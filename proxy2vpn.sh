@@ -19,7 +19,7 @@ set -e
 # Configuration
 # ======================================================
 PREFIX="vpn"
-readlink_result="$(readlink -f "${0}")"
+readlink_result="$(readlink -f "$0")"
 SCRIPT_DIR="$(dirname "${readlink_result}")"
 PRESETS_FILE="${SCRIPT_DIR}/presets/presets.json"
 PROFILES_DIR="${SCRIPT_DIR}/profiles"
@@ -51,36 +51,36 @@ NC='\033[0m' # No Color
 # Helper Functions
 # ======================================================
 print_error() {
-    echo -e "${RED}Error: ${1}${NC}" >&2
+    echo -e "${RED}Error: $1${NC}" >&2
 }
 
 print_success() {
-    echo -e "${GREEN}${1}${NC}"
+    echo -e "${GREEN}$1${NC}"
 }
 
 print_info() {
-    echo -e "${YELLOW}${1}${NC}"
+    echo -e "${YELLOW}$1${NC}"
 }
 
 print_warning() {
-    echo -e "${YELLOW}Warning: ${1}${NC}"
+    echo -e "${YELLOW}Warning: $1${NC}"
 }
 
 print_header() {
-    echo -e "${BLUE}${1}${NC}"
+    echo -e "${BLUE}$1${NC}"
 }
 
 print_debug() {
-    echo -e "${MAGENTA}Debug: ${1}${NC}"
+    echo -e "${MAGENTA}Debug: $1${NC}"
 }
 
 print_config() {
-    echo -e "${CYAN}Config: ${1}${NC}"
+    echo -e "${CYAN}Config: $1${NC}"
 }
 
 # Validate if a command exists
 command_exists() {
-    command -v "${1}" >/dev/null 2>&1
+    command -v "$1" >/dev/null 2>&1
 }
 
 # Check dependencies
@@ -202,7 +202,7 @@ fetch_server_list() {
 
 # Extract countries list for a provider
 get_countries_for_provider() {
-    local provider="${1}"
+    local provider="$1"
 
     # Ensure we have the server list
     if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
@@ -225,18 +225,20 @@ get_countries_for_provider() {
     # Extract countries based on provider from the server list
     if [[ "${provider}" == "private internet access" ]]; then
         provider="pia"
+  elif   [[ "${provider}" == "private internet access" ]]; then
+        provider="pia"
   fi
 
     # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[${provider}]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
+    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         jq -r --arg provider "${provider}" '
-            .[${provider}].servers |
-            group_by(.country) |
+            .[$provider].servers | 
+            group_by(.country) | 
             map({
                 country: (.[0].country // "Unknown"),
-                code: (.[0].country_code // .[0].region //
+                code: (.[0].country_code // .[0].region // 
                       (if .[0].country then (.[0].country | split(" ") | .[0][0:2] | ascii_upcase) else "??" end))
-            }) |
+            }) | 
             unique_by(.country)
         ' "${SERVERS_CACHE_FILE}" >"${cache_file}"
   else
@@ -251,8 +253,8 @@ get_countries_for_provider() {
 
 # Extract cities for a provider in a country
 get_cities_for_country() {
-    local provider="${1}"
-    local country_code="${2}"
+    local provider="$1"
+    local country_code="$2"
 
     # Ensure we have the server list
     if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
@@ -278,18 +280,18 @@ get_cities_for_country() {
   fi
 
     # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[${provider}]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
+    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         jq -r --arg provider "${provider}" '
-            .[${provider}].servers |
-            group_by(.country) |
+            .[$provider].servers | 
+            group_by(.country) | 
             map({
-                country_code: (.[0].country_code // .[0].region //
+                country_code: (.[0].country_code // .[0].region // 
                               (if .[0].country then (.[0].country | split(" ") | .[0][0:2] | ascii_upcase) else "??" end)),
                 country: (.[0].country // "Unknown"),
                 cities: (
-                    map(.city) |
-                    map(select(. != null)) |
-                    unique |
+                    map(.city) | 
+                    map(select(. != null)) | 
+                    unique | 
                     sort
                 )
             })
@@ -306,9 +308,9 @@ get_cities_for_country() {
 
 # Get server hostnames for a provider in a city
 get_servers_for_city() {
-    local provider="${1}"
-    local country_code="${2}"
-    local city="${3}"
+    local provider="$1"
+    local country_code="$2"
+    local city="$3"
 
     # Ensure we have the server list
     if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
@@ -334,9 +336,9 @@ get_servers_for_city() {
   fi
 
     # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[${provider}]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
+    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         jq -r --arg provider "${provider}" '
-            .[${provider}].servers |
+            .[$provider].servers |
             map({
                 hostname: (.hostname // .server_name // null),
                 country: (.country // "Unknown"),
@@ -359,8 +361,8 @@ get_servers_for_city() {
 
 # Validate if a country exists for a provider
 validate_country() {
-    local provider="${1}"
-    local country="${2}"
+    local provider="$1"
+    local country="$2"
 
     # Ensure we have countries for this provider
     get_countries_for_provider "${provider}" || return 1
@@ -372,19 +374,19 @@ validate_country() {
   fi
 
     # Check if the country exists in the provider's list
-    if jq -e --arg country "${country}" '.[] | select(.country == ${country} or .code == ${country})' "${country_file}" >/dev/null 2>&1; then
+    if jq -e --arg country "$country" '.[] | select(.country == $country or .code == $country)' "$country_file" >/dev/null 2>&1; then
         return 0
   else
-        print_error "Country '${country}' not found for provider '${provider}'"
+        print_error "Country '$country' not found for provider '$provider'"
         return 1
   fi
 }
 
 # Validate if a city exists within a country for a provider
 validate_city() {
-    local provider="${1}"
-    local country_code="${2}"
-    local city="${3}"
+    local provider="$1"
+    local country_code="$2"
+    local city="$3"
 
     # Ensure we have cities for this provider
     get_cities_for_country "${provider}" "${country_code}" || return 1
@@ -396,17 +398,17 @@ validate_city() {
   fi
 
     # Check if the city exists in the provider's list for the specified country
-    if jq -e --arg country "${country_code}" --arg city "${city}" '.[] | select(.country_code == ${country} or .country == ${country}) | .cities | index(${city})' "${city_file}" >/dev/null 2>&1; then
+    if jq -e --arg country "$country_code" --arg city "$city" '.[] | select(.country_code == $country or .country == $country) | .cities | index($city)' "$city_file" >/dev/null 2>&1; then
         return 0
   else
-        print_error "City '${city}' not found in country '${country_code}' for provider '${provider}'"
+        print_error "City '$city' not found in country '$country_code' for provider '$provider'"
         return 1
   fi
 }
 
 # List available countries for a provider
 list_countries() {
-    local provider="${1:-${DEFAULT_VPN_PROVIDER}}"
+    local provider="${1:-$DEFAULT_VPN_PROVIDER}"
 
     # Ensure we have countries for this provider
     get_countries_for_provider "${provider}" || return 1
@@ -417,32 +419,32 @@ list_countries() {
         return 1
   fi
 
-    print_header "Available Countries for ${provider}:"
+    print_header "Available Countries for $provider:"
     echo
 
     printf "%-25s %-20s\n" "COUNTRY" "CODE"
     printf "%-25s %-20s\n" "-------" "----"
 
-    jq -r '.[] | "\(.country)|\(.code)"' "${country_file}" | while read -r line; do
-        country=$(echo "${line}" | cut -d'|' -f1)
-        code=$(echo "${line}" | cut -d'|' -f2)
-        printf "%-25s %-20s\n" "${country}" "${code}"
+    jq -r '.[] | "\(.country)|\(.code)"' "$country_file" | while read -r line; do
+        country=$(echo "$line" | cut -d'|' -f1)
+        code=$(echo "$line" | cut -d'|' -f2)
+        printf "%-25s %-20s\n" "$country" "$code"
   done
 }
 
 # List available cities for a country and provider
 list_cities() {
-    local provider="${1:-${DEFAULT_VPN_PROVIDER}}"
-    local country_code="${2}"
+    local provider="${1:-$DEFAULT_VPN_PROVIDER}"
+    local country_code="$2"
 
-    if [[ -z "${country_code}" ]]; then
+    if [[ -z "$country_code" ]]; then
         print_error "Country code is required"
-        echo "Usage: ${0} list-cities <provider> <country_code>"
+        echo "Usage: $0 list-cities <provider> <country_code>"
         return 1
   fi
 
     # Special case mapping for common country codes
-    case "${country_code}" in
+    case "$country_code" in
         US | USA | UNITED_STATES | UNITEDSTATES)
             country_code="United States"
             ;;
@@ -451,9 +453,6 @@ list_cities() {
             ;;
         UAE | AE | UNITED_ARAB_EMIRATES)
             country_code="United Arab Emirates"
-            ;;
-        *)
-            # Keep original country code
             ;;
   esac
 
@@ -466,7 +465,7 @@ list_cities() {
         return 1
   fi
 
-    print_header "Available Cities for ${provider} in ${country_code}:"
+    print_header "Available Cities for $provider in $country_code:"
     echo
 
     printf "%-30s\n" "CITY"
@@ -474,33 +473,33 @@ list_cities() {
 
     # Extract cities for the specified country
     # First try exact country code, then try fuzzy match with country name
-    country_name=$(jq -r --arg code "${country_code}" '.[] | select(.country_code == ${code}) | .country' "${city_file}" | head -1)
+    country_name=$(jq -r --arg code "$country_code" '.[] | select(.country_code == $code) | .country' "$city_file" | head -1)
 
     # If a 2-letter code was provided but no match found, try to find matching countries
-    if [[ -z "${country_name}" && ${#country_code} -eq 2 ]]; then
-        country_name=$(jq -r --arg code "${country_code}" '.[] | select(.country | test("^" + ${code}; "i")) | .country' "${city_file}" | head -1)
+    if [[ -z "$country_name" && ${#country_code} -eq 2 ]]; then
+        country_name=$(jq -r --arg code "$country_code" '.[] | select(.country | test("^" + $code; "i")) | .country' "$city_file" | head -1)
 
         # Try matching countries that start with this code
-        if [[ -z "${country_name}" ]]; then
-            country_name=$(jq -r '.[] | .country' "${city_file}" | grep -i "^${country_code}" | head -1)
+        if [[ -z "$country_name" ]]; then
+            country_name=$(jq -r '.[] | .country' "$city_file" | grep -i "^$country_code" | head -1)
     fi
 
         # As a last resort, look for countries that have this code
-        if [[ -z "${country_name}" ]]; then
-            country_code_upper=$(echo "${country_code}" | tr '[:lower:]' '[:upper:]')
-            country_name=$(jq -r --arg code "${country_code_upper}" '.[] | select(.country_code == ${code}) | .country' "${city_file}" | head -1)
+        if [[ -z "$country_name" ]]; then
+            country_code_upper=$(echo "$country_code" | tr '[:lower:]' '[:upper:]')
+            country_name=$(jq -r --arg code "$country_code_upper" '.[] | select(.country_code == $code) | .country' "$city_file" | head -1)
     fi
   fi
 
-    if [[ -n "${country_name}" ]]; then
-        print_info "Found matching country: ${country_name}"
-        jq -r --arg country "${country_name}" '.[] | select(.country == ${country}) | .cities[]' "${city_file}" | sort | while read -r city; do
-            printf "%-30s\n" "${city}"
+    if [[ -n "$country_name" ]]; then
+        print_info "Found matching country: $country_name"
+        jq -r --arg country "$country_name" '.[] | select(.country == $country) | .cities[]' "$city_file" | sort | while read -r city; do
+            printf "%-30s\n" "$city"
     done
   else
         # Fallback to original search
-        jq -r --arg country "${country_code}" '.[] | select(.country_code == ${country} or .country == ${country}) | .cities[]' "${city_file}" | sort | while read -r city; do
-            printf "%-30s\n" "${city}"
+        jq -r --arg country "$country_code" '.[] | select(.country_code == $country or .country == $country) | .cities[]' "$city_file" | sort | while read -r city; do
+            printf "%-30s\n" "$city"
     done
   fi
 }
@@ -514,14 +513,13 @@ update_all_server_lists() {
     fetch_server_list || return 1
 
     # Extract all providers from the server list
-    local providers
-    providers=$(jq -r 'keys | .[]' "${SERVERS_CACHE_FILE}" | grep -v "version" | sort | uniq)
+    local providers=$(jq -r 'keys | .[]' "${SERVERS_CACHE_FILE}" | grep -v "version" | sort | uniq)
 
-    for provider in ${providers}; do
-        print_info "Updating data for provider: ${provider}"
+    for provider in $providers; do
+        print_info "Updating data for provider: $provider"
         get_countries_for_provider "${provider}"
-        get_cities_for_country "${provider}" ""
-        get_servers_for_city "${provider}" "" ""
+        get_cities_for_country "$provider" ""
+        get_servers_for_city "$provider" "" ""
   done
 
     print_success "All server lists updated successfully"
@@ -534,31 +532,31 @@ update_all_server_lists() {
 
 # Create a user profile
 create_profile() {
-    local profile_name="${1}"
-    local username="${2}"
-    local password="${3}"
+    local profile_name="$1"
+    local username="$2"
+    local password="$3"
 
-    if [[ -z "${profile_name}" || -z "${username}" || -z "${password}" ]]; then
+    if [[ -z "$profile_name" || -z "$username" || -z "$password" ]]; then
         print_error "Missing required parameters."
-        echo "Usage: ${0} create-profile <profile_name> <username> <password>"
+        echo "Usage: $0 create-profile <profile_name> <username> <password>"
         exit 1
   fi
 
     local profile_file="${PROFILES_DIR}/${profile_name}.env"
 
     # Check if profile already exists
-    if [[ -f "${profile_file}" ]]; then
-        print_error "Profile '${profile_name}' already exists"
+    if [[ -f "$profile_file" ]]; then
+        print_error "Profile '$profile_name' already exists"
         exit 1
   fi
 
     # Create profile file
-    cat >"${profile_file}"  <<EOF
-OPENVPN_USER=${username}
-OPENVPN_PASSWORD=${password}
+    cat >"$profile_file"  <<EOF
+OPENVPN_USER=$username
+OPENVPN_PASSWORD=$password
 EOF
 
-    print_success "Created user profile: ${profile_name}"
+    print_success "Created user profile: $profile_name"
 }
 
 # List all user profiles
@@ -574,13 +572,13 @@ list_profiles() {
     printf "%-20s %-30s\n" "PROFILE NAME" "USERNAME"
     printf "%-20s %-30s\n" "------------" "--------"
 
-    for profile in "${PROFILES_DIR}"/*.env; do
-        local profile_name=$(basename "${profile}" .env)
-        local username=$(grep "OPENVPN_USER" "${profile}" | cut -d'=' -f2)
+    for profile in "$PROFILES_DIR"/*.env; do
+        local profile_name=$(basename "$profile" .env)
+        local username=$(grep "OPENVPN_USER" "$profile" | cut -d'=' -f2)
 
-        if [[ -z "${username}" ]]; then username="<empty>"; fi
+        if [[ -z "$username" ]]; then username="<empty>"; fi
 
-        printf "%-20s %-30s\n" "${profile_name}" "${username}"
+        printf "%-20s %-30s\n" "$profile_name" "$username"
   done
 }
 
@@ -590,25 +588,25 @@ list_profiles() {
 
 # Create a VPN container with a profile
 create_vpn_from_profile() {
-    local container_name="${1}"
-    local port="${2}"
-    local profile_name="${3}"
-    local server_city="${4}"
-    local server_hostname="${5}"
-    local provider="${6:-${DEFAULT_VPN_PROVIDE}R}"
+    local container_name="$1"
+    local port="$2"
+    local profile_name="$3"
+    local server_city="$4"
+    local server_hostname="$5"
+    local provider="${6:-$DEFAULT_VPN_PROVIDER}"
 
-    if [[ -z "${container_name}" || -z "${port}" || -z "${profile_name}" ]]; then
+    if [[ -z "${container_name}" || -z "$port" || -z "$profile_name" ]]; then
         print_error "Missing required parameters."
-        echo "Usage: ${0} create-from-profile <container_name> <port> <profile_name> [server_city] [server_hostname] [provider]"
-        echo "Example: ${0} create-from-profile vpn1 8888 myprofile \"New York\" \"\" protonvpn"
+        echo "Usage: $0 create-from-profile <container_name> <port> <profile_name> [server_city] [server_hostname] [provider]"
+        echo "Example: $0 create-from-profile vpn1 8888 myprofile \"New York\" \"\" protonvpn"
         echo "Note: You can set HTTPPROXY_USER and HTTPPROXY_PASSWORD environment variables to enable HTTP proxy authentication"
         exit 1
   fi
 
     # Check if profile exists
     local profile_file="${PROFILES_DIR}/${profile_name}.env"
-    if [[ ! -f "${profile_file}" ]]; then
-        print_error "Profile '${profile_name}' not found"
+    if [[ ! -f "$profile_file" ]]; then
+        print_error "Profile '$profile_name' not found"
         exit 1
   fi
 
@@ -629,21 +627,13 @@ create_vpn_from_profile() {
         "-e VPN_SERVICE_PROVIDER=${provider}"
         "-e HTTPPROXY=on"
         "-e HTTPPROXY_LISTENING_ADDRESS=:8888"
+        "--env-file ${profile_file}"
   )
 
-    # Add environment variables from the profile file
-    while IFS= read -r line; do
-        if [[ -n "${line}" && ! "${line}" =~ ^# ]]; then
-            key=$(echo "${line}" | cut -d '=' -f 1)
-            value=$(echo "${line}" | cut -d '=' -f 2-)
-            env_vars+=("-e ${key}=${value}")
-    fi
-  done     <"${profile_file}"
-
     # Add optional location parameters
-    if [[ -n "${server_city}" ]]; then
+    if [[ -n "$server_city" ]]; then
         # Validate city if server validation is enabled
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
             # Fetch server list if needed
             if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
                 fetch_server_list || exit 1
@@ -652,28 +642,28 @@ create_vpn_from_profile() {
             # Get country for the city
             local country_code=""
             if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                country_code=$(jq -r --arg city "${server_city}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                country_code=$(jq -r --arg city "$server_city" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
       fi
 
-            if [[ -n "${country_code}" ]]; then
+            if [[ -n "$country_code" ]]; then
                 env_vars+=("-e SERVER_COUNTRIES=${country_code}")
       fi
     fi
 
         env_vars+=("-e SERVER_CITIES=${server_city}")
         location_type="city"
-        location_value="${server_city}"
-  elif     [[ -n "${server_hostname}" ]]; then
+        location_value="$server_city"
+  elif   [[ -n "$server_hostname" ]]; then
         env_vars+=("-e SERVER_HOSTNAMES=${server_hostname}")
         location_type="hostname"
-        location_value="${server_hostname}"
+        location_value="$server_hostname"
   fi
 
     # Add device tun if configured
-    if jq -e '.use_device_tun // true' "${CONFIG_FILE}" | grep -q "true"; then
-            device_args="--device /dev/net/tun:/dev/net/tun"
+    if jq -e '.use_device_tun // true' "$CONFIG_FILE" | grep -q "true"; then
+        device_args="--device /dev/net/tun:/dev/net/tun"
   else
-            device_args=""
+        device_args=""
   fi
 
     # Ensure network exists
@@ -687,7 +677,7 @@ create_vpn_from_profile() {
         --restart unless-stopped \
         -p "${port}:8888" \
         --cap-add=NET_ADMIN \
-        --device /dev/net/tun:/dev/net/tun \
+        "${device_args}" \
         --network "${PREFIX}_network" \
         --label "${PREFIX}.type=vpn" \
         --label "${PREFIX}.port=${port}" \
@@ -711,24 +701,24 @@ create_vpn_from_profile() {
 
 # Create a regular VPN container with validation
 create_vpn() {
-    local name="${1}"
-    local port="${2}"
-    local provider="${3}"
-    local location="${4}"
+    local name="$1"
+    local port="$2"
+    local provider="$3"
+    local location="$4"
     local username="${5:-}"
     local password="${6:-}"
 
-    if [[ -z "${name}" || -z "${port}" || -z "${provider}" ]]; then
+    if [[ -z "$name" || -z "$port" || -z "$provider" ]]; then
         print_error "Missing required parameters."
-        echo "Usage: ${0} create <container_name> <port> <provider> [location] [username] [password]"
-        echo "Example: ${0} create vpn1 8888 protonvpn \"United States\" myuser mypass"
+        echo "Usage: $0 create <container_name> <port> <provider> [location] [username] [password]"
+        echo "Example: $0 create vpn1 8888 protonvpn \"United States\" myuser mypass"
         echo "Note: You can set HTTPPROXY_USER and HTTPPROXY_PASSWORD environment variables to enable HTTP proxy authentication"
         exit 1
   fi
 
     # Full container name - if using numeric naming convention, keep as is
-    local full_container_name="${name}"
-    if [[ ! "${name}" == vpn* ]]; then
+    local full_container_name="$name"
+    if [[ ! "$name" == vpn* ]]; then
         full_container_name="${PREFIX}_${name}"
   fi
 
@@ -755,38 +745,38 @@ create_vpn() {
   fi
 
     # Add optional location with validation
-    if [[ -n "${location}" ]]; then
+    if [[ -n "$location" ]]; then
         # Fetch server list if needed
         if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
             fetch_server_list || exit 1
     fi
 
         # Try to determine if location is a country, city, or hostname
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
             # Check if it's a country
-            if validate_country "${provider}" "${location}"; then
+            if validate_country "$provider" "$location"; then
                 env_vars+=("-e SERVER_COUNTRIES=${location}")
                 location_type="country"
       else
                 # Check major cities
-                get_cities_for_country "${provider}" ""
+                get_cities_for_country "$provider" ""
 
                 # See if any cities match
                 if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                    if jq -e --arg city "${location}" '.[] | select(.cities | index(${city}) >= 0)' "${CACHE_DIR}/${provider}_cities.json" >/dev/null 2>&1; then
+                    if jq -e --arg city "$location" '.[] | select(.cities | index($city) >= 0)' "${CACHE_DIR}/${provider}_cities.json" >/dev/null 2>&1; then
                         env_vars+=("-e SERVER_CITIES=${location}")
                         location_type="city"
 
                         # Also try to find which country this city belongs to
-                        local country_code=$(jq -r --arg city "${location}" '.[] | select(.cities | index(${city}) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
-                        if [[ -n "${country_code}" ]]; then
+                        local country_code=$(jq -r --arg city "$location" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                        if [[ -n "$country_code" ]]; then
                             env_vars+=("-e SERVER_COUNTRIES=${country_code}")
             fi
           else
                         # Assume it's a hostname or just pass it as country anyway
                         env_vars+=("-e SERVER_COUNTRIES=${location}")
                         location_type="country"
-                        print_warning "Location '${location}' not found in provider server list. Using as country name anyway."
+                        print_warning "Location '$location' not found in provider server list. Using as country name anyway."
           fi
         else
                     # If no city file, just use as country
@@ -801,16 +791,16 @@ create_vpn() {
     fi
   fi
 
-    if [[ -n "${username}" ]]; then
+    if [[ -n "$username" ]]; then
         env_vars+=("-e OPENVPN_USER=${username}")
   fi
 
-    if [[ -n "${password}" ]]; then
+    if [[ -n "$password" ]]; then
         env_vars+=("-e OPENVPN_PASSWORD=${password}")
   fi
 
     # Add device tun if configured
-    if jq -e '.use_device_tun // true' "${CONFIG_FILE}" | grep -q "true"; then
+    if jq -e '.use_device_tun // true' "$CONFIG_FILE" | grep -q "true"; then
         device_args="--device /dev/net/tun:/dev/net/tun"
   else
         device_args=""
@@ -866,54 +856,54 @@ list_containers() {
     # Find all containers with our labels
     local containers=$(docker ps -a --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}")
 
-    for container in ${containers}; do
-        local short_name=$(basename "${container}")
-        if [[ "${short_name}" == "${PREFIX}_"* ]]; then
-            short_name=${short_name#"${PREFIX}"_}
+    for container in $containers; do
+        local short_name=$(basename "$container")
+        if [[ "$short_name" == "${PREFIX}_"* ]]; then
+            short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
     fi
 
-        local port=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.port"}}' "${container}" 2>/dev/null)
-        local provider=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.provider"}}' "${container}" 2>/dev/null)
-        local profile=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.profile" | printf "%s"}}' "${container}" 2>/dev/null)
-        local location_type=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location_type" | printf "%s"}}' "${container}" 2>/dev/null)
-        local location=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location"}}' "${container}" 2>/dev/null)
-        local status=$(docker inspect --format='{{.State.Status}}' "${container}" 2>/dev/null)
+        local port=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.port"}}' "$container" 2>/dev/null)
+        local provider=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.provider"}}' "$container" 2>/dev/null)
+        local profile=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.profile" | printf "%s"}}' "$container" 2>/dev/null)
+        local location_type=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.location_type" | printf "%s"}}' "$container" 2>/dev/null)
+        local location=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.location"}}' "$container" 2>/dev/null)
+        local status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null)
 
         # Get IP address if container is running
         local ip="N/A"
-        if [[ "${status}" = "running" ]]; then
+        if [[ "$status" = "running" ]]; then
             ip=$(curl -s -m 5 -x "localhost:${port}" https://ifconfig.me 2>/dev/null || echo "N/A")
     fi
 
-        if [[ -z "${port}" ]]; then port="N/A"; fi
-        if [[ -z "${provider}" ]]; then provider="unknown"; fi
-        if [[ -z "${profile}" ]]; then profile="none"; fi
-        if [[ -z "${location_type}" ]]; then
-            if [[ -n "${location}" ]]; then
+        if [[ -z "$port" ]]; then port="N/A"; fi
+        if [[ -z "$provider" ]]; then provider="unknown"; fi
+        if [[ -z "$profile" ]]; then profile="none"; fi
+        if [[ -z "$location_type" ]]; then
+            if [[ -n "$location" ]]; then
                 location_type="country"
       else
                 location_type="none"
       fi
     fi
-        if [[ -z "${location}" ]]; then location="unspecified"; fi
+        if [[ -z "$location" ]]; then location="unspecified"; fi
 
-        printf "%-15s %-10s %-12s %-15s %-10s %-15s %-20s %-10s\n" "${short_name}" "${port}" "${provider}" "${profile}" "${location_type}" "${location}" "${ip}" "${status}"
+        printf "%-15s %-10s %-12s %-15s %-10s %-15s %-20s %-10s\n" "$short_name" "$port" "$provider" "$profile" "$location_type" "$location" "$ip" "$status"
   done
 }
 
 # Delete a VPN container
 delete_container() {
-    local name="${1}"
+    local name="$1"
 
-    if [[ -z "${name}" ]]; then
+    if [[ -z "$name" ]]; then
         print_error "Missing container name."
-        echo "Usage: ${0} delete <container_name>"
+        echo "Usage: $0 delete <container_name>"
         exit 1
   fi
 
     # Full container name - if it already starts with vpn, keep as is
-    local full_container_name="${name}"
-    if [[ ! "${name}" == vpn* ]]; then
+    local full_container_name="$name"
+    if [[ ! "$name" == vpn* ]]; then
         full_container_name="${PREFIX}_${name}"
   fi
 
@@ -934,18 +924,18 @@ delete_container() {
 
 # View container logs
 view_logs() {
-    local name="${1}"
+    local name="$1"
     local lines="${2:-100}"
 
-    if [[ -z "${name}" ]]; then
+    if [[ -z "$name" ]]; then
         print_error "Missing container name."
-        echo "Usage: ${0} logs <container_name> [lines]"
+        echo "Usage: $0 logs <container_name> [lines]"
         exit 1
   fi
 
     # Full container name - if it already starts with vpn, keep as is
-    local full_container_name="${name}"
-    if [[ ! "${name}" == vpn* ]]; then
+    local full_container_name="$name"
+    if [[ ! "$name" == vpn* ]]; then
         full_container_name="${PREFIX}_${name}"
   fi
 
@@ -958,25 +948,25 @@ view_logs() {
     print_info "Logs for container ${name} (last ${lines} lines):"
     echo
 
-    docker logs --tail "${lines}" "${full_container_name}"
+    docker logs --tail "$lines" "${full_container_name}"
 }
 
 # Update container configuration with validation
 update_container() {
-    local name="${1}"
-    local key="${2}"
-    local value="${3}"
+    local name="$1"
+    local key="$2"
+    local value="$3"
 
-    if [[ -z "${name}" || -z "${key}" || -z "${value}" ]]; then
+    if [[ -z "$name" || -z "$key" || -z "$value" ]]; then
         print_error "Missing required parameters."
-        echo "Usage: ${0} update <container_name> <key> <value>"
-        echo "Example: ${0} update vpn1 SERVER_CITIES \"New York\""
+        echo "Usage: $0 update <container_name> <key> <value>"
+        echo "Example: $0 update vpn1 SERVER_CITIES \"New York\""
         exit 1
   fi
 
     # Full container name - if it already starts with vpn, keep as is
-    local full_container_name="${name}"
-    if [[ ! "${name}" == vpn* ]]; then
+    local full_container_name="$name"
+    if [[ ! "$name" == vpn* ]]; then
         full_container_name="${PREFIX}_${name}"
   fi
 
@@ -990,22 +980,21 @@ update_container() {
 
     # Need to recreate the container with the new environment variable
     # First, get all the current container information
-    local port=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.port"}}' "${full_container_name}")
-    local provider=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.provider"}}' "${full_container_name}")
-    local profile=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.profile" | printf "%s"}}' "${full_container_name}")
-    local location_type=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location_type" | printf "%s"}}' "${full_container_name}")
-    local location=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location"}}' "${full_container_name}")
+    local port=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.port"}}' "${full_container_name}")
+    local provider=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.provider"}}' "${full_container_name}")
+    local profile=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.profile" | printf "%s"}}' "${full_container_name}")
+    local location_type=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.location_type" | printf "%s"}}' "${full_container_name}")
+    local location=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.location"}}' "${full_container_name}")
 
     # Get all environment variables
-    local env_vars_str
-    env_vars_str=$(docker inspect --format='{{range .Config.Env}}{{.}} {{end}}' "${full_container_name}")
+    local env_vars=$(docker inspect --format='{{range .Config.Env}}{{.}} {{end}}' "${full_container_name}")
 
     # Create an array to hold new environment variables
     local new_env_vars=()
 
     # Process existing env vars and replace the one being updated
     updated=false
-    for env in ${env_vars_str}; do
+    for env in ${env_vars}; do
         # Skip empty values
         if [[ -z "${env}" ]]; then
             continue
@@ -1015,7 +1004,7 @@ update_container() {
         local env_key=$(echo "${env}" | cut -d= -f1)
         local env_value=$(echo "${env}" | cut -d= -f2-)
 
-        if [[ "${env}_key" = "${key}" ]]; then
+        if [[ "${env}_key" = "$key" ]]; then
             new_env_vars+=("-e ${key}=${value}")
             updated=true
     else
@@ -1024,51 +1013,51 @@ update_container() {
   done
 
     # If the variable wasn't in the existing set, add it
-    if [[ "${updated}" = "false" ]]; then
+    if [[ "$updated" = "false" ]]; then
         new_env_vars+=("-e ${key}=${value}")
   fi
 
     # Update location labels based on what was updated
-    if [[ "${key}" = "SERVER_COUNTRIES" ]]; then
+    if [[ "$key" = "SERVER_COUNTRIES" ]]; then
         # Validate country if server validation is enabled
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
-            if ! validate_country "${provider}" "${value}"; then
-                print_warning "Country '${value}' not found in provider server list. Using anyway."
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
+            if ! validate_country "$provider" "$value"; then
+                print_warning "Country '$value' not found in provider server list. Using anyway."
       fi
     fi
 
-        location="${value}"
+        location="$value"
         location_type="country"
-  elif   [[ "${key}" = "SERVER_CITIES" ]]; then
+  elif   [[ "$key" = "SERVER_CITIES" ]]; then
         # Validate city if server validation is enabled
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
-            get_cities_for_country "${provider}" ""
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
+            get_cities_for_country "$provider" ""
 
             # Try to find which country this city belongs to
             if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                local country_code=$(jq -r --arg city "${value}" '.[] | select(.cities | index(${city}) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                local country_code=$(jq -r --arg city "$value" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
 
-                if [[ -n "${country_code}" ]]; then
+                if [[ -n "$country_code" ]]; then
                     # Also update the country if we found a match
                     new_env_vars+=("-e SERVER_COUNTRIES=${country_code}")
         else
-                    print_warning "City '${value}' not found in any country for provider '${provider}'. Using anyway."
+                    print_warning "City '$value' not found in any country for provider '$provider'. Using anyway."
         fi
       fi
     fi
 
-        location="${value}"
+        location="$value"
         location_type="city"
-  elif   [[ "${key}" = "SERVER_HOSTNAMES" ]]; then
-        location="${value}"
+  elif   [[ "$key" = "SERVER_HOSTNAMES" ]]; then
+        location="$value"
         location_type="hostname"
-  elif   [[ "${key}" = "HTTPPROXY_USER" || "${key}" = "HTTPPROXY_PASSWORD" ]]; then
+  elif   [[ "$key" = "HTTPPROXY_USER" || "$key" = "HTTPPROXY_PASSWORD" ]]; then
         # No special handling for HTTP proxy auth, just update the env var
         :  # No-op, just use the value as-is
   fi
 
     # Add device tun if configured
-    if jq -e '.use_device_tun // true' "${CONFIG_FILE}" | grep -q "true"; then
+    if jq -e '.use_device_tun // true' "$CONFIG_FILE" | grep -q "true"; then
         device_args="--device /dev/net/tun:/dev/net/tun"
   else
         device_args=""
@@ -1102,17 +1091,17 @@ update_container() {
 
 # Start a container
 start_container() {
-    local name="${1}"
+    local name="$1"
 
-    if [[ -z "${name}" ]]; then
+    if [[ -z "$name" ]]; then
         print_error "Missing container name."
-        echo "Usage: ${0} start <container_name>"
+        echo "Usage: $0 start <container_name>"
         exit 1
   fi
 
     # Full container name - if it already starts with vpn, keep as is
-    local full_container_name="${name}"
-    if [[ ! "${name}" == vpn* ]]; then
+    local full_container_name="$name"
+    if [[ ! "$name" == vpn* ]]; then
         full_container_name="${PREFIX}_${name}"
   fi
 
@@ -1135,17 +1124,17 @@ start_container() {
 
 # Stop a container
 stop_container() {
-    local name="${1}"
+    local name="$1"
 
-    if [[ -z "${name}" ]]; then
+    if [[ -z "$name" ]]; then
         print_error "Missing container name."
-        echo "Usage: ${0} stop <container_name>"
+        echo "Usage: $0 stop <container_name>"
         exit 1
   fi
 
     # Full container name - if it already starts with vpn, keep as is
-    local full_container_name="${name}"
-    if [[ ! "${name}" == vpn* ]]; then
+    local full_container_name="$name"
+    if [[ ! "$name" == vpn* ]]; then
         full_container_name="${PREFIX}_${name}"
   fi
 
@@ -1175,7 +1164,7 @@ cleanup_containers() {
     # Get all VPN containers, sorting by name to ensure consistent order
     local containers=$(docker ps -a --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}" | sort)
 
-    if [[ -z "${containers}" ]]; then
+    if [[ -z "$containers" ]]; then
         print_error "No VPN containers found to clean up"
         return 1
   fi
@@ -1185,25 +1174,24 @@ cleanup_containers() {
 
     local success_count=0
     local fail_count=0
-    local container_array=()
 
-    # Store containers in an array instead of piping to while loop
-    while read -r container; do
-        [[ -n "${container}" ]] && container_array+=("${container}")
-  done   <<<"${containers}"
-
-    for container in "${container_array[@]}"; do
-        local short_name=$(basename "${container}")
-        if [[ "${short_name}" == "${PREFIX}_"* ]]; then
-            short_name=${short_name#"${PREFIX}"_}
+    echo "$containers" | while read -r container; do
+        # Skip if container is empty (can happen due to newlines)
+        if [[ -z "$container" ]]; then
+            continue
     fi
 
-        echo -n "  Removing ${short_name}... "
+        local short_name=$(basename "$container")
+        if [[ "$short_name" == "${PREFIX}_"* ]]; then
+            short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
+    fi
+
+        echo -n "  Removing $short_name... "
 
         # Make sure container is stopped first
-        docker stop "${container}" >/dev/null 2>&1
+        docker stop "$container" >/dev/null 2>&1
 
-        if docker rm "${container}" >/dev/null 2>&1; then
+        if docker rm "$container" >/dev/null 2>&1; then
             echo -e "${GREEN}✓${NC}"
             ((success_count++))
     else
@@ -1212,12 +1200,12 @@ cleanup_containers() {
     fi
   done
 
-    if [[ ${success_count} -gt 0 ]]; then
-        print_success "${success_count} containers removed successfully"
+    if [[ $success_count -gt 0 ]]; then
+        print_success "$success_count containers removed successfully"
   fi
 
-    if [[ ${fail_count} -gt 0 ]]; then
-        print_error "${fail_count} containers failed to be removed"
+    if [[ $fail_count -gt 0 ]]; then
+        print_error "$fail_count containers failed to be removed"
   fi
 }
 
@@ -1226,7 +1214,7 @@ start_all_containers() {
     # Get all VPN containers, sorting by name to ensure consistent order
     local containers=$(docker ps -a --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}" | sort)
 
-    if [[ -z "${containers}" ]]; then
+    if [[ -z "$containers" ]]; then
         print_error "No VPN containers found"
         return 1
   fi
@@ -1236,27 +1224,26 @@ start_all_containers() {
 
     local success_count=0
     local fail_count=0
-    local container_array=()
 
-    # Store containers in an array instead of piping to while loop
-    while read -r container; do
-        [[ -n "${container}" ]] && container_array+=("${container}")
-  done   <<<"${containers}"
+    echo "$containers" | while read -r container; do
+        # Skip if container is empty (can happen due to newlines)
+        if [[ -z "$container" ]]; then
+            continue
+    fi
 
-    for container in "${container_array[@]}"; do
-        local short_name=$(basename "${container}")
-        if [[ "${short_name}" == "${PREFIX}_"* ]]; then
-            short_name=${short_name#"${PREFIX}"_}
+        local short_name=$(basename "$container")
+        if [[ "$short_name" == "${PREFIX}_"* ]]; then
+            short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
     fi
 
         # Check if already running
         if docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
-            echo -e "  ${BLUE}⮕${NC} ${short_name} is already running"
+            echo -e "  ${BLUE}⮕${NC} $short_name is already running"
             continue
     fi
 
-        echo -n "  Starting ${short_name}... "
-        if docker start "${container}" >/dev/null 2>&1; then
+        echo -n "  Starting $short_name... "
+        if docker start "$container" >/dev/null 2>&1; then
             echo -e "${GREEN}✓${NC}"
             ((success_count++))
     else
@@ -1265,12 +1252,12 @@ start_all_containers() {
     fi
   done
 
-    if [[ ${success_count} -gt 0 ]]; then
-        print_success "${success_count} containers started successfully"
+    if [[ $success_count -gt 0 ]]; then
+        print_success "$success_count containers started successfully"
   fi
 
-    if [[ ${fail_count} -gt 0 ]]; then
-        print_error "${fail_count} containers failed to start"
+    if [[ $fail_count -gt 0 ]]; then
+        print_error "$fail_count containers failed to start"
   fi
 }
 
@@ -1279,7 +1266,7 @@ stop_all_containers() {
     # Get all running VPN containers, sorting by name to ensure consistent order
     local containers=$(docker ps --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}" | sort)
 
-    if [[ -z "${containers}" ]]; then
+    if [[ -z "$containers" ]]; then
         print_error "No running VPN containers found"
         return 1
   fi
@@ -1289,21 +1276,20 @@ stop_all_containers() {
 
     local success_count=0
     local fail_count=0
-    local container_array=()
 
-    # Store containers in an array instead of piping to while loop
-    while read -r container; do
-        [[ -n "${container}" ]] && container_array+=("${container}")
-  done   <<<"${containers}"
-
-    for container in "${container_array[@]}"; do
-        local short_name=$(basename "${container}")
-        if [[ "${short_name}" == "${PREFIX}_"* ]]; then
-            short_name=${short_name#"${PREFIX}"_}
+    echo "$containers" | while read -r container; do
+        # Skip if container is empty (can happen due to newlines)
+        if [[ -z "$container" ]]; then
+            continue
     fi
 
-        echo -n "  Stopping ${short_name}... "
-        if docker stop "${container}" >/dev/null 2>&1; then
+        local short_name=$(basename "$container")
+        if [[ "$short_name" == "${PREFIX}_"* ]]; then
+            short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
+    fi
+
+        echo -n "  Stopping $short_name... "
+        if docker stop "$container" >/dev/null 2>&1; then
             echo -e "${GREEN}✓${NC}"
             ((success_count++))
     else
@@ -1312,12 +1298,12 @@ stop_all_containers() {
     fi
   done
 
-    if [[ ${success_count} -gt 0 ]]; then
-        print_success "${success_count} containers stopped successfully"
+    if [[ $success_count -gt 0 ]]; then
+        print_success "$success_count containers stopped successfully"
   fi
 
-    if [[ ${fail_count} -gt 0 ]]; then
-        print_error "${fail_count} containers failed to stop"
+    if [[ $fail_count -gt 0 ]]; then
+        print_error "$fail_count containers failed to stop"
   fi
 }
 
@@ -1340,28 +1326,28 @@ test_proxy() {
   fi
 
     # Try to get IP through proxy with timeout
-    local result=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -x "${host}:${port}" "${url}")
+    local result=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -x "${host}:${port}" "$url")
     local exit_code=$?
 
-    if [[ ${exit_code} -ne 0 || "${result}" != "200" ]]; then
+    if [[ ${exit_code} -ne 0 || "$result" != "200" ]]; then
         print_error "Failed to connect to proxy at ${host}:${port}"
-        echo "HTTP Status: ${result}, Exit code: ${exit_code}"
+        echo "HTTP Status: $result, Exit code: $exit_code"
         return 1
   fi
 
     # Get the IP address
-    local ip=$(curl -s -m 10 -x "${host}:${port}" "${url}")
+    local ip=$(curl -s -m 10 -x "${host}:${port}" "$url")
 
     print_success "Proxy test successful!"
     echo
-    echo "Your IP through the VPN: ${ip}"
+    echo "Your IP through the VPN: $ip"
     echo "Proxy connection: ${host}:${port}"
     return 0
 }
 
 # Monitor container health and restart if needed
 monitor_containers() {
-    local interval="${1:-${HEALTH_CHECK_INTERVA}L}"
+    local interval="${1:-$HEALTH_CHECK_INTERVAL}"
 
     print_info "Starting container health monitoring (Ctrl+C to stop)..."
     print_info "Checking containers every ${interval} seconds"
@@ -1370,56 +1356,56 @@ monitor_containers() {
         # Get all running VPN containers
         local containers=$(docker ps --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}")
 
-        if [[ -z "${containers}" ]]; then
+        if [[ -z "$containers" ]]; then
             print_info "No running VPN containers found. Waiting..."
-            sleep "${interval}"
+            sleep "$interval"
             continue
     fi
 
         echo "$(date +"%Y-%m-%d %H:%M:%S") - Checking container health..."
 
-        for container in ${containers}; do
-            local short_name=$(basename "${container}")
-            if [[ "${short_name}" == "${PREFIX}_"* ]]; then
-                short_name=${short_name#"${PREFIX}"_}
+        for container in $containers; do
+            local short_name=$(basename "$container")
+            if [[ "$short_name" == "${PREFIX}_"* ]]; then
+                short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
       fi
 
-            local port=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.port"}}' "${container}" 2>/dev/null)
+            local port=$(docker inspect --format='{{index .Config.Labels "'${PREFIX}'.port"}}' "$container" 2>/dev/null)
 
-            if [[ -z "${port}" ]]; then
-                print_info "Container ${short_name} has no port label, skipping check"
+            if [[ -z "$port" ]]; then
+                print_info "Container $short_name has no port label, skipping check"
                 continue
       fi
 
             # Test the proxy connection
-            echo -n "Testing ${short_name} (port ${port}): "
+            echo -n "Testing $short_name (port $port): "
 
-            if test_proxy "${port}" "localhost" "https://ifconfig.me" >/dev/null 2>&1; then
+            if test_proxy "$port" "localhost" "https://ifconfig.me" >/dev/null 2>&1; then
                 echo -e "${GREEN}OK${NC}"
       else
                 echo -e "${RED}FAILED${NC}"
-                print_info "Container ${short_name} is not responding, restarting..."
+                print_info "Container $short_name is not responding, restarting..."
 
                 # Only restart if configured to do so
-                if jq -e '.auto_restart_containers // true' "${CONFIG_FILE}" | grep -q "true"; then
-                    docker restart "${container}" >/dev/null
-                    print_info "Container ${short_name} restarted. Waiting 15s for it to initialize..."
+                if jq -e '.auto_restart_containers // true' "$CONFIG_FILE" | grep -q "true"; then
+                    docker restart "$container" >/dev/null
+                    print_info "Container $short_name restarted. Waiting 15s for it to initialize..."
                     sleep 15
 
                     # Test again after restart
-                    if test_proxy "${port}" "localhost" "https://ifconfig.me" >/dev/null 2>&1; then
-                        print_success "Container ${short_name} is now working"
+                    if test_proxy "$port" "localhost" "https://ifconfig.me" >/dev/null 2>&1; then
+                        print_success "Container $short_name is now working"
           else
-                        print_error "Container ${short_name} still not responding after restart"
+                        print_error "Container $short_name still not responding after restart"
           fi
         else
-                    print_info "Auto-restart is disabled. Use '${0} restart ${short_name}' to restart manually."
+                    print_info "Auto-restart is disabled. Use '$0 restart $short_name' to restart manually."
         fi
       fi
     done
 
         echo "Health check complete. Next check in ${interval} seconds."
-        sleep "${interval}"
+        sleep "$interval"
   done
 }
 
@@ -1429,14 +1415,14 @@ monitor_containers() {
 
 # Create batch of VPN containers from a json file
 create_batch() {
-    local batch_file="${1}"
+    local batch_file="$1"
 
-    if [[ -z "${batch_file}" ]]; then
+    if [[ -z "$batch_file" ]]; then
         batch_file="${SCRIPT_DIR}/vpn_batch.json"
   fi
 
-    if [[ ! -f "${batch_file}" ]]; then
-        print_error "Batch file not found: ${batch_file}"
+    if [[ ! -f "$batch_file" ]]; then
+        print_error "Batch file not found: $batch_file"
         exit 1
   fi
 
@@ -1446,96 +1432,75 @@ create_batch() {
         exit 1
   fi
 
-    print_header "Creating containers from batch file: ${batch_file}"
+    print_header "Creating containers from batch file: $batch_file"
     echo
 
-    # Get all container names from the batch file
-    # Get container names from batch file (compatible with older bash versions)
-    local container_names=()
-    while IFS= read -r line; do
-        container_names+=("${line}")
-  done   < <(jq -r 'keys[]' "${batch_file}")
-
-    # Process each container entry
-    for name in "${container_names[@]}"; do
+    # Process batch file to create multiple containers
+    jq -r 'keys[]' "$batch_file" | while read -r name; do
         # Extract settings
-        local container_name=$(jq -r --arg name "${name}" '.[$name].container_name // $name' "${batch_file}")
-        local port=$(jq -r --arg name "${name}" '.[$name].port' "${batch_file}")
-        local profile=$(jq -r --arg name "${name}" '.[$name].user_profile // ""' "${batch_file}")
-        local provider=$(jq -r --arg name "${name}" '.[$name].vpn_provider // "protonvpn"' "${batch_file}")
-        local server_city=$(jq -r --arg name "${name}" '.[$name].server_city // ""' "${batch_file}")
-        local server_hostname=$(jq -r --arg name "${name}" '.[$name].server_hostname // ""' "${batch_file}")
+        local container_name=$(jq -r --arg name "$name" '.[$name].container_name // $name' "$batch_file")
+        local port=$(jq -r --arg name "$name" '.[$name].port' "$batch_file")
+        local profile=$(jq -r --arg name "$name" '.[$name].user_profile // ""' "$batch_file")
+        local provider=$(jq -r --arg name "$name" '.[$name].vpn_provider // "protonvpn"' "$batch_file")
+        local server_city=$(jq -r --arg name "$name" '.[$name].server_city // ""' "$batch_file")
+        local server_hostname=$(jq -r --arg name "$name" '.[$name].server_hostname // ""' "$batch_file")
 
-        print_info "Creating container: ${container_name} (port: ${port})"
+        print_info "Creating container: $container_name (port: $port)"
 
-        if [[ -n "${profile}" && -f "${PROFILES_DIR}/${profile}.env" ]]; then
+        if [[ -n "$profile" && -f "${PROFILES_DIR}/${profile}.env" ]]; then
             # Check for environment variables in the batch file
-            local env_vars_json=$(jq -r --arg name "${name}" '.[$name].environment // {}' "${batch_file}")
-            if [[ "${env_vars_json}" != "{}" ]]; then
+            local env_vars=$(jq -r --arg name "$name" '.[$name].environment // {}' "$batch_file")
+            if [[ "${env_vars}" != "{}" ]]; then
                 # Set HTTP proxy authentication if specified in environment section
-                local proxy_user=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_USER // ""' "${batch_file}")
-                local proxy_pass=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_PASSWORD // ""' "${batch_file}")
+                local proxy_user=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_USER // ""' "$batch_file")
+                local proxy_pass=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_PASSWORD // ""' "$batch_file")
 
-                # Store variables in local environment for this iteration
-                local HTTPPROXY_USER_VAL=""
-                local HTTPPROXY_PASSWORD_VAL=""
-
-                if [[ -n "${proxy_user}" ]]; then
-                    HTTPPROXY_USER_VAL="${proxy_user}"
-                    export HTTPPROXY_USER="${proxy_user}"
+                if [[ -n "$proxy_user" ]]; then
+                    export HTTPPROXY_USER="$proxy_user"
         fi
 
-                if [[ -n "${proxy_pass}" ]]; then
-                    HTTPPROXY_PASSWORD_VAL="${proxy_pass}"
-                    export HTTPPROXY_PASSWORD="${proxy_pass}"
+                if [[ -n "$proxy_pass" ]]; then
+                    export HTTPPROXY_PASSWORD="$proxy_pass"
         fi
       fi
 
             # Create container with profile
-            print_debug "Creating container ${container_name} with profile ${profile}, provider ${provider}, port ${port}"
-            create_vpn_from_profile "${container_name}" "${port}" "${profile}" "${server_city}" "${server_hostname}" "${provider}"
+            create_vpn_from_profile "$container_name" "$port" "$profile" "$server_city" "$server_hostname" "$provider" >/dev/null 2>&1
 
             # Clear environment variables to avoid affecting other containers
-            if [[ "${env_vars_json}" != "{}" ]]; then
+            if [[ "${env_vars}" != "{}" ]]; then
                 unset HTTPPROXY_USER
                 unset HTTPPROXY_PASSWORD
       fi
     else
             # Fall back to regular create if profile doesn't exist
-            local username=$(jq -r --arg name "${name}" '.[${name}].username // ""' "${batch_file}")
-            local password=$(jq -r --arg name "${name}" '.[${name}].password // ""' "${batch_file}")
-            local location="${server_city}"
-            if [[ -z "${location}" ]]; then
-                location="${server_hostname}"
+            local username=$(jq -r --arg name "$name" '.[$name].username // ""' "$batch_file")
+            local password=$(jq -r --arg name "$name" '.[$name].password // ""' "$batch_file")
+            local location="$server_city"
+            if [[ -z "$location" ]]; then
+                location="$server_hostname"
       fi
 
             # Check for environment variables in the batch file
-            local env_vars_json=$(jq -r --arg name "${name}" '.[$name].environment // {}' "${batch_file}")
-            if [[ "${env_vars_json}" != "{}" ]]; then
+            local env_vars=$(jq -r --arg name "$name" '.[$name].environment // {}' "$batch_file")
+            if [[ "${env_vars}" != "{}" ]]; then
                 # Set HTTP proxy authentication if specified in environment section
-                local proxy_user=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_USER // ""' "${batch_file}")
-                local proxy_pass=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_PASSWORD // ""' "${batch_file}")
+                local proxy_user=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_USER // ""' "$batch_file")
+                local proxy_pass=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_PASSWORD // ""' "$batch_file")
 
-                # Store variables in local environment for this iteration
-                local HTTPPROXY_USER_VAL=""
-                local HTTPPROXY_PASSWORD_VAL=""
-
-                if [[ -n "${proxy_user}" ]]; then
-                    HTTPPROXY_USER_VAL="${proxy_user}"
-                    export HTTPPROXY_USER="${proxy_user}"
+                if [[ -n "$proxy_user" ]]; then
+                    export HTTPPROXY_USER="$proxy_user"
         fi
 
-                if [[ -n "${proxy_pass}" ]]; then
-                    HTTPPROXY_PASSWORD_VAL="${proxy_pass}"
-                    export HTTPPROXY_PASSWORD="${proxy_pass}"
+                if [[ -n "$proxy_pass" ]]; then
+                    export HTTPPROXY_PASSWORD="$proxy_pass"
         fi
       fi
 
-            print_debug "Creating container ${container_name} with username/password, provider ${provider}, port ${port}, location ${location}"
-            create_vpn "${container_name}" "${port}" "${provider}" "${location}" "${username}" "${password}"
+            create_vpn "$container_name" "$port" "$provider" "$location" "$username" "$password" >/dev/null 2>&1
 
             # Clear environment variables to avoid affecting other containers
-            if [[ "${env_vars_json}" != "{}" ]]; then
+            if [[ "${env_vars}" != "{}" ]]; then
                 unset HTTPPROXY_USER
                 unset HTTPPROXY_PASSWORD
       fi
@@ -1543,51 +1508,51 @@ create_batch() {
 
         local exit_code=$?
         if [[ ${exit_code} -eq 0 ]]; then
-            echo -e "  ${GREEN}✓${NC} ${container_name} created successfully"
+            echo -e "  ${GREEN}✓${NC} $container_name created successfully"
     else
-            echo -e "  ${RED}✗${NC} Failed to create ${container_name}"
+            echo -e "  ${RED}✗${NC} Failed to create $container_name"
     fi
   done
 
     print_success "Batch creation complete"
-    print_info "Use '${0} list' to see all containers"
+    print_info "Use '$0 list' to see all containers"
 }
 
 # Check and prepare profiles from Docker Compose file
 check_compose_profiles() {
-    local compose_file="${1}"
+    local compose_file="$1"
     local auto_create="${2:-false}"
 
-    print_header "Checking profiles for Docker Compose file: ${compose_file}"
+    print_header "Checking profiles for Docker Compose file: $compose_file"
     echo
 
     # First, extract all template names that reference env files
-    local templates=$(grep -E "x-vpn-base-[a-zA-Z0-9_-]+:" "${compose_file}" | grep -o "x-vpn-base-[a-zA-Z0-9_-]\+" | sed -E 's/x-vpn-base-//')
+    local templates=$(grep -E "x-vpn-base-[a-zA-Z0-9_-]+:" "$compose_file" | grep -o "x-vpn-base-[a-zA-Z0-9_-]\+" | sed -E 's/x-vpn-base-//')
 
-    if [[ -z "${templates}" ]]; then
+    if [[ -z "$templates" ]]; then
         print_info "No VPN base templates found in compose file"
         return 0
   fi
 
-    print_info "Found base templates: ${templates}"
+    print_info "Found base templates: $templates"
 
     # Check if corresponding profile files exist
     local missing_profiles=""
-    for template in ${templates}; do
+    for template in $templates; do
         if [[ ! -f "${PROFILES_DIR}/${template}.env" ]]; then
             print_warning "Missing profile for template ${template}"
-            missing_profiles="${missing_profiles} ${template}"
+            missing_profiles="$missing_profiles $template"
     else
             print_success "Found profile for template ${template}: ${PROFILES_DIR}/${template}.env"
     fi
   done
 
     # If auto_create is set to true, create symlinks from env files to profile directory
-    if [[ "${auto_create}" = "true" && -n "${missing_profiles}" ]]; then
+    if [[ "$auto_create" = "true" && -n "$missing_profiles" ]]; then
         print_info "Auto-creating missing profiles from env files in compose file directory..."
 
-        for template in ${missing_profiles}; do
-            local env_file="$(dirname "${compose_file}")/env.${template}"
+        for template in $missing_profiles; do
+            local env_file="$(dirname "$compose_file")/env.${template}"
 
             if [[ -f "${env}_file" ]]; then
                 print_info "Found env file for template ${template}: ${env_file}"
@@ -1597,19 +1562,19 @@ check_compose_profiles() {
                 print_success "Created profile ${template}.env from ${env_file}"
       else
                 print_error "Could not find env file for template ${template}: ${env_file}"
-                print_info "You may need to create the profile manually: ${0} create-profile ${template} your_username your_password"
+                print_info "You may need to create the profile manually: $0 create-profile ${template} your_username your_password"
       fi
     done
-  elif   [[ -n "${missing_profiles}" ]]; then
+  elif   [[ -n "$missing_profiles" ]]; then
         print_warning "Some templates in compose file do not have matching profiles. Create them first:"
-        for template in ${missing_profiles}; do
-            echo "${0} create-profile ${template} your_username your_password"
+        for template in $missing_profiles; do
+            echo "$0 create-profile ${template} your_username your_password"
     done
 
         # Ask user if they want to continue anyway
         read -p "Do you want to continue with import anyway? Missing profiles will be skipped. (y/n): " -n 1 -r
         echo
-        if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             print_info "Import cancelled. Create the missing profiles first."
             exit 0
     fi
@@ -1620,260 +1585,240 @@ check_compose_profiles() {
 
 # Import containers from Docker Compose file
 import_from_compose() {
-    local compose_file="${1}"
-    local create_containers="${2:-true}"  # Parameter controls whether to create containers or just parse
+    local compose_file="$1"
+    local auto_create="${2:-false}"  # Add parameter to auto-create profiles
 
-    if [[ -z "${compose_file}" ]]; then
+    if [[ -z "$compose_file" ]]; then
         print_error "Missing compose file path."
-        echo "Usage: ${0} import-compose <compose_file_path> [create_containers]"
-        echo "Example: ${0} import-compose ./compose.yml true  # Parse and create containers"
-        echo "Example: ${0} import-compose ./compose.yml false # Only parse, don't create containers"
+        echo "Usage: $0 import-compose <compose_file_path> [auto_create_profiles]"
+        echo "Example: $0 import-compose ./compose.yml true  # Auto-create profiles from env files"
         exit 1
   fi
 
-    if [[ ! -f "${compose_file}" ]]; then
-        print_error "Compose file not found: ${compose_file}"
+    if [[ ! -f "$compose_file" ]]; then
+        print_error "Compose file not found: $compose_file"
         exit 1
   fi
 
-    print_header "Importing VPN containers from Docker Compose file: ${compose_file}"
+    print_header "Importing VPN containers from Docker Compose file: $compose_file"
     echo
 
-    # Check for needed profiles before importing - always auto-create true
-    check_compose_profiles "${compose_file}" "true"
+    # Check for needed profiles before importing
+    check_compose_profiles "$compose_file" "$auto_create"
 
     # Create a temporary batch file
     local batch_file="/tmp/vpn_batch_$$.json"
-    echo "{" >"${batch_file}"
+    echo "{" >"$batch_file"
 
     # Find services section in the compose file
-    local services_start=$(grep -n "^[[:space:]]*services:" "${compose_file}" | cut -d':' -f1)
+    local services_start=$(grep -n "^[[:space:]]*services:" "$compose_file" | cut -d':' -f1)
 
-    if [[ -z "${services_start}" ]]; then
+    if [[ -z "$services_start" ]]; then
         print_error "No 'services:' section found in the compose file"
         exit 1
   fi
 
     # Extract service names from within the services section
     # Only include service names like "vpnN" where N is a number
-    local services=$(awk "NR > ${services_start}" "${compose_file}" | grep -E "^[[:space:]]*vpn[0-9]+:" | sed 's/[[:space:]]*\([a-zA-Z0-9_-]*\):.*/\1/')
+    local services=$(awk "NR > $services_start" "$compose_file" | grep -E "^[[:space:]]*vpn[0-9]+:" | sed 's/[[:space:]]*\([a-zA-Z0-9_-]*\):.*/\1/')
 
     # Look for VPN services in the compose file using the gluetun image
     local first=true
-    for service in ${services}; do
+    for service in $services; do
         # Check if this service uses gluetun image
-        local is_gluetun=$(grep -A 20 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "image:.*qmcgaw/gluetun|image:.*gluetun")
+        local is_gluetun=$(grep -A 20 "^[[:space:]]*${service}:" "$compose_file" | grep -E "image:.*qmcgaw/gluetun|image:.*gluetun")
 
         # If not using gluetun directly, check if it extends a base that might use gluetun
-        if [[ -z "${is_gluetun}" ]]; then
-            local extends=$(grep -A 2 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "<<: \*vpn-base|extends:|<<: \*vpn-base-[a-zA-Z0-9_-]+")
-            if [[ -z "${extends}" ]]; then
+        if [[ -z "$is_gluetun" ]]; then
+            local extends=$(grep -A 2 "^[[:space:]]*${service}:" "$compose_file" | grep -E "<<: \*vpn-base|extends:|<<: \*vpn-base-[a-zA-Z0-9_-]+")
+            if [[ -z "$extends" ]]; then
                 # Not a VPN container, skip
                 continue
       fi
     fi
 
-        print_info "Found VPN service: ${service}"
+        print_info "Found VPN service: $service"
 
         # Add service to batch file
         if [[ "${first}" = "true" ]]; then
             first=false
     else
-            echo "  }," >>"${batch_file}"
+            echo "  }," >>"$batch_file"
     fi
 
         # Use the service name as the container name
-        local container_name="${service}"
-        echo "  \"${container_name}\": {" >>"${batch_file}"
-        echo "    \"container_name\": \"${container_name}\"," >>"${batch_file}"
+        local container_name="$service"
+        echo "  \"$container_name\": {" >>"$batch_file"
+        echo "    \"container_name\": \"$container_name\"," >>"$batch_file"
 
         # Extract port from the service block (look for port mapping)
         # First, extract the entire service definition
-        local service_block=$(awk "/^[[:space:]]*${service}:/{flag=1;next} /^[[:space:]]*[a-zA-Z0-9_-]+:/{flag=0} flag" "${compose_file}")
+        local service_block=$(awk "/^[[:space:]]*${service}:/{flag=1;next} /^[[:space:]]*[a-zA-Z0-9_-]+:/{flag=0} flag" "$compose_file")
 
         # Extract the ports section
-        local port_lines=$(echo "${service_block}" | grep -A 10 "ports:")
+        local port_lines=$(echo "$service_block" | grep -A 10 "ports:")
 
         # Parse Docker Compose style port mappings
         # Try different formats: "host:container", "0.0.0.0:host:container", or "host:container/protocol"
         local port=""
 
         # Print the entire service block for debugging
-        print_debug "Service block for ${service}: ${service_block}"
+        print_debug "Service block for $service: $service_block"
 
         # Extract port directly from compose-style port mappings
-        if [[ "${service_block}" =~ ports:[[:space:]]*- ]]; then
+        if [[ "$service_block" =~ ports:[[:space:]]*- ]]; then
             # First, try direct regex extraction for the 0.0.0.0:PORT:8888 format
             # This format is used in your compose.yml
-            if [[ "${service_block}" =~ [0-9\.]+:([0-9]+):[0-9]+ ]]; then
+            if [[ "$service_block" =~ [0-9\.]+:([0-9]+):[0-9]+ ]]; then
                 port="${BASH_REMATCH[1]}"
-                print_info "Extracted port from Docker Compose style port mapping for ${service}: ${port}"
+                print_info "Extracted port from Docker Compose style port mapping for $service: $port"
       fi
 
             # If that didn't work, try a more general approach
-            if [[ -z "${port}" ]]; then
+            if [[ -z "$port" ]]; then
                 # Split the ports section for better parsing
-                local port_entries=$(echo "${service_block}" | grep -A 5 "ports:" | grep -E -- "- ")
-                print_debug "Port entries: ${port_entries}"
+                local port_entries=$(echo "$service_block" | grep -A 5 "ports:" | grep -E -- "- ")
+                print_debug "Port entries: $port_entries"
 
                 # Extract the first port number that seems to be a host port (8888:8888, etc.)
-                if [[ "${port_entries}" =~ ([0-9]+):[0-9]+ ]]; then
+                if [[ "$port_entries" =~ ([0-9]+):[0-9]+ ]]; then
                     port="${BASH_REMATCH[1]}"
-                    print_info "Extracted port from Docker Compose port entries for ${service}: ${port}"
+                    print_info "Extracted port from Docker Compose port entries for $service: $port"
         fi
       fi
     fi
 
-        if [[ -z "${port}" ]]; then
+        if [[ -z "$port" ]]; then
             # If no port found in direct mapping, look for environment variables with port
-            port=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "HTTPPROXY_PORT|HTTP_PROXY_PORT" | grep -o "[0-9]\+" | head -1)
+            port=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "HTTPPROXY_PORT|HTTP_PROXY_PORT" | grep -o "[0-9]\+" | head -1)
 
             # Check if there's a numeric suffix in the service name (e.g., vpn1, vpn2, etc.)
-            if [[ -z "${port}" && "${service}" =~ vpn([0-9]+) ]]; then
+            if [[ -z "$port" && "$service" =~ vpn([0-9]+) ]]; then
                 # Get the service number and add it to a base port
                 local service_num="${BASH_REMATCH[1]}"
                 local base_port=8887
                 port=$((base_port + service_num))
-                print_info "Using computed port for ${service}: ${port} (base_port + ${service_num})"
+                print_info "Using computed port for $service: $port (base_port + $service_num)"
       fi
 
             # If still no port, use default from config
-            if [[ -z "${port}" ]]; then
-                port=$(jq -r '.default_proxy_port // 8888' "${CONFIG_FILE}")
-                print_warning "No port found for ${service}, using default: ${port}"
+            if [[ -z "$port" ]]; then
+                port=$(jq -r '.default_proxy_port // 8888' "$CONFIG_FILE")
+                print_warning "No port found for $service, using default: $port"
       fi
     fi
 
-        echo "    \"port\": ${port}," >>"${batch_file}"
+        echo "    \"port\": $port," >>"$batch_file"
 
         # Try to extract VPN provider
-        local provider=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "VPN_SERVICE_PROVIDER|vpn_provider" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
-        if [[ -z "${provider}" ]]; then
-            provider="${DEFAULT_VPN_PROVIDER}"
-            print_info "No provider specified for ${service}, using default: ${provider}"
+        local provider=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "VPN_SERVICE_PROVIDER|vpn_provider" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
+        if [[ -z "$provider" ]]; then
+            provider="$DEFAULT_VPN_PROVIDER"
+            print_info "No provider specified for $service, using default: $provider"
     fi
-        echo "    \"vpn_provider\": \"${provider}\"," >>"${batch_file}"
+        echo "    \"vpn_provider\": \"$provider\"," >>"$batch_file"
 
         # Look for user profiles
         # First check for direct profile references in extends/template
-        local profile_found=false
-        for profile in $(find "${PROFILES_DIR}" -type f -name "*.env" -exec basename {} \; | sed 's/\.env$//'); do
-            if grep -A 5 "^[[:space:]]*${service}:" "${compose_file}" | grep -q "\*vpn-base-${profile}"; then
-                echo "    \"user_profile\": \"${profile}\"," >>"${batch_file}"
-                profile_found=true
+        for profile in $(ls -1 "$PROFILES_DIR" | sed 's/\.env$//'); do
+            if grep -A 5 "^[[:space:]]*${service}:" "$compose_file" | grep -q "\*vpn-base-${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >>"$batch_file"
                 break
       fi
     done
 
         # Also check for env_file references to map them to profiles
-        if [[ "${profile_found}" = "false" ]]; then
-            for profile in $(find "${PROFILES_DIR}" -type f -name "*.env" -exec basename {} \; | sed 's/\.env$//'); do
-                # Check direct env file references
-                if grep -A 10 "^[[:space:]]*${service}:" "${compose_file}" | grep -q "env_file:.*env\.${profile}"; then
-                    echo "    \"user_profile\": \"${profile}\"," >>"${batch_file}"
-                    profile_found=true
-                    break
-        elif       grep -A 10 "^[[:space:]]*${service}:" "${compose_file}" | grep -q "env_file:.*- env\.${profile}"; then
-                    echo "    \"user_profile\": \"${profile}\"," >>"${batch_file}"
-                    profile_found=true
-                    break
-        elif       grep -A 20 -B 10 "<<: \\*vpn-base-${profile}" "${compose_file}" | grep -q "env_file:.*env\.${profile}"; then
-                    echo "    \"user_profile\": \"${profile}\"," >>"${batch_file}"
-                    profile_found=true
-                    break
-        fi
-      done
-    fi
+        for profile in $(ls -1 "$PROFILES_DIR" | sed 's/\.env$//'); do
+            # Check direct env file references
+            if grep -A 10 "^[[:space:]]*${service}:" "$compose_file" | grep -q "env_file:.*env\.${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >>"$batch_file"
+                break
+      elif       grep -A 10 "^[[:space:]]*${service}:" "$compose_file" | grep -q "env_file:.*- env\.${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >>"$batch_file"
+                break
+      elif       grep -A 20 -B 10 "<<: \\*vpn-base-${profile}" "$compose_file" | grep -q "env_file:.*env\.${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >>"$batch_file"
+                break
+      fi
+    done
 
         # Check for references to a base template that references an env file
-        if [[ "${profile_found}" = "false" ]]; then
-            local base_template=""
-            base_template=$(grep -A 2 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "<<: \*vpn-base-[a-zA-Z0-9_-]+" | sed -E 's/.*<<: \*vpn-base-([a-zA-Z0-9_-]+).*/\1/')
+        local base_template=""
+        base_template=$(grep -A 2 "^[[:space:]]*${service}:" "$compose_file" | grep -E "<<: \*vpn-base-[a-zA-Z0-9_-]+" | sed -E 's/.*<<: \*vpn-base-([a-zA-Z0-9_-]+).*/\1/')
 
-            if [[ -n "${base_template}" ]]; then
-                print_info "Service ${service} uses template: vpn-base-${base_template}"
+        if [[ -n "$base_template" ]]; then
+            print_info "Service $service uses template: vpn-base-$base_template"
 
-                # Check if we have a matching profile for this template
-                if [[ -f "${PROFILES_DIR}/${base_template}.env" ]]; then
-                    echo "    \"user_profile\": \"${base_template}\"," >>"${batch_file}"
-                    profile_found=true
-                    print_info "Found matching profile file: ${base_template}.env"
-        else
-                    print_warning "Profile file for base template '${base_template}' not found in profiles directory."
-                    print_info "You may need to create the profile first with: ${0} create-profile ${base_template} your_username your_password"
-        fi
+            # Check if we have a matching profile for this template
+            if [[ -f "${PROFILES_DIR}/${base_template}.env" ]]; then
+                echo "    \"user_profile\": \"${base_template}\"," >>"$batch_file"
+                print_info "Found matching profile file: ${base_template}.env"
+      else
+                print_warning "Profile file for base template '${base_template}' not found in profiles directory."
+                print_info "You may need to create the profile first with: $0 create-profile ${base_template} your_username your_password"
       fi
     fi
 
         # If no profile match found, look for username/password directly
-        if ! grep -q "user_profile" "${batch_file}"; then
-            local username=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "OPENVPN_USER|VPN_USER" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
-            local password=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "OPENVPN_PASSWORD|VPN_PASSWORD" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
+        if ! grep -q "user_profile" "$batch_file"; then
+            local username=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "OPENVPN_USER|VPN_USER" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
+            local password=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "OPENVPN_PASSWORD|VPN_PASSWORD" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
 
-            if [[ -n "${username}" ]]; then
-                echo "    \"username\": \"${username}\"," >>"${batch_file}"
+            if [[ -n "$username" ]]; then
+                echo "    \"username\": \"$username\"," >>"$batch_file"
       fi
 
-            if [[ -n "${password}" ]]; then
-                echo "    \"password\": \"${password}\"," >>"${batch_file}"
+            if [[ -n "$password" ]]; then
+                echo "    \"password\": \"$password\"," >>"$batch_file"
       fi
     fi
 
         # Extract server location information - try multiple common env var names
         # First check for cities
-        local server_city=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_CITIES|VPN_CITY|CITY" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+        local server_city=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "SERVER_CITIES|VPN_CITY|CITY" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
 
-        if [[ -n "${server_city}" ]]; then
-            echo "    \"server_city\": \"${server_city}\"," >>"${batch_file}"
+        if [[ -n "$server_city" ]]; then
+            echo "    \"server_city\": \"$server_city\"," >>"$batch_file"
     else
             # Try hostnames
-            local server_hostname=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_HOSTNAMES|VPN_HOSTNAME|HOSTNAME" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+            local server_hostname=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "SERVER_HOSTNAMES|VPN_HOSTNAME|HOSTNAME" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
 
-            if [[ -n "${server_hostname}" ]]; then
-                echo "    \"server_hostname\": \"${server_hostname}\"," >>"${batch_file}"
+            if [[ -n "$server_hostname" ]]; then
+                echo "    \"server_hostname\": \"$server_hostname\"," >>"$batch_file"
       else
                 # Try countries/regions
-                local server_country=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_COUNTRIES|COUNTRY|VPN_REGION|REGION" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+                local server_country=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "SERVER_COUNTRIES|COUNTRY|VPN_REGION|REGION" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
 
-                if [[ -n "${server_country}" ]]; then
-                    echo "    \"server_country\": \"${server_country}\"," >>"${batch_file}"
+                if [[ -n "$server_country" ]]; then
+                    echo "    \"server_country\": \"$server_country\"," >>"$batch_file"
         fi
       fi
     fi
 
         # Remove trailing comma from the last entry
-        sed -i -e '$ s/,$//' "${batch_file}"
+        sed -i -e '$ s/,$//' "$batch_file"
   done
 
     if [[ "${first}" = "true" ]]; then
         # No VPN services found
         print_error "No VPN services found in the Docker Compose file"
-        rm -f "${batch_file}"
+        rm -f "$batch_file"
         exit 1
   fi
 
     # Close the last container and the JSON object
-    echo "  }" >>"${batch_file}"
-    echo "}" >>"${batch_file}"
+    echo "  }" >>"$batch_file"
+    echo "}" >>"$batch_file"
 
     # Print debug information about what we found
-    print_info "Found $(jq -r 'keys | length' "${batch_file}") VPN services to import"
-    print_info "Services: $(jq -r 'keys | join(", ")' "${batch_file}")"
+    print_info "Found $(jq -r 'keys | length' "$batch_file") VPN services to import"
+    print_info "Services: $(jq -r 'keys | join(", ")' "$batch_file")"
 
-    # Only create containers if requested
-    if [[ "${create_containers}" == "true" ]]; then
-        # Create the containers from the batch file
-        print_info "Creating containers with batch file: ${batch_file}"
-        # Dump batch file contents for debugging
-        print_debug "Batch file contents:"
-        print_debug "$(cat "${batch_file}")"
-        create_batch "${batch_file}"
-  else
-        print_info "Skipping container creation as requested (create_containers=${create_containers})"
-  fi
+    # Create the containers from the batch file
+    create_batch "$batch_file"
 
     # Clean up temporary file
-    rm -f "${batch_file}"
+    rm -f "$batch_file"
 }
 
 # ======================================================
@@ -1882,8 +1827,8 @@ import_from_compose() {
 
 # Listing of presets
 list_presets() {
-    if [[ ! -f "${PRESETS_FILE}" ]]; then
-        print_error "Presets file not found: ${PRESETS_FILE}"
+    if [[ ! -f "$PRESETS_FILE" ]]; then
+        print_error "Presets file not found: $PRESETS_FILE"
         exit 1
   fi
 
@@ -1901,44 +1846,44 @@ list_presets() {
     printf "%-25s %-12s %-20s %-10s %-20s %-30s\n" "----" "--------" "--------" "----" "-------------" "-----------"
 
     # Parse the presets file
-    jq -r 'keys[]' "${PRESETS_FILE}" | while read -r name; do
-        provider=$(jq -r --arg name "${name}" '.[${name}].vpn_provider' "${PRESETS_FILE}")
-        port=$(jq -r --arg name "${name}" '.[${name}].port' "${PRESETS_FILE}")
-        desc=$(jq -r --arg name "${name}" '.[${name}].description' "${PRESETS_FILE}")
+    jq -r 'keys[]' "$PRESETS_FILE" | while read -r name; do
+        provider=$(jq -r --arg name "$name" '.[$name].vpn_provider' "$PRESETS_FILE")
+        port=$(jq -r --arg name "$name" '.[$name].port' "$PRESETS_FILE")
+        desc=$(jq -r --arg name "$name" '.[$name].description' "$PRESETS_FILE")
 
         # Check for different location types
-        server_country=$(jq -r --arg name "${name}" '.[${name}].server_location // empty' "${PRESETS_FILE}")
-        server_city=$(jq -r --arg name "${name}" '.[${name}].environment.SERVER_CITIES // empty' "${PRESETS_FILE}")
-        server_hostname=$(jq -r --arg name "${name}" '.[${name}].environment.SERVER_HOSTNAMES // empty' "${PRESETS_FILE}")
+        server_country=$(jq -r --arg name "$name" '.[$name].server_location // empty' "$PRESETS_FILE")
+        server_city=$(jq -r --arg name "$name" '.[$name].environment.SERVER_CITIES // empty' "$PRESETS_FILE")
+        server_hostname=$(jq -r --arg name "$name" '.[$name].environment.SERVER_HOSTNAMES // empty' "$PRESETS_FILE")
 
-        location="${server_country}"
+        location="$server_country"
         location_type="country"
 
-        if [[ -n "${server_city}" ]]; then
-            location="${server_city}"
+        if [[ -n "$server_city" ]]; then
+            location="$server_city"
             location_type="city"
-    elif     [[ -n "${server_hostname}" ]]; then
-            location="${server_hostname}"
+    elif     [[ -n "$server_hostname" ]]; then
+            location="$server_hostname"
             location_type="hostname"
     fi
 
-        printf "%-25s %-12s %-20s %-10s %-20s %-30s\n" "${name}" "${provider}" "${location}" "${port}" "${location_type}" "${desc}"
+        printf "%-25s %-12s %-20s %-10s %-20s %-30s\n" "$name" "$provider" "$location" "$port" "$location_type" "$desc"
   done
 }
 
 # Apply a preset with  options
 apply_preset() {
-    local preset_name="${1}"
-    local container_name="${2}"
+    local preset_name="$1"
+    local container_name="$2"
 
     if [[ -z "${preset_name}" || -z "${container_name}" ]]; then
         print_error "Missing preset name or container name."
-        echo "Usage: ${0} apply-preset <preset_name> <container_name>"
+        echo "Usage: $0 apply-preset <preset_name> <container_name>"
         exit 1
   fi
 
-    if [[ ! -f "${PRESETS_FILE}" ]]; then
-        print_error "Presets file not found: ${PRESETS_FILE}"
+    if [[ ! -f "$PRESETS_FILE" ]]; then
+        print_error "Presets file not found: $PRESETS_FILE"
         exit 1
   fi
 
@@ -1949,33 +1894,33 @@ apply_preset() {
   fi
 
     # Check if preset exists
-    if ! jq -e --arg name "${preset_name}" 'has(${name})' "${PRESETS_FILE}" | grep -q "true"; then
+    if ! jq -e --arg name "$preset_name" 'has($name)' "$PRESETS_FILE" | grep -q "true"; then
         print_error "Preset '${preset_name}' not found"
         exit 1
   fi
 
     # Extract preset data
-    local provider=$(jq -r --arg name "${preset_name}" '.[${name}].vpn_provider' "${PRESETS_FILE}")
-    local port=$(jq -r --arg name "${preset_name}" '.[${name}].port' "${PRESETS_FILE}")
+    local provider=$(jq -r --arg name "$preset_name" '.[$name].vpn_provider' "$PRESETS_FILE")
+    local port=$(jq -r --arg name "$preset_name" '.[$name].port' "$PRESETS_FILE")
 
     # Check for different location types in the preset
-    local location=$(jq -r --arg name "${preset_name}" '.[${name}].server_location // ""' "${PRESETS_FILE}")
-    local server_city=$(jq -r --arg name "${preset_name}" '.[${name}].environment.SERVER_CITIES // ""' "${PRESETS_FILE}")
-    local server_hostname=$(jq -r --arg name "${preset_name}" '.[${name}].environment.SERVER_HOSTNAMES // ""' "${PRESETS_FILE}")
+    local location=$(jq -r --arg name "$preset_name" '.[$name].server_location // ""' "$PRESETS_FILE")
+    local server_city=$(jq -r --arg name "$preset_name" '.[$name].environment.SERVER_CITIES // ""' "$PRESETS_FILE")
+    local server_hostname=$(jq -r --arg name "$preset_name" '.[$name].environment.SERVER_HOSTNAMES // ""' "$PRESETS_FILE")
 
     local location_type="country"
-    local location_value="${location}"
+    local location_value="$location"
 
-    if [[ -n "${server_city}" ]]; then
+    if [[ -n "$server_city" ]]; then
         location_type="city"
-        location_value="${server_city}"
-  elif   [[ -n "${server_hostname}" ]]; then
+        location_value="$server_city"
+  elif   [[ -n "$server_hostname" ]]; then
         location_type="hostname"
-        location_value="${server_hostname}"
+        location_value="$server_hostname"
   fi
 
     # Check if a user profile is specified
-    local profile=$(jq -r --arg name "${preset_name}" '.[${name}].user_profile // ""' "${PRESETS_FILE}")
+    local profile=$(jq -r --arg name "$preset_name" '.[$name].user_profile // ""' "$PRESETS_FILE")
 
     # Full container name - if using numeric naming, keep as is
     local full_container_name="${container_name}"
@@ -1995,7 +1940,7 @@ apply_preset() {
     ensure_network
 
     # Add device tun if configured
-    if jq -e '.use_device_tun // true' "${CONFIG_FILE}" | grep -q "true"; then
+    if jq -e '.use_device_tun // true' "$CONFIG_FILE" | grep -q "true"; then
         device_args="--device /dev/net/tun:/dev/net/tun"
   else
         device_args=""
@@ -2018,27 +1963,24 @@ apply_preset() {
   fi
 
     # Add profile env file if specified
-    if [[ -n "${profile}" && -f "${PROFILES_DIR}/${profile}.env" ]]; then
+    if [[ -n "$profile" && -f "${PROFILES_DIR}/${profile}.env" ]]; then
         env_vars+=("--env-file ${PROFILES_DIR}/${profile}.env")
   fi
 
     # Add location settings
-    if [[ "${location_type}" = "country" && -n "${location_value}" ]]; then
+    if [[ "$location_type" = "country" && -n "$location_value" ]]; then
         env_vars+=("-e SERVER_COUNTRIES=${location_value}")
-  elif   [[ "${location_type}" = "city" && -n "${location_value}" ]]; then
+  elif   [[ "$location_type" = "city" && -n "$location_value" ]]; then
         env_vars+=("-e SERVER_CITIES=${location_value}")
-  elif   [[ "${location_type}" = "hostname" && -n "${location_value}" ]]; then
+  elif   [[ "$location_type" = "hostname" && -n "$location_value" ]]; then
         env_vars+=("-e SERVER_HOSTNAMES=${location_value}")
   fi
 
     # Add all environment variables from the preset
-    local preset_env_vars
-    preset_env_vars=$(jq -r --arg name "${preset_name}" '.[${name}].environment | to_entries[] | "-e \(.key)=\(.value)"' "${PRESETS_FILE}")
+    local preset_env_vars=$(jq -r --arg name "$preset_name" '.[$name].environment | to_entries[] | "-e \(.key)=\(.value)"' "$PRESETS_FILE")
     if [[ -n "${preset_env_vars}" ]]; then
-        # Read preset env vars into array to avoid pipeline subshell issues
-        readarray -t preset_env_array <<<"${preset_env_vars}"
-        for env_var in "${preset_env_array[@]}"; do
-            [[ -n "${env_var}" ]] && env_vars+=("${env_var}")
+        for env_var in ${preset_env_vars}; do
+            env_vars+=("${env}_var")
     done
   fi
 
@@ -2073,13 +2015,13 @@ apply_preset() {
 
 # Create a new preset from existing container
 create_preset() {
-    local container_name="${1}"
-    local preset_name="${2}"
-    local description="${3}"
+    local container_name="$1"
+    local preset_name="$2"
+    local description="$3"
 
     if [[ -z "${container_name}" || -z "${preset_name}" ]]; then
         print_error "Missing container name or preset name."
-        echo "Usage: ${0} create-preset <container_name> <preset_name> [description]"
+        echo "Usage: $0 create-preset <container_name> <preset_name> [description]"
         exit 1
   fi
 
@@ -2114,16 +2056,15 @@ create_preset() {
     location=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location"}}' "${full_container_name}" 2>/dev/null)
 
     # Get all environment variables
-    local env_vars_str
-    env_vars_str=$(docker inspect --format='{{range .Config.Env}}{{.}} {{end}}' "${full_container_name}")
+    local env_vars=$(docker inspect --format='{{range .Config.Env}}{{.}} {{end}}' "${full_container_name}")
 
     # Create a temporary file for the environment
     local env_file="/tmp/preset_env_$$.json"
-    echo "{" >"${env_file}"
+    echo "{" >"${env}_file"
 
     # Add environment variables
     local first=true
-    for env in ${env_vars_str}; do
+    for env in ${env_vars}; do
         # Skip empty values
         if [[ -z "${env}" ]]; then
             continue
@@ -2141,13 +2082,13 @@ create_preset() {
         if [[ "${first}" = "true" ]]; then
             first=false
     else
-            echo "," >>"${env_file}"
+            echo "," >>"${env}_file"
     fi
 
-        echo "  \"${env_key}\": \"${env_value}\"" >>"${env_file}"
+        echo "  \"${env}_key\": \"${env}_value\"" >>"${env}_file"
   done
 
-    echo "}" >>"${env_file}"
+    echo "}" >>"${env}_file"
 
     # Create temp file for the new preset
     local preset_file="/tmp/preset_$$.json"
@@ -2168,7 +2109,6 @@ create_preset() {
        --arg profile "${profile}" \
        --arg location_type "${location_type}"
        # Read env file content safely
-       local env_file_content
        env_file_content="$(cat "${env_file}" || true)"
        jq --arg name "${preset_name}" \
        --arg provider "${provider}" \
@@ -2178,15 +2118,15 @@ create_preset() {
        --arg profile "${profile}" \
        --arg location_type "${location_type}" \
        --argjson env "${env_file_content}" \
-       '.[${name}] = {
-         "name": ${name},
-         "vpn_provider": ${provider},
-         "server_location": ${location},
-         "port": (${port} | tonumber),
-         "user_profile": ${profile},
-         "location_type": ${location_type},
+       '.[$name] = {
+         "name": $name,
+         "vpn_provider": $provider,
+         "server_location": $location,
+         "port": ($port | tonumber),
+         "user_profile": $profile,
+         "location_type": $location_type,
          "environment": ${env},
-         "description": ${desc},
+         "description": $desc,
          "created_at": (now | todate),
          "updated_at": (now | todate)
        }' "${preset_file}" >"${preset_file}.new"
@@ -2220,7 +2160,7 @@ show_version() {
 show_usage() {
     echo "Proxy2VPN v${VERSION} - Advanced VPN Container Manager"
     echo
-    echo "Usage: ${0} <command> [arguments]"
+    echo "Usage: $0 <command> [arguments]"
     echo
     echo "Profile Commands:"
     echo "  create-profile <profile> <username> <password>"
@@ -2249,10 +2189,9 @@ show_usage() {
     echo "Batch Operations:"
     echo "  create-batch [file]      Create multiple containers from a batch file"
     echo "                           (Default: ./vpn_batch.json)"
-    echo "  import-compose <file> [create_containers]"
+    echo "  import-compose <file> [auto_create]"
     echo "                           Import containers from a Docker Compose file"
-    echo "                           If create_containers=true (default), containers will be created"
-    echo "                           If create_containers=false, only parsing will be done, no containers created"
+    echo "                           If auto_create=true, will attempt to copy env.* files to profiles/"
     echo
     echo "Preset Commands:"
     echo "  presets                  List all presets"
@@ -2274,13 +2213,12 @@ show_usage() {
     echo "  cleanup                  Remove all VPN containers"
     echo
     echo "Examples:"
-    echo "  ${0} create-profile myuser john.doe@example.com mysecretpass"
-    echo "  ${0} create-from-profile vpn1 8888 myuser \"New York\""
-    echo "  ${0} test 8888"
-    echo "  ${0} apply-preset protonvpn-us vpn2"
-    echo "  ${0} list-countries protonvpn"
-    echo "  ${0} import-compose ./compose.yml true  # Parse and create containers"
-    echo "  ${0} import-compose ./compose.yml false # Only parse, don't create containers"
+    echo "  $0 create-profile myuser john.doe@example.com mysecretpass"
+    echo "  $0 create-from-profile vpn1 8888 myuser \"New York\""
+    echo "  $0 test 8888"
+    echo "  $0 apply-preset protonvpn-us vpn2"
+    echo "  $0 list-countries protonvpn"
+    echo "  $0 import-compose ./compose.yml true  # Auto-create profiles from env.* files"
     echo
     echo "Notes:"
     echo "  - Container names can be specified with or without the '${PREFIX}' prefix"
@@ -2309,7 +2247,7 @@ main() {
   fi
 
     # Get command
-    cmd="${1}"
+    cmd="$1"
     shift
 
     # Process commands

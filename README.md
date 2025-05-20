@@ -323,25 +323,6 @@ When HTTP proxy authentication is enabled, clients must provide the username and
 
 ## Development
 
-### Automated Tests
-
-This project includes automated tests to ensure the functionality works as expected. The tests are located in the `tests/` directory and can be run with:
-
-```bash
-# Run all tests
-make test
-
-# Or run the test runner directly
-./tests/run_tests.sh
-```
-
-The testing system:
-- Tests for import functionality to ensure no duplicate fields
-- Verifies bug fixes and critical functionality
-- Is automatically run by GitHub Actions on all PRs and commits
-
-To add new tests, create a shell script in the `tests/` directory with the prefix `verify_` (e.g., `verify_my_feature.sh`).
-
 ### Shell Script Linting and Formatting
 
 This project uses ShellCheck for linting and shfmt for formatting to maintain high-quality shell scripts. A GitHub Action automatically runs these checks on all `.sh` files when changes are pushed.
@@ -378,10 +359,7 @@ make fmt-check
 # Format all shell scripts
 make fmt
 
-# Run tests
-make test
-
-# Run all checks, formatting, and tests
+# Run all checks and formatting
 make all
 ```
 

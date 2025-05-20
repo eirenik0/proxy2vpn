@@ -41,7 +41,7 @@ echo
 
 print_info "This will remove proxy2vpn from your system."
 print_info "The following files and directories will be removed:"
-echo 
+echo
 echo "  * ${SCRIPT_PATH}"
 echo "  * ${INSTALL_DIR} (including all settings and profiles)"
 echo
@@ -49,7 +49,7 @@ echo
 # Ask for confirmation
 read -p "Are you sure you want to uninstall proxy2vpn? (y/n) " -n 1 -r
 echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
     print_info "Uninstallation cancelled."
     exit 0
 fi
@@ -57,37 +57,37 @@ fi
 # Check for running containers
 if command -v docker &>/dev/null; then
     running_containers=$(docker ps --filter "label=vpn.type=vpn" --format "{{.Names}}" 2>/dev/null || echo "")
-    if [ -n "$running_containers" ]; then
+    if [[ -n "${running_containers}" ]]; then
         print_error "There are still running VPN containers managed by proxy2vpn:"
-        echo "$running_containers"
+        echo "${running_containers}"
         echo
         print_info "Please stop these containers before uninstalling."
         read -p "Do you want to force uninstall anyway? (y/n) " -n 1 -r
         echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
             print_info "Uninstallation cancelled."
             exit 0
-        fi
-        print_info "Proceeding with forced uninstallation..."
     fi
+        print_info "Proceeding with forced uninstallation..."
+  fi
 fi
 
 # Remove wrapper script
-if [ -f "$SCRIPT_PATH" ]; then
+if [[ -f "${SCRIPT_PATH}" ]]; then
     print_info "Removing wrapper script..."
-    rm -f "$SCRIPT_PATH"
+    rm -f "${SCRIPT_PATH}"
     print_success "Wrapper script removed."
 else
-    print_info "Wrapper script not found at $SCRIPT_PATH. Skipping."
+    print_info "Wrapper script not found at ${SCRIPT_PATH}. Skipping."
 fi
 
 # Remove installation directory
-if [ -d "$INSTALL_DIR" ]; then
+if [[ -d "${INSTALL_DIR}" ]]; then
     print_info "Removing installation directory..."
-    rm -rf "$INSTALL_DIR"
+    rm -rf "${INSTALL_DIR}"
     print_success "Installation directory removed."
 else
-    print_info "Installation directory not found at $INSTALL_DIR. Skipping."
+    print_info "Installation directory not found at ${INSTALL_DIR}. Skipping."
 fi
 
 print_success "proxy2vpn has been successfully uninstalled from your system."
