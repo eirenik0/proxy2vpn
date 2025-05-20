@@ -1152,6 +1152,108 @@ stop_container() {
 }
 
 # ======================================================
+# Bulk Container Operations
+# ======================================================
+
+# Start all VPN containers 
+start_all_containers() {
+    # Get all VPN containers, sorting by name to ensure consistent order
+    local containers=$(docker ps -a --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}" | sort)
+
+    if [ -z "$containers" ]; then
+        print_error "No VPN containers found"
+        return 1
+    fi
+
+    print_header "Starting VPN containers..."
+    echo
+
+    local success_count=0
+    local fail_count=0
+
+    echo "$containers" | while read -r container; do
+        # Skip if container is empty (can happen due to newlines)
+        if [ -z "$container" ]; then
+            continue
+        fi
+        
+        local short_name=$(basename "$container")
+        if [[ "$short_name" == "${PREFIX}_"* ]]; then
+            short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
+        fi
+
+        # Check if already running
+        if docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
+            echo -e "  ${BLUE}⮕${NC} $short_name is already running"
+            continue
+        fi
+
+        echo -n "  Starting $short_name... "
+        if docker start "$container" >/dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC}"
+            ((success_count++))
+        else
+            echo -e "${RED}✗${NC}"
+            ((fail_count++))
+        fi
+    done
+
+    if [ $success_count -gt 0 ]; then
+        print_success "$success_count containers started successfully"
+    fi
+    
+    if [ $fail_count -gt 0 ]; then
+        print_error "$fail_count containers failed to start"
+    fi
+}
+
+# Stop all VPN containers
+stop_all_containers() {
+    # Get all running VPN containers, sorting by name to ensure consistent order
+    local containers=$(docker ps --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}" | sort)
+
+    if [ -z "$containers" ]; then
+        print_error "No running VPN containers found"
+        return 1
+    fi
+
+    print_header "Stopping VPN containers..."
+    echo
+
+    local success_count=0
+    local fail_count=0
+
+    echo "$containers" | while read -r container; do
+        # Skip if container is empty (can happen due to newlines)
+        if [ -z "$container" ]; then
+            continue
+        fi
+        
+        local short_name=$(basename "$container")
+        if [[ "$short_name" == "${PREFIX}_"* ]]; then
+            short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
+        fi
+
+        echo -n "  Stopping $short_name... "
+        if docker stop "$container" >/dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC}"
+            ((success_count++))
+        else
+            echo -e "${RED}✗${NC}"
+            ((fail_count++))
+        fi
+    done
+
+    if [ $success_count -gt 0 ]; then
+        print_success "$success_count containers stopped successfully"
+    fi
+    
+    if [ $fail_count -gt 0 ]; then
+        print_error "$fail_count containers failed to stop"
+    fi
+}
+
+# ======================================================
 # Monitoring and Health Checks
 # ======================================================
 
@@ -2026,6 +2128,10 @@ show_usage() {
     echo "  test [port] [host] [url] Test VPN proxy connection"
     echo "  monitor [interval]       Monitor all containers and auto-restart if needed"
     echo
+    echo "Bulk Operations:"
+    echo "  up                       Start all VPN containers"
+    echo "  down                     Stop all VPN containers"
+    echo
     echo "Examples:"
     echo "  $0 create-profile myuser john.doe@example.com mysecretpass"
     echo "  $0 create-from-profile vpn1 8888 myuser \"New York\""
@@ -2136,6 +2242,14 @@ main() {
             ;;
         monitor)
             monitor_containers "$@"
+            ;;
+            
+        # Bulk operations
+        up)
+            start_all_containers
+            ;;
+        down)
+            stop_all_containers
             ;;
 
         # Help

@@ -13,6 +13,7 @@ This tool simplifies the management of multiple VPN containers, each running the
 - **Connection Health Monitoring**: Auto-restart non-responsive containers
 - **Preset System**: Support for cities and specific server hostnames
 - **Docker Compose Import**: Import your existing Docker Compose setup
+- **Docker Compose-like Commands**: Use `up` and `down` commands to start/stop containers
 - **Granular OpenVPN Settings**: Configure specific server hostnames and cities
 - **Dynamic Server Lists**: Fetch and use server information directly from gluetun
 - **HTTP Proxy Authentication**: Set username and password for HTTP proxy access
@@ -86,6 +87,22 @@ Create multiple containers at once using a JSON batch file:
 ./proxy2vpn.sh create-batch vpn_batch_example.json
 ```
 
+Start or stop all VPN containers at once:
+
+```bash
+# Start all VPN containers
+./proxy2vpn.sh up
+
+# Stop all VPN containers
+./proxy2vpn.sh down
+
+# Start a specific container
+./proxy2vpn.sh start vpn1
+
+# Stop a specific container
+./proxy2vpn.sh stop vpn1
+```
+
 Example batch file with HTTP proxy authentication:
 
 ```json
@@ -150,6 +167,10 @@ You can set HTTP proxy authentication by using the environment variables `HTTPPR
 - `update-server-lists`: Fetches and caches all server information
 - `list-countries <provider>`: Shows available countries for a provider
 - `list-cities <provider> <country_code>`: Shows available cities in a country
+
+### Bulk Operations
+- `up`: Start all VPN containers
+- `down`: Stop all VPN containers
 
 ### Other Commands
 - `test [port] [host] [url]`: Test a proxy connection
