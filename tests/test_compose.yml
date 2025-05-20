@@ -1,0 +1,23 @@
+x-vpn-base-test: &vpn-base-test
+  image: qmcgaw/gluetun
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  env_file:
+    - env.test
+
+services:
+  testvpn1:
+    <<: *vpn-base-test
+    ports:
+      - "0.0.0.0:9999:8888/tcp"
+    environment:
+      - SERVER_CITIES=New York
+      
+  testvpn2:
+    <<: *vpn-base-test
+    ports:
+      - "0.0.0.0:9998:8888/tcp"
+    environment:
+      - SERVER_CITIES=Chicago

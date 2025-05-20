@@ -9,8 +9,8 @@ WHITE  := $(shell tput -Txterm setaf 7)
 RESET  := $(shell tput -Txterm sgr0)
 
 # Shell script files
-SHELL_FILES := $(wildcard *.sh)
-TEST_FILES := $(wildcard tests/*.sh)
+SHELL_FILES := $(wildcard *.sh) $(wildcard scripts/*.sh)
+TEST_FILES := $(wildcard tests/integration_*.sh) $(wildcard tests/setup_test_env.sh) $(wildcard tests/run_integration_tests.sh)
 
 # ShellCheck options
 # SC2034: Unused variables (sometimes variables are for documentation)
@@ -79,12 +79,12 @@ test-prep: ## Prepare test environment
 	@echo "${GREEN}✓ Test environment prepared${RESET}"
 
 test: test-prep ## Run test suite
-	@echo "${YELLOW}Running tests...${RESET}"
-	@./tests/run_tests.sh && echo "${GREEN}✓ All tests passed${RESET}" || { echo "${YELLOW}× Some tests failed${RESET}"; exit 1; }
+	@echo "${YELLOW}Running integration tests...${RESET}"
+	@./tests/run_integration_tests.sh && echo "${GREEN}✓ All tests passed${RESET}" || { echo "${YELLOW}× Some tests failed${RESET}"; exit 1; }
 
 test-lint: lint-tests test-prep ## Lint test scripts and run tests
 	@echo "${YELLOW}Running linted tests...${RESET}"
-	@./tests/run_tests.sh && echo "${GREEN}✓ All linted tests passed${RESET}" || { echo "${YELLOW}× Some tests failed${RESET}"; exit 1; }
+	@./tests/run_integration_tests.sh && echo "${GREEN}✓ All linted tests passed${RESET}" || { echo "${YELLOW}× Some tests failed${RESET}"; exit 1; }
 
 all: lint fmt test ## Run all checks, format code, and tests
 

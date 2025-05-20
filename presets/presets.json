@@ -1,0 +1,143 @@
+{
+  "protonvpn_us": {
+    "name": "protonvpn_us",
+    "vpn_provider": "protonvpn",
+    "server_location": "United States",
+    "port": 8888,
+    "user_profile": "proton",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "protonvpn",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "US"
+    },
+    "description": "ProtonVPN connection to the United States"
+  },
+  "nordvpn_uk": {
+    "name": "nordvpn_uk",
+    "vpn_provider": "nordvpn",
+    "server_location": "United Kingdom",
+    "port": 8889,
+    "user_profile": "nord",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "nordvpn",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "GB"
+    },
+    "description": "NordVPN connection to the United Kingdom"
+  },
+  "surfshark_japan": {
+    "name": "surfshark_japan",
+    "vpn_provider": "surfshark",
+    "server_location": "Japan",
+    "port": 8890,
+    "user_profile": "surfshark",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "surfshark",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "JP"
+    },
+    "description": "Surfshark connection to Japan"
+  },
+  "expressvpn_germany": {
+    "name": "expressvpn_germany",
+    "vpn_provider": "expressvpn",
+    "server_location": "Germany",
+    "port": 8891,
+    "user_profile": "express",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "expressvpn",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "DE"
+    },
+    "description": "ExpressVPN connection to Germany"
+  },
+  "mullvad_sweden": {
+    "name": "mullvad_sweden",
+    "vpn_provider": "mullvad",
+    "server_location": "Sweden",
+    "port": 8892,
+    "user_profile": "mullvad",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "mullvad",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "SE"
+    },
+    "description": "Mullvad connection to Sweden"
+  },
+  "private_internet_access_canada": {
+    "name": "private_internet_access_canada",
+    "vpn_provider": "private internet access",
+    "server_location": "Canada",
+    "port": 8893,
+    "user_profile": "pia",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "private internet access",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "CA"
+    },
+    "description": "PIA connection to Canada"
+  },
+  "cyberghost_france": {
+    "name": "cyberghost_france",
+    "vpn_provider": "cyberghost",
+    "server_location": "France",
+    "port": 8894,
+    "user_profile": "cyberghost",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "cyberghost",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "FR"
+    },
+    "description": "CyberGhost connection to France"
+  },
+  "torguard_australia": {
+    "name": "torguard_australia",
+    "vpn_provider": "torguard",
+    "server_location": "Australia",
+    "port": 8895,
+    "user_profile": "torguard",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "torguard",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "AU"
+    },
+    "description": "TorGuard connection to Australia"
+  },
+  "windscribe_italy": {
+    "name": "windscribe_italy",
+    "vpn_provider": "windscribe",
+    "server_location": "Italy",
+    "port": 8896,
+    "user_profile": "windscribe",
+    "location_type": "country",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "windscribe",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "IT"
+    },
+    "description": "Windscribe connection to Italy"
+  },
+  "protonvpn_new_york": {
+    "name": "protonvpn_new_york",
+    "vpn_provider": "protonvpn",
+    "server_location": "New York",
+    "port": 8897,
+    "user_profile": "proton",
+    "location_type": "city",
+    "environment": {
+      "VPN_SERVICE_PROVIDER": "protonvpn",
+      "HTTPPROXY": "on",
+      "SERVER_COUNTRIES": "US",
+      "SERVER_CITIES": "New York"
+    },
+    "description": "ProtonVPN connection to New York City"
+  }
+}

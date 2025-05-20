@@ -1,0 +1,9 @@
+{
+  "docker_image": "qmcgaw/gluetun:latest",
+  "proxy_port": 8888,
+  "vpn_network": "proxy2vpn_network",
+  "dns_servers": "1.1.1.1,1.0.0.1",
+  "update_check_interval": 86400,
+  "monitor_interval": 300,
+  "default_vpn_provider": "protonvpn"
+}

@@ -19,6 +19,8 @@ jobs:
   shellcheck:
     name: Shellcheck and Format Check
     runs-on: ubuntu-latest
+    # Skip this workflow if the tests workflow is already running on the same commit
+    if: ${{ !contains(github.event.commits[0].message, '[skip lint]') }}
     steps:
       - uses: actions/checkout@v3
       
