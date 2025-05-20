@@ -1155,6 +1155,56 @@ stop_container() {
 # Bulk Container Operations
 # ======================================================
 
+# Clean up all VPN containers
+cleanup_containers() {
+    # Get all VPN containers, sorting by name to ensure consistent order
+    local containers=$(docker ps -a --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}" | sort)
+
+    if [ -z "$containers" ]; then
+        print_error "No VPN containers found to clean up"
+        return 1
+    fi
+
+    print_header "Cleaning up all VPN containers..."
+    echo
+
+    local success_count=0
+    local fail_count=0
+
+    echo "$containers" | while read -r container; do
+        # Skip if container is empty (can happen due to newlines)
+        if [ -z "$container" ]; then
+            continue
+        fi
+        
+        local short_name=$(basename "$container")
+        if [[ "$short_name" == "${PREFIX}_"* ]]; then
+            short_name=$(echo "$short_name" | sed "s/^${PREFIX}_//")
+        fi
+
+        echo -n "  Removing $short_name... "
+        
+        # Make sure container is stopped first
+        docker stop "$container" >/dev/null 2>&1
+        
+        if docker rm "$container" >/dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC}"
+            ((success_count++))
+        else
+            echo -e "${RED}✗${NC}"
+            ((fail_count++))
+        fi
+    done
+
+    if [ $success_count -gt 0 ]; then
+        print_success "$success_count containers removed successfully"
+    fi
+    
+    if [ $fail_count -gt 0 ]; then
+        print_error "$fail_count containers failed to be removed"
+    fi
+}
+
 # Start all VPN containers 
 start_all_containers() {
     # Get all VPN containers, sorting by name to ensure consistent order
@@ -2131,6 +2181,7 @@ show_usage() {
     echo "Bulk Operations:"
     echo "  up                       Start all VPN containers"
     echo "  down                     Stop all VPN containers"
+    echo "  cleanup                  Remove all VPN containers"
     echo
     echo "Examples:"
     echo "  $0 create-profile myuser john.doe@example.com mysecretpass"
@@ -2250,6 +2301,9 @@ main() {
             ;;
         down)
             stop_all_containers
+            ;;
+        cleanup)
+            cleanup_containers
             ;;
 
         # Help

@@ -96,6 +96,9 @@ Start or stop all VPN containers at once:
 # Stop all VPN containers
 ./proxy2vpn.sh down
 
+# Remove all VPN containers 
+./proxy2vpn.sh cleanup
+
 # Start a specific container
 ./proxy2vpn.sh start vpn1
 
@@ -171,6 +174,7 @@ You can set HTTP proxy authentication by using the environment variables `HTTPPR
 ### Bulk Operations
 - `up`: Start all VPN containers
 - `down`: Stop all VPN containers
+- `cleanup`: Remove all VPN containers
 
 ### Other Commands
 - `test [port] [host] [url]`: Test a proxy connection
