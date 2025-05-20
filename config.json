@@ -1,0 +1,8 @@
+{
+    "default_vpn_provider": "protonvpn",
+    "container_naming_convention": "numeric",
+    "default_proxy_port": 8888,
+    "health_check_interval": 60,
+    "auto_restart_containers": true,
+    "use_device_tun": true
+}
