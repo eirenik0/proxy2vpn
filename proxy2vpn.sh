@@ -50,15 +50,17 @@ NC='\033[0m' # No Color
 # ======================================================
 # Include utility files (if available)
 # ======================================================
-if [[ -f "${SCRIPT_DIR}/server_utils.sh" ]]; then
-    source "${SCRIPT_DIR}/server_utils.sh"
+if [[ -f "${SCRIPT_DIR}/scripts/server_utils.sh" ]]; then
+    # shellcheck source=scripts/server_utils.sh
+    source "${SCRIPT_DIR}/scripts/server_utils.sh"
     SERVER_UTILS_LOADED=true
 else
     SERVER_UTILS_LOADED=false
 fi
 
-if [[ -f "${SCRIPT_DIR}/server_display.sh" ]]; then
-    source "${SCRIPT_DIR}/server_display.sh"
+if [[ -f "${SCRIPT_DIR}/scripts/server_display.sh" ]]; then
+    # shellcheck source=scripts/server_display.sh
+    source "${SCRIPT_DIR}/scripts/server_display.sh"
     SERVER_DISPLAY_LOADED=true
 else
     SERVER_DISPLAY_LOADED=false
@@ -192,8 +194,9 @@ ensure_network() {
 fetch_server_list() {
     # Use the server_utils.sh implementation if available
     if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
-        # The function has been loaded from server_utils.sh
-        command -v fetch_server_list >/dev/null 2>&1 && fetch_server_list "$@"
+        # shellcheck source=scripts/server_utils.sh
+        source "${SCRIPT_DIR}/scripts/server_utils.sh"
+        fetch_server_list "$@"
         return $?
     fi
 
@@ -235,7 +238,8 @@ fetch_server_list() {
 list_providers_wrapper() {
     # Use server_display.sh implementation if available
     if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
-        source "${SCRIPT_DIR}/server_display.sh"
+        # shellcheck source=scripts/server_display.sh
+        source "${SCRIPT_DIR}/scripts/server_display.sh"
         list_providers "$@"
         return $?
     fi
@@ -258,7 +262,9 @@ list_providers_wrapper() {
 normalize_provider_name() {
     # Use server_utils.sh implementation if available
     if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
-        command -v normalize_provider_name >/dev/null 2>&1 && normalize_provider_name "$@"
+        # shellcheck source=scripts/server_utils.sh
+        source "${SCRIPT_DIR}/scripts/server_utils.sh"
+        normalize_provider_name "$@"
         return $?
     fi
 
@@ -289,7 +295,9 @@ normalize_provider_name() {
 provider_exists() {
     # Use server_utils.sh implementation if available
     if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
-        command -v provider_exists >/dev/null 2>&1 && provider_exists "$@"
+        # shellcheck source=scripts/server_utils.sh
+        source "${SCRIPT_DIR}/scripts/server_utils.sh"
+        provider_exists "$@"
         return $?
     fi
 
@@ -314,7 +322,8 @@ provider_exists() {
 list_countries_wrapper() {
     # Use server_display.sh implementation if available
     if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
-        source "${SCRIPT_DIR}/server_display.sh"
+        # shellcheck source=scripts/server_display.sh
+        source "${SCRIPT_DIR}/scripts/server_display.sh"
         list_countries "$@"
         return $?
     fi
@@ -363,7 +372,8 @@ list_countries_wrapper() {
 list_cities_wrapper() {
     # Use server_display.sh implementation if available
     if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
-        source "${SCRIPT_DIR}/server_display.sh"
+        # shellcheck source=scripts/server_display.sh
+        source "${SCRIPT_DIR}/scripts/server_display.sh"
         list_cities "$@"
         return $?
     fi
@@ -429,7 +439,8 @@ list_servers_wrapper() {
     # Use server_display.sh implementation if available
     if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
         print_info "Using server_display.sh implementation"
-        source "${SCRIPT_DIR}/server_display.sh"
+        # shellcheck source=scripts/server_display.sh
+        source "${SCRIPT_DIR}/scripts/server_display.sh"
         list_servers "$@"
         return $?
     fi
@@ -518,7 +529,8 @@ update_server_list_wrapper() {
     # Use server_utils.sh implementation if available
     if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
         # Call the external function directly from the source file
-        source "${SCRIPT_DIR}/server_utils.sh"
+        # shellcheck source=scripts/server_utils.sh
+        source "${SCRIPT_DIR}/scripts/server_utils.sh"
         update_server_list "$@"
         return $?
     fi

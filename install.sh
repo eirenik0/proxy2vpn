@@ -112,6 +112,7 @@ mkdir -p "${USER_BIN}"
 mkdir -p "${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}/profiles"
 mkdir -p "${INSTALL_DIR}/presets"
+mkdir -p "${INSTALL_DIR}/scripts"
 
 # Download main script
 print_info "Downloading proxy2vpn script..."
@@ -132,6 +133,13 @@ curl -s "${REPO_RAW_URL}/config.json" >"${INSTALL_DIR}/config.json"
 # Download presets
 print_info "Setting up presets..."
 curl -s "${REPO_RAW_URL}/presets/presets.json" >"${INSTALL_DIR}/presets/presets.json"
+
+# Download utility scripts
+print_info "Downloading utility scripts..."
+curl -s "${REPO_RAW_URL}/scripts/server_utils.sh" >"${INSTALL_DIR}/scripts/server_utils.sh"
+curl -s "${REPO_RAW_URL}/scripts/server_display.sh" >"${INSTALL_DIR}/scripts/server_display.sh"
+chmod +x "${INSTALL_DIR}/scripts/server_utils.sh"
+chmod +x "${INSTALL_DIR}/scripts/server_display.sh"
 
 # Create profiles README
 cat >"${INSTALL_DIR}/profiles/README.md"  <<EOF
@@ -214,6 +222,12 @@ verify_installation() {
     # Check if profiles folder exists
     if [[ ! -d "${INSTALL_DIR}/profiles" ]]; then
         print_error "Profiles directory not found at ${INSTALL_DIR}/profiles"
+        issues=$((issues + 1))
+  fi
+  
+    # Check if scripts folder exists
+    if [[ ! -d "${INSTALL_DIR}/scripts" ]]; then
+        print_error "Scripts directory not found at ${INSTALL_DIR}/scripts"
         issues=$((issues + 1))
   fi
 

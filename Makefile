@@ -38,12 +38,12 @@ check: ## Verify that dependencies are installed
 
 lint-main: check ## Lint main shell scripts with shellcheck
 	@echo "${YELLOW}Running shellcheck on main scripts...${RESET}"
-	@shellcheck --shell=bash --enable=all --exclude=$(SHELLCHECK_EXCLUDES) $(SHELL_FILES)
+	@shellcheck --shell=bash --enable=all --exclude=$(SHELLCHECK_EXCLUDES) -x $(SHELL_FILES)
 	@echo "${GREEN}✓ Main scripts shellcheck passed${RESET}"
 
 lint-tests: check ## Lint test scripts with shellcheck
 	@echo "${YELLOW}Running shellcheck on test scripts...${RESET}"
-	@shellcheck --shell=bash --enable=all --exclude=$(TEST_SHELLCHECK_EXCLUDES) $(TEST_FILES)
+	@shellcheck --shell=bash --enable=all --exclude=$(TEST_SHELLCHECK_EXCLUDES) -x $(TEST_FILES)
 	@echo "${GREEN}✓ Test scripts shellcheck passed${RESET}"
 
 lint: lint-main lint-tests ## Lint all shell scripts with shellcheck
