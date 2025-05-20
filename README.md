@@ -17,9 +17,35 @@ This tool simplifies the management of multiple VPN containers, each running the
 
 ## Installation
 
+### Option 1: Quick Install (Recommended)
+
+Install directly using curl:
+
+```bash
+curl -s https://raw.githubusercontent.com/eirenik0/proxy2vpn/main/install.sh | bash
+```
+
+This will:
+- Download the script to `~/.proxy2vpn/`
+- Create a wrapper in `~/.local/bin/proxy2vpn`
+- Set up the required directory structure
+- Add the bin directory to your PATH (if needed)
+
+### Uninstalling
+
+To remove proxy2vpn from your system:
+
+```bash
+curl -s https://raw.githubusercontent.com/eirenik0/proxy2vpn/main/uninstall.sh | bash
+```
+
+This will remove the proxy2vpn script and all configuration files but will leave any Docker containers you've created intact.
+
+### Option 2: Manual Installation
+
 1. Clone the repository:
    ```bash
-   git clone https://yourrepo/proxy2vpn.git
+   git clone https://eirenik0/proxy2vpn.git
    cd proxy2vpn
    ```
 
