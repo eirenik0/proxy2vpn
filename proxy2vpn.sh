@@ -58,6 +58,10 @@ print_info() {
     echo -e "${YELLOW}$1${NC}"
 }
 
+print_warning() {
+    echo -e "${YELLOW}Warning: $1${NC}"
+}
+
 print_header() {
     echo -e "${BLUE}$1${NC}"
 }
@@ -1358,13 +1362,80 @@ create_batch() {
     print_info "Use '$0 list' to see all containers"
 }
 
+# Check and prepare profiles from Docker Compose file
+check_compose_profiles() {
+    local compose_file="$1"
+    local auto_create="${2:-false}"
+    
+    print_header "Checking profiles for Docker Compose file: $compose_file"
+    echo
+
+    # First, extract all template names that reference env files
+    local templates=$(grep -E "x-vpn-base-[a-zA-Z0-9_-]+:" "$compose_file" | grep -o "x-vpn-base-[a-zA-Z0-9_-]\+" | sed -E 's/x-vpn-base-//')
+    
+    if [ -z "$templates" ]; then
+        print_info "No VPN base templates found in compose file"
+        return 0
+    fi
+    
+    print_info "Found base templates: $templates"
+    
+    # Check if corresponding profile files exist
+    local missing_profiles=""
+    for template in $templates; do
+        if [ ! -f "${PROFILES_DIR}/${template}.env" ]; then
+            print_warning "Missing profile for template ${template}"
+            missing_profiles="$missing_profiles $template"
+        else
+            print_success "Found profile for template ${template}: ${PROFILES_DIR}/${template}.env"
+        fi
+    done
+    
+    # If auto_create is set to true, create symlinks from env files to profile directory
+    if [ "$auto_create" = "true" ] && [ -n "$missing_profiles" ]; then
+        print_info "Auto-creating missing profiles from env files in compose file directory..."
+        
+        for template in $missing_profiles; do
+            local env_file="$(dirname "$compose_file")/env.${template}"
+            
+            if [ -f "$env_file" ]; then
+                print_info "Found env file for template ${template}: ${env_file}"
+                
+                # Create profile from env file
+                cp "$env_file" "${PROFILES_DIR}/${template}.env"
+                print_success "Created profile ${template}.env from ${env_file}"
+            else
+                print_error "Could not find env file for template ${template}: ${env_file}"
+                print_info "You may need to create the profile manually: $0 create-profile ${template} your_username your_password"
+            fi
+        done
+    elif [ -n "$missing_profiles" ]; then
+        print_warning "Some templates in compose file do not have matching profiles. Create them first:"
+        for template in $missing_profiles; do
+            echo "$0 create-profile ${template} your_username your_password"
+        done
+        
+        # Ask user if they want to continue anyway
+        read -p "Do you want to continue with import anyway? Missing profiles will be skipped. (y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Import cancelled. Create the missing profiles first."
+            exit 0
+        fi
+    fi
+    
+    return 0
+}
+
 # Import containers from Docker Compose file
 import_from_compose() {
     local compose_file="$1"
+    local auto_create="${2:-false}"  # Add parameter to auto-create profiles
 
     if [ -z "$compose_file" ]; then
         print_error "Missing compose file path."
-        echo "Usage: $0 import-compose <compose_file_path>"
+        echo "Usage: $0 import-compose <compose_file_path> [auto_create_profiles]"
+        echo "Example: $0 import-compose ./compose.yml true  # Auto-create profiles from env files"
         exit 1
     fi
 
@@ -1375,59 +1446,217 @@ import_from_compose() {
 
     print_header "Importing VPN containers from Docker Compose file: $compose_file"
     echo
+    
+    # Check for needed profiles before importing
+    check_compose_profiles "$compose_file" "$auto_create"
 
     # Create a temporary batch file
     local batch_file="/tmp/vpn_batch_$$.json"
     echo "{" > "$batch_file"
 
-    # Simple parsing of docker-compose file for VPN services
+    # Find services section in the compose file
+    local services_start=$(grep -n "^[[:space:]]*services:" "$compose_file" | cut -d':' -f1)
+    
+    if [ -z "$services_start" ]; then
+        print_error "No 'services:' section found in the compose file"
+        exit 1
+    fi
+    
+    # Extract service names from within the services section
+    # Only include service names like "vpnN" where N is a number
+    local services=$(awk "NR > $services_start" "$compose_file" | grep -E "^[[:space:]]*vpn[0-9]+:" | sed 's/[[:space:]]*\([a-zA-Z0-9_-]*\):.*/\1/')
+    
+    # Look for VPN services in the compose file using the gluetun image
     local first=true
-    grep -A 20 "^  vpn[0-9]*:" "$compose_file" | while read -r line; do
-        if [[ "$line" =~ ^[[:space:]]*vpn([0-9]+): ]]; then
-            # New container found
-            if [ "$first" = "true" ]; then
-                first=false
+    for service in $services; do
+        # Check if this service uses gluetun image
+        local is_gluetun=$(grep -A 20 "^[[:space:]]*${service}:" "$compose_file" | grep -E "image:.*qmcgaw/gluetun|image:.*gluetun")
+        
+        # If not using gluetun directly, check if it extends a base that might use gluetun
+        if [ -z "$is_gluetun" ]; then
+            local extends=$(grep -A 2 "^[[:space:]]*${service}:" "$compose_file" | grep -E "<<: \*vpn-base|extends:|<<: \*vpn-base-[a-zA-Z0-9_-]+")
+            if [ -z "$extends" ]; then
+                # Not a VPN container, skip
+                continue
+            fi
+        fi
+        
+        print_info "Found VPN service: $service"
+        
+        # Add service to batch file
+        if [ "$first" = "true" ]; then
+            first=false
+        else
+            echo "  }," >> "$batch_file"
+        fi
+        
+        # Use the service name as the container name
+        local container_name="$service"
+        echo "  \"$container_name\": {" >> "$batch_file"
+        echo "    \"container_name\": \"$container_name\"," >> "$batch_file"
+        
+        # Extract port from the service block (look for port mapping)
+        # First, extract the entire service definition
+        local service_block=$(awk "/^[[:space:]]*${service}:/{flag=1;next} /^[[:space:]]*[a-zA-Z0-9_-]+:/{flag=0} flag" "$compose_file")
+        
+        # Extract the ports section
+        local port_lines=$(echo "$service_block" | grep -A 10 "ports:")
+        
+        # Parse Docker Compose style port mappings
+        # Try different formats: "host:container", "0.0.0.0:host:container", or "host:container/protocol"
+        local port=""
+        
+        # Print the entire service block for debugging
+        print_debug "Service block for $service: $service_block"
+        
+        # Extract port directly from compose-style port mappings
+        if [[ "$service_block" =~ ports:[[:space:]]*- ]]; then
+            # First, try direct regex extraction for the 0.0.0.0:PORT:8888 format
+            # This format is used in your compose.yml
+            if [[ "$service_block" =~ [0-9\.]+:([0-9]+):[0-9]+ ]]; then
+                port="${BASH_REMATCH[1]}"
+                print_info "Extracted port from Docker Compose style port mapping for $service: $port"
+            fi
+            
+            # If that didn't work, try a more general approach
+            if [ -z "$port" ]; then
+                # Split the ports section for better parsing
+                local port_entries=$(echo "$service_block" | grep -A 5 "ports:" | grep -E -- "- ")
+                print_debug "Port entries: $port_entries"
+                
+                # Extract the first port number that seems to be a host port (8888:8888, etc.)
+                if [[ "$port_entries" =~ ([0-9]+):[0-9]+ ]]; then
+                    port="${BASH_REMATCH[1]}"
+                    print_info "Extracted port from Docker Compose port entries for $service: $port"
+                fi
+            fi
+        fi
+        
+        if [ -z "$port" ]; then
+            # If no port found in direct mapping, look for environment variables with port
+            port=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "HTTPPROXY_PORT|HTTP_PROXY_PORT" | grep -o "[0-9]\+" | head -1)
+            
+            # Check if there's a numeric suffix in the service name (e.g., vpn1, vpn2, etc.)
+            if [ -z "$port" ] && [[ "$service" =~ vpn([0-9]+) ]]; then
+                # Get the service number and add it to a base port
+                local service_num="${BASH_REMATCH[1]}"
+                local base_port=8887
+                port=$((base_port + service_num))
+                print_info "Using computed port for $service: $port (base_port + $service_num)"
+            fi
+            
+            # If still no port, use default from config
+            if [ -z "$port" ]; then
+                port=$(jq -r '.default_proxy_port // 8888' "$CONFIG_FILE")
+                print_warning "No port found for $service, using default: $port"
+            fi
+        fi
+        
+        echo "    \"port\": $port," >> "$batch_file"
+        
+        # Try to extract VPN provider
+        local provider=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "VPN_SERVICE_PROVIDER|vpn_provider" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
+        if [ -z "$provider" ]; then
+            provider="$DEFAULT_VPN_PROVIDER"
+            print_info "No provider specified for $service, using default: $provider"
+        fi
+        echo "    \"vpn_provider\": \"$provider\"," >> "$batch_file"
+        
+        # Look for user profiles
+        # First check for direct profile references in extends/template
+        for profile in $(ls -1 "$PROFILES_DIR" | sed 's/\.env$//'); do
+            if grep -A 5 "^[[:space:]]*${service}:" "$compose_file" | grep -q "\*vpn-base-${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >> "$batch_file"
+                break
+            fi
+        done
+        
+        # Also check for env_file references to map them to profiles
+        for profile in $(ls -1 "$PROFILES_DIR" | sed 's/\.env$//'); do
+            # Check direct env file references
+            if grep -A 10 "^[[:space:]]*${service}:" "$compose_file" | grep -q "env_file:.*env\.${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >> "$batch_file"
+                break
+            elif grep -A 10 "^[[:space:]]*${service}:" "$compose_file" | grep -q "env_file:.*- env\.${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >> "$batch_file"
+                break
+            elif grep -A 20 -B 10 "<<: \\*vpn-base-${profile}" "$compose_file" | grep -q "env_file:.*env\.${profile}"; then
+                echo "    \"user_profile\": \"$profile\"," >> "$batch_file"
+                break
+            fi
+        done
+        
+        # Check for references to a base template that references an env file
+        local base_template=""
+        base_template=$(grep -A 2 "^[[:space:]]*${service}:" "$compose_file" | grep -E "<<: \*vpn-base-[a-zA-Z0-9_-]+" | sed -E 's/.*<<: \*vpn-base-([a-zA-Z0-9_-]+).*/\1/')
+        
+        if [ -n "$base_template" ]; then
+            print_info "Service $service uses template: vpn-base-$base_template"
+            
+            # Check if we have a matching profile for this template
+            if [ -f "${PROFILES_DIR}/${base_template}.env" ]; then
+                echo "    \"user_profile\": \"${base_template}\"," >> "$batch_file"
+                print_info "Found matching profile file: ${base_template}.env"
             else
-                echo "  }," >> "$batch_file"
+                print_warning "Profile file for base template '${base_template}' not found in profiles directory."
+                print_info "You may need to create the profile first with: $0 create-profile ${base_template} your_username your_password"
             fi
-
-            local container_id="${BASH_REMATCH[1]}"
-            local container_name="vpn${container_id}"
-            echo "  \"$container_name\": {" >> "$batch_file"
-            echo "    \"container_name\": \"$container_name\"," >> "$batch_file"
-
-            # Extract port from the service block
-            local port=$(grep -A 5 "^  $container_name:" "$compose_file" | grep -o "[0-9]\+:[0-9]\+" | cut -d':' -f1)
-            echo "    \"port\": $port," >> "$batch_file"
-
-            # See which profile is used
-            if grep -A 1 "^  $container_name:" "$compose_file" | grep -q "<<: \*vpn-base-serg"; then
-                echo "    \"user_profile\": \"serg\"," >> "$batch_file"
-            elif grep -A 1 "^  $container_name:" "$compose_file" | grep -q "<<: \*vpn-base-vlad"; then
-                echo "    \"user_profile\": \"vlad\"," >> "$batch_file"
-            elif grep -A 1 "^  $container_name:" "$compose_file" | grep -q "<<: \*vpn-base-andr"; then
-                echo "    \"user_profile\": \"andr\"," >> "$batch_file"
+        fi
+        
+        # If no profile match found, look for username/password directly
+        if ! grep -q "user_profile" "$batch_file"; then
+            local username=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "OPENVPN_USER|VPN_USER" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
+            local password=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "OPENVPN_PASSWORD|VPN_PASSWORD" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/')
+            
+            if [ -n "$username" ]; then
+                echo "    \"username\": \"$username\"," >> "$batch_file"
             fi
-
-            # Extract SERVER_CITIES or SERVER_HOSTNAMES
-            local server_city=$(grep -A 10 "^  $container_name:" "$compose_file" | grep "SERVER_CITIES" | cut -d'=' -f2- | tr -d ' ' | tr -d '"' | tr -d "'")
-            local server_hostname=$(grep -A 10 "^  $container_name:" "$compose_file" | grep "SERVER_HOSTNAMES" | cut -d'=' -f2- | tr -d ' ' | tr -d '"' | tr -d "'")
-
-            if [ -n "$server_city" ]; then
-                echo "    \"server_city\": \"$server_city\"," >> "$batch_file"
+            
+            if [ -n "$password" ]; then
+                echo "    \"password\": \"$password\"," >> "$batch_file"
             fi
-
+        fi
+        
+        # Extract server location information - try multiple common env var names
+        # First check for cities
+        local server_city=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "SERVER_CITIES|VPN_CITY|CITY" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+        
+        if [ -n "$server_city" ]; then
+            echo "    \"server_city\": \"$server_city\"," >> "$batch_file"
+        else
+            # Try hostnames
+            local server_hostname=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "SERVER_HOSTNAMES|VPN_HOSTNAME|HOSTNAME" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+            
             if [ -n "$server_hostname" ]; then
                 echo "    \"server_hostname\": \"$server_hostname\"," >> "$batch_file"
+            else
+                # Try countries/regions
+                local server_country=$(grep -A 50 "^[[:space:]]*${service}:" "$compose_file" | grep -E "SERVER_COUNTRIES|COUNTRY|VPN_REGION|REGION" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+                
+                if [ -n "$server_country" ]; then
+                    echo "    \"server_country\": \"$server_country\"," >> "$batch_file"
+                fi
             fi
-
-            echo "    \"vpn_provider\": \"protonvpn\"" >> "$batch_file"
         fi
+        
+        # Remove trailing comma from the last entry
+        sed -i -e '$ s/,$//' "$batch_file"
     done
+    
+    if [ "$first" = "true" ]; then
+        # No VPN services found
+        print_error "No VPN services found in the Docker Compose file"
+        rm -f "$batch_file"
+        exit 1
+    fi
 
     # Close the last container and the JSON object
     echo "  }" >> "$batch_file"
     echo "}" >> "$batch_file"
+    
+    # Print debug information about what we found
+    print_info "Found $(jq -r 'keys | length' "$batch_file") VPN services to import"
+    print_info "Services: $(jq -r 'keys | join(", ")' "$batch_file")"
 
     # Create the containers from the batch file
     create_batch "$batch_file"
@@ -1782,7 +2011,9 @@ show_usage() {
     echo "Batch Operations:"
     echo "  create-batch [file]      Create multiple containers from a batch file"
     echo "                           (Default: ./vpn_batch.json)"
-    echo "  import-compose <file>    Import containers from a Docker Compose file"
+    echo "  import-compose <file> [auto_create]"
+    echo "                           Import containers from a Docker Compose file"
+    echo "                           If auto_create=true, will attempt to copy env.* files to profiles/"
     echo
     echo "Preset Commands:"
     echo "  presets                  List all presets"
@@ -1801,6 +2032,7 @@ show_usage() {
     echo "  $0 test 8888"
     echo "  $0 apply-preset protonvpn-us vpn2"
     echo "  $0 list-countries protonvpn"
+    echo "  $0 import-compose ./compose.yml true  # Auto-create profiles from env.* files"
     echo
     echo "Notes:"
     echo "  - Container names can be specified with or without the '$PREFIX' prefix"
