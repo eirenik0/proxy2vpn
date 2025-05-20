@@ -11,7 +11,7 @@
 # License: MIT
 
 # Script version
-VERSION="1.0.0"
+VERSION="0.1.1"
 
 set -e
 
@@ -396,7 +396,7 @@ validate_city() {
   fi
 
     # Check if the city exists in the provider's list for the specified country
-    if jq -e --arg country "${country_code}" --arg city "${city}" '.[] | select(.country_code == ${country} or .country == ${country}) | .cities | index(${city})' "${city_file}" >/dev/null 2>&1; then
+    if jq -e --arg country "${country_code}" --arg city "${city}" '.[] | select(.country_code == $country or .country == $country) | .cities | index($city)' "${city_file}" >/dev/null 2>&1; then
         return 0
   else
         print_error "City '${city}' not found in country '${country_code}' for provider '${provider}'"
@@ -595,7 +595,7 @@ create_vpn_from_profile() {
     local profile_name="${3}"
     local server_city="${4}"
     local server_hostname="${5}"
-    local provider="${6:-${DEFAULT_VPN_PROVIDE}R}"
+    local provider="${6:-protonvpn}"
 
     if [[ -z "${container_name}" || -z "${port}" || -z "${profile_name}" ]]; then
         print_error "Missing required parameters."
@@ -624,13 +624,22 @@ create_vpn_from_profile() {
         exit 1
   fi
 
-    # Create environment variable array
-    env_vars=(
-        "-e VPN_SERVICE_PROVIDER=${provider}"
-        "-e HTTPPROXY=on"
-        "-e HTTPPROXY_LISTENING_ADDRESS=:8888"
-        "--env-file ${profile_file}"
-  )
+    # Create a temporary env file from the profile and add additional settings
+    local temp_env_file
+    temp_env_file=$(mktemp)
+
+    # First add our custom variables - we need to ensure these take precedence
+    echo "VPN_SERVICE_PROVIDER=${provider}" > "${temp_env_file}"
+    echo "HTTPPROXY=on" >> "${temp_env_file}"
+    echo "HTTPPROXY_LISTENING_ADDRESS=:8888" >> "${temp_env_file}"
+
+    # Copy the profile file content if it exists
+    if [[ -f "${profile_file}" ]]; then
+        cat "${profile_file}" >> "${temp_env_file}"
+    fi
+
+    # We'll use --env-file instead of individual -e flags
+    env_vars=("--env-file" "${temp_env_file}")
 
     # Add optional location parameters
     if [[ -n "${server_city}" ]]; then
@@ -644,19 +653,30 @@ create_vpn_from_profile() {
             # Get country for the city
             local country_code=""
             if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                country_code=$(jq -r --arg city "${server_city}" '.[] | select(.cities | index(${city}) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                country_code=$(jq -r --arg city "${server_city}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
       fi
 
-            if [[ -n "${country_code}" ]]; then
-                env_vars+=("-e SERVER_COUNTRIES=${country_code}")
-      fi
+            # For ProtonVPN US cities, we need to set the country to "United States"
+            # regardless of whether we found a country code or not since most city detection
+            # doesn't properly set the country
+            if [[ "${provider}" == "protonvpn" && ( "${server_city}" == "Salt Lake City" || "${server_city}" == "New York" || "${server_city}" == "Chicago" || "${server_city}" == "Dallas" || "${server_city}" == "Denver" || "${server_city}" == "Los Angeles" || "${server_city}" == "Miami" || "${server_city}" == "Phoenix" || "${server_city}" == "San Jose" || "${server_city}" == "Seattle" || "${server_city}" == "Washington" || "${server_city}" == "Boston" || "${server_city}" == "Ashburn" || "${server_city}" == "Secaucus" || "${server_city}" == "Atlanta" ) ]]; then
+                # Use "United States" for ProtonVPN US cities
+                echo "SERVER_COUNTRIES=United States" >> "${temp_env_file}"
+                print_info "Setting country to 'United States' for US city: ${server_city}"
+            elif [[ -n "${country_code}" ]]; then
+                echo "SERVER_COUNTRIES=${country_code}" >> "${temp_env_file}"
+                print_info "Using country code from city lookup: ${country_code}"
+            else
+                print_warning "No country code found for city: ${server_city}. This might cause connection issues."
+            fi
     fi
 
-        env_vars+=("-e SERVER_CITIES=${server_city}")
+        # Format city name properly - maintain spaces
+        echo "SERVER_CITIES=${server_city}" >> "${temp_env_file}"
         location_type="city"
         location_value="${server_city}"
   elif   [[ -n "${server_hostname}" ]]; then
-        env_vars+=("-e SERVER_HOSTNAMES=${server_hostname}")
+        echo "SERVER_HOSTNAMES=${server_hostname}" >> "${temp_env_file}"
         location_type="hostname"
         location_value="${server_hostname}"
   fi
@@ -674,24 +694,46 @@ create_vpn_from_profile() {
     print_info "Creating VPN container ${container_name} on port ${port}..."
 
     # Create the container
-    docker run -d \
-        --name "${full_container_name}" \
-        --restart unless-stopped \
-        -p "${port}:8888" \
-        --cap-add=NET_ADMIN \
-        "${device_args}" \
-        --network "${PREFIX}_network" \
-        --label "${PREFIX}.type=vpn" \
-        --label "${PREFIX}.port=${port}" \
-        --label "${PREFIX}.internal_port=8888" \
-        --label "${PREFIX}.provider=${provider}" \
-        --label "${PREFIX}.profile=${profile_name}" \
-        --label "${PREFIX}.location_type=${location_type}" \
-        --label "${PREFIX}.location=${location_value}" \
-        "${env_vars[@]}" \
-        qmcgaw/gluetun:latest
+    if [[ -n "${device_args}" ]]; then
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --device /dev/net/tun:/dev/net/tun \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.profile=${profile_name}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            --label "${PREFIX}.location=${location_value}" \
+            "${env_vars[@]}" \
+            qmcgaw/gluetun:latest
+    else
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.profile=${profile_name}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            --label "${PREFIX}.location=${location_value}" \
+            "${env_vars[@]}" \
+            qmcgaw/gluetun:latest
+    fi
 
     local exit_code=$?
+
+    # Clean up temp file
+    rm -f "${temp_env_file}"
+
     if [[ ${exit_code} -eq 0 ]]; then
         print_success "VPN container ${container_name} created successfully on port ${port}"
         print_info "To test the connection: curl -x localhost:${port} https://ifconfig.me"
@@ -731,6 +773,7 @@ create_vpn() {
   fi
 
     # Create environment variable array
+    # Ensure VPN provider is set first in environment to take precedence
     env_vars=(
         "-e VPN_SERVICE_PROVIDER=${provider}"
         "-e HTTPPROXY=on"
@@ -765,12 +808,12 @@ create_vpn() {
 
                 # See if any cities match
                 if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                    if jq -e --arg city "${location}" '.[] | select(.cities | index(${city}) >= 0)' "${CACHE_DIR}/${provider}_cities.json" >/dev/null 2>&1; then
+                    if jq -e --arg city "${location}" '.[] | select(.cities | index($city) >= 0)' "${CACHE_DIR}/${provider}_cities.json" >/dev/null 2>&1; then
                         env_vars+=("-e SERVER_CITIES=${location}")
                         location_type="city"
 
                         # Also try to find which country this city belongs to
-                        local country_code=$(jq -r --arg city "${location}" '.[] | select(.cities | index(${city}) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                        local country_code=$(jq -r --arg city "${location}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
                         if [[ -n "${country_code}" ]]; then
                             env_vars+=("-e SERVER_COUNTRIES=${country_code}")
             fi
@@ -814,21 +857,74 @@ create_vpn() {
     print_info "Creating VPN container ${name} on port ${port}..."
 
     # Create the container
-    docker run -d \
-        --name "${full_container_name}" \
-        --restart unless-stopped \
-        -p "${port}:8888" \
-        --cap-add=NET_ADMIN \
-        "${device_args}" \
-        --network "${PREFIX}_network" \
-        --label "${PREFIX}.type=vpn" \
-        --label "${PREFIX}.port=${port}" \
-        --label "${PREFIX}.internal_port=8888" \
-        --label "${PREFIX}.provider=${provider}" \
-        --label "${PREFIX}.location=${location}" \
-        --label "${PREFIX}.location_type=${location_type}" \
-        "${env_vars[@]}" \
-        qmcgaw/gluetun:latest
+    if [[ -n "${device_args}" ]]; then
+        # Start with an empty list of environment variables
+        final_env_vars=()
+
+        # Add our custom environment variables first
+        for env_var in "${env_vars[@]}"; do
+            final_env_vars+=("${env_var}")
+        done
+
+        # Explicitly add OpenVPN credentials if found
+        if [[ "${found_openvpn_user}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_USER=${openvpn_user}")
+        fi
+
+        if [[ "${found_openvpn_password}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_PASSWORD=${openvpn_password}")
+        fi
+
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --device /dev/net/tun:/dev/net/tun \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.location=${location}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            "${final_env_vars[@]}" \
+            -e VPN_SERVICE_PROVIDER="${provider}" \
+            qmcgaw/gluetun:latest
+    else
+        # Start with an empty list of environment variables
+        final_env_vars=()
+
+        # Add our custom environment variables first
+        for env_var in "${env_vars[@]}"; do
+            final_env_vars+=("${env_var}")
+        done
+
+        # Explicitly add OpenVPN credentials if found
+        if [[ "${found_openvpn_user}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_USER=${openvpn_user}")
+        fi
+
+        if [[ "${found_openvpn_password}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_PASSWORD=${openvpn_password}")
+        fi
+
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.location=${location}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            "${final_env_vars[@]}" \
+            -e VPN_SERVICE_PROVIDER="${provider}" \
+            qmcgaw/gluetun:latest
+    fi
 
     local exit_code=$?
     if [[ ${exit_code} -eq 0 ]]; then
@@ -1038,7 +1134,7 @@ update_container() {
 
             # Try to find which country this city belongs to
             if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                local country_code=$(jq -r --arg city "${value}" '.[] | select(.cities | index(${city}) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                local country_code=$(jq -r --arg city "${value}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
 
                 if [[ -n "${country_code}" ]]; then
                     # Also update the country if we found a match
@@ -1071,22 +1167,58 @@ update_container() {
     docker rm "${full_container_name}" >/dev/null
 
     # Create a new container with the updated configuration
-    docker run -d \
-        --name "${full_container_name}" \
-        --restart unless-stopped \
-        -p "${port}:8888" \
-        --cap-add=NET_ADMIN \
-        "${device_args}" \
-        --network "${PREFIX}_network" \
-        --label "${PREFIX}.type=vpn" \
-        --label "${PREFIX}.port=${port}" \
-        --label "${PREFIX}.internal_port=8888" \
-        --label "${PREFIX}.provider=${provider}" \
-        --label "${PREFIX}.profile=${profile}" \
-        --label "${PREFIX}.location_type=${location_type}" \
-        --label "${PREFIX}.location=${location}" \
-        "${new_env_vars[@]}" \
-        qmcgaw/gluetun:latest
+    if [[ -n "${device_args}" ]]; then
+        # Start with an empty list of environment variables
+        final_env_vars=()
+
+        # Add our custom environment variables first
+        for env_var in "${new_env_vars[@]}"; do
+            final_env_vars+=("${env_var}")
+        done
+
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --device /dev/net/tun:/dev/net/tun \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.profile=${profile}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            --label "${PREFIX}.location=${location}" \
+            "${final_env_vars[@]}" \
+            -e VPN_SERVICE_PROVIDER="${provider}" \
+            qmcgaw/gluetun:latest
+    else
+        # Start with an empty list of environment variables
+        final_env_vars=()
+
+        # Add our custom environment variables first
+        for env_var in "${new_env_vars[@]}"; do
+            final_env_vars+=("${env_var}")
+        done
+
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.profile=${profile}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            --label "${PREFIX}.location=${location}" \
+            "${final_env_vars[@]}" \
+            -e VPN_SERVICE_PROVIDER="${provider}" \
+            qmcgaw/gluetun:latest
+    fi
 
     print_success "Container ${name} updated successfully"
     print_info "Note: The container has been recreated with the new settings"
@@ -1178,7 +1310,7 @@ cleanup_containers() {
     local success_count=0
     local fail_count=0
     local container_array=()
-    
+
     # Store containers in an array instead of piping to while loop
     while read -r container; do
         [[ -n "${container}" ]] && container_array+=("${container}")
@@ -1229,7 +1361,7 @@ start_all_containers() {
     local success_count=0
     local fail_count=0
     local container_array=()
-    
+
     # Store containers in an array instead of piping to while loop
     while read -r container; do
         [[ -n "${container}" ]] && container_array+=("${container}")
@@ -1282,7 +1414,7 @@ stop_all_containers() {
     local success_count=0
     local fail_count=0
     local container_array=()
-    
+
     # Store containers in an array instead of piping to while loop
     while read -r container; do
         [[ -n "${container}" ]] && container_array+=("${container}")
@@ -1443,27 +1575,29 @@ create_batch() {
 
     # Get all container names from the batch file
     local container_names=()
-    mapfile -t container_names < <(jq -r 'keys[]' "${batch_file}")
-    
+    while IFS= read -r line; do
+        container_names+=("${line}")
+    done < <(jq -r 'keys[]' "${batch_file}")
+
     # Process each container entry
     for name in "${container_names[@]}"; do
         # Extract settings
-        local container_name=$(jq -r --arg name "${name}" '.[${name}].container_name // ${name}' "${batch_file}")
-        local port=$(jq -r --arg name "${name}" '.[${name}].port' "${batch_file}")
-        local profile=$(jq -r --arg name "${name}" '.[${name}].user_profile // ""' "${batch_file}")
-        local provider=$(jq -r --arg name "${name}" '.[${name}].vpn_provider // "protonvpn"' "${batch_file}")
-        local server_city=$(jq -r --arg name "${name}" '.[${name}].server_city // ""' "${batch_file}")
-        local server_hostname=$(jq -r --arg name "${name}" '.[${name}].server_hostname // ""' "${batch_file}")
+        local container_name=$(jq -r --arg name "${name}" '.[$name].container_name // $name' "${batch_file}")
+        local port=$(jq -r --arg name "${name}" '.[$name].port' "${batch_file}")
+        local profile=$(jq -r --arg name "${name}" '.[$name].user_profile // ""' "${batch_file}")
+        local provider=$(jq -r --arg name "${name}" '.[$name].vpn_provider // "protonvpn"' "${batch_file}")
+        local server_city=$(jq -r --arg name "${name}" '.[$name].server_city // ""' "${batch_file}")
+        local server_hostname=$(jq -r --arg name "${name}" '.[$name].server_hostname // ""' "${batch_file}")
 
         print_info "Creating container: ${container_name} (port: ${port})"
 
         if [[ -n "${profile}" && -f "${PROFILES_DIR}/${profile}.env" ]]; then
             # Check for environment variables in the batch file
-            local env_vars_json=$(jq -r --arg name "${name}" '.[${name}].environment // {}' "${batch_file}")
+            local env_vars_json=$(jq -r --arg name "${name}" '.[$name].environment // {}' "${batch_file}")
             if [[ "${env_vars_json}" != "{}" ]]; then
                 # Set HTTP proxy authentication if specified in environment section
-                local proxy_user=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_USER // ""' "${batch_file}")
-                local proxy_pass=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_PASSWORD // ""' "${batch_file}")
+                local proxy_user=$(jq -r --arg name "${name}" '.[$name].environment.HTTPPROXY_USER // ""' "${batch_file}")
+                local proxy_pass=$(jq -r --arg name "${name}" '.[$name].environment.HTTPPROXY_PASSWORD // ""' "${batch_file}")
 
                 # Store variables in local environment for this iteration
                 local HTTPPROXY_USER_VAL=""
@@ -1490,19 +1624,19 @@ create_batch() {
             fi
         else
             # Fall back to regular create if profile doesn't exist
-            local username=$(jq -r --arg name "${name}" '.[${name}].username // ""' "${batch_file}")
-            local password=$(jq -r --arg name "${name}" '.[${name}].password // ""' "${batch_file}")
+            local username=$(jq -r --arg name "${name}" '.[$name].username // ""' "${batch_file}")
+            local password=$(jq -r --arg name "${name}" '.[$name].password // ""' "${batch_file}")
             local location="${server_city}"
             if [[ -z "${location}" ]]; then
                 location="${server_hostname}"
             fi
 
             # Check for environment variables in the batch file
-            local env_vars_json=$(jq -r --arg name "${name}" '.[${name}].environment // {}' "${batch_file}")
+            local env_vars_json=$(jq -r --arg name "${name}" '.[$name].environment // {}' "${batch_file}")
             if [[ "${env_vars_json}" != "{}" ]]; then
                 # Set HTTP proxy authentication if specified in environment section
-                local proxy_user=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_USER // ""' "${batch_file}")
-                local proxy_pass=$(jq -r --arg name "${name}" '.[${name}].environment.HTTPPROXY_PASSWORD // ""' "${batch_file}")
+                local proxy_user=$(jq -r --arg name "${name}" '.[$name].environment.HTTPPROXY_USER // ""' "${batch_file}")
+                local proxy_pass=$(jq -r --arg name "${name}" '.[$name].environment.HTTPPROXY_PASSWORD // ""' "${batch_file}")
 
                 # Store variables in local environment for this iteration
                 local HTTPPROXY_USER_VAL=""
@@ -1569,24 +1703,24 @@ check_compose_profiles() {
     fi
   done
 
-    # If auto_create is set to true, create symlinks from env files to profile directory
+    # If auto_create is set to true, create profiles from env files to profile directory
     if [[ "${auto_create}" = "true" && -n "${missing_profiles}" ]]; then
         print_info "Auto-creating missing profiles from env files in compose file directory..."
 
         for template in ${missing_profiles}; do
             local env_file="$(dirname "${compose_file}")/env.${template}"
 
-            if [[ -f "${env}_file" ]]; then
+            if [[ -f "${env_file}" ]]; then
                 print_info "Found env file for template ${template}: ${env_file}"
 
                 # Create profile from env file
-                cp "${env}_file" "${PROFILES_DIR}/${template}.env"
+                cp "${env_file}" "${PROFILES_DIR}/${template}.env"
                 print_success "Created profile ${template}.env from ${env_file}"
-      else
+            else
                 print_error "Could not find env file for template ${template}: ${env_file}"
                 print_info "You may need to create the profile manually: ${0} create-profile ${template} your_username your_password"
-      fi
-    done
+            fi
+        done
   elif   [[ -n "${missing_profiles}" ]]; then
         print_warning "Some templates in compose file do not have matching profiles. Create them first:"
         for template in ${missing_profiles}; do
@@ -1737,7 +1871,14 @@ import_from_compose() {
         if [[ -z "${provider}" ]]; then
             provider="${DEFAULT_VPN_PROVIDER}"
             print_info "No provider specified for ${service}, using default: ${provider}"
-    fi
+        fi
+
+        # Ensure provider name is normalized
+        if [[ "${provider}" == "${DEFAULT_VPN_PROVIDER}R" ]]; then
+            provider="${DEFAULT_VPN_PROVIDER}"
+            print_info "Fixed provider name (removed trailing R) for ${service}: ${provider}"
+        fi
+
         echo "    \"vpn_provider\": \"${provider}\"," >>"${batch_file}"
 
         # Look for user profiles
@@ -1796,11 +1937,12 @@ import_from_compose() {
     fi
 
         # Extract server location information - try multiple common env var names
-        # First check for cities
-        local server_city=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_CITIES|VPN_CITY|CITY" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+        # First check for cities - preserve spaces in city names
+        local server_city=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_CITIES|VPN_CITY|CITY" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d '"' | tr -d "'")
 
         if [[ -n "${server_city}" ]]; then
             echo "    \"server_city\": \"${server_city}\"," >>"${batch_file}"
+            print_info "Found server city for ${service}: '${server_city}'"
     else
             # Try hostnames
             local server_hostname=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_HOSTNAMES|VPN_HOSTNAME|HOSTNAME" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
@@ -1808,12 +1950,13 @@ import_from_compose() {
             if [[ -n "${server_hostname}" ]]; then
                 echo "    \"server_hostname\": \"${server_hostname}\"," >>"${batch_file}"
       else
-                # Try countries/regions
-                local server_country=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_COUNTRIES|COUNTRY|VPN_REGION|REGION" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d ' ' | tr -d '"' | tr -d "'")
+                # Try countries/regions - preserve spaces for country names
+                local server_country=$(grep -A 50 "^[[:space:]]*${service}:" "${compose_file}" | grep -E "SERVER_COUNTRIES|COUNTRY|VPN_REGION|REGION" | head -1 | sed -E 's/.*=[ "]*([^"]*).*/\1/' | tr -d '"' | tr -d "'")
 
                 if [[ -n "${server_country}" ]]; then
                     echo "    \"server_country\": \"${server_country}\"," >>"${batch_file}"
-        fi
+                    print_info "Found server country for ${service}: '${server_country}'"
+                fi
       fi
     fi
 
@@ -1986,8 +2129,29 @@ apply_preset() {
 
     # Add profile env file if specified
     if [[ -n "${profile}" && -f "${PROFILES_DIR}/${profile}.env" ]]; then
-        env_vars+=("--env-file ${PROFILES_DIR}/${profile}.env")
-  fi
+        # Load the variables from profile file
+        # Track if we found OpenVPN credentials
+        local found_openvpn_user=false
+        local found_openvpn_password=false
+        local openvpn_user=""
+        local openvpn_password=""
+
+        while IFS='=' read -r key value; do
+            # Skip comments and empty lines
+            [[ "${key}" =~ ^#.*$ || -z "${key}" ]] && continue
+
+            # Special handling for OpenVPN credentials
+            if [[ "${key}" == "OPENVPN_USER" ]]; then
+                found_openvpn_user=true
+                openvpn_user="${value}"
+            elif [[ "${key}" == "OPENVPN_PASSWORD" ]]; then
+                found_openvpn_password=true
+                openvpn_password="${value}"
+            else
+                env_vars+=("-e ${key}=${value}")
+            fi
+        done < "${PROFILES_DIR}/${profile}.env"
+    fi
 
     # Add location settings
     if [[ "${location_type}" = "country" && -n "${location_value}" ]]; then
@@ -2010,23 +2174,78 @@ apply_preset() {
   fi
 
     # Create container using the preset
-    docker run -d \
-        --name "${full_container_name}" \
-        --restart unless-stopped \
-        -p "${port}:8888" \
-        --cap-add=NET_ADMIN \
-        "${device_args}" \
-        --network "${PREFIX}_network" \
-        --label "${PREFIX}.type=vpn" \
-        --label "${PREFIX}.port=${port}" \
-        --label "${PREFIX}.internal_port=8888" \
-        --label "${PREFIX}.provider=${provider}" \
-        --label "${PREFIX}.profile=${profile}" \
-        --label "${PREFIX}.location_type=${location_type}" \
-        --label "${PREFIX}.location=${location_value}" \
-        --label "${PREFIX}.preset=${preset_name}" \
-        "${env_vars[@]}" \
-        qmcgaw/gluetun:latest
+    if [[ -n "${device_args}" ]]; then
+        # Start with an empty list of environment variables
+        final_env_vars=()
+
+        # Add our custom environment variables first
+        for env_var in "${env_vars[@]}"; do
+            final_env_vars+=("${env_var}")
+        done
+
+        # Explicitly add OpenVPN credentials if found
+        if [[ "${found_openvpn_user}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_USER=${openvpn_user}")
+        fi
+
+        if [[ "${found_openvpn_password}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_PASSWORD=${openvpn_password}")
+        fi
+
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --device /dev/net/tun:/dev/net/tun \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.profile=${profile}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            --label "${PREFIX}.location=${location_value}" \
+            --label "${PREFIX}.preset=${preset_name}" \
+            "${final_env_vars[@]}" \
+            -e VPN_SERVICE_PROVIDER="${provider}" \
+            qmcgaw/gluetun:latest
+    else
+        # Start with an empty list of environment variables
+        final_env_vars=()
+
+        # Add our custom environment variables first
+        for env_var in "${env_vars[@]}"; do
+            final_env_vars+=("${env_var}")
+        done
+
+        # Explicitly add OpenVPN credentials if found
+        if [[ "${found_openvpn_user}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_USER=${openvpn_user}")
+        fi
+
+        if [[ "${found_openvpn_password}" == "true" ]]; then
+            final_env_vars+=("-e OPENVPN_PASSWORD=${openvpn_password}")
+        fi
+
+        docker run -d \
+            --name "${full_container_name}" \
+            --restart unless-stopped \
+            -p "${port}:8888" \
+            --cap-add=NET_ADMIN \
+            --network "${PREFIX}_network" \
+            --label "${PREFIX}.type=vpn" \
+            --label "${PREFIX}.port=${port}" \
+            --label "${PREFIX}.internal_port=8888" \
+            --label "${PREFIX}.provider=${provider}" \
+            --label "${PREFIX}.profile=${profile}" \
+            --label "${PREFIX}.location_type=${location_type}" \
+            --label "${PREFIX}.location=${location_value}" \
+            --label "${PREFIX}.preset=${preset_name}" \
+            "${final_env_vars[@]}" \
+            -e VPN_SERVICE_PROVIDER="${provider}" \
+            qmcgaw/gluetun:latest
+    fi
 
     local exit_code=$?
     if [[ ${exit_code} -eq 0 ]]; then
