@@ -2,6 +2,7 @@
 #
 # proxy2vpn installer script
 # This script downloads the proxy2vpn script and sets it up in the user's bin directory
+# Version: 1.0.0
 #
 
 # Destination paths - define early for cleanup function

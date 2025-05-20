@@ -2,6 +2,7 @@
 #
 # proxy2vpn uninstaller script
 # This script removes all proxy2vpn files from the user's system
+# Version: 1.0.0
 #
 
 set -e

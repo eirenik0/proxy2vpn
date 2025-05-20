@@ -179,6 +179,7 @@ You can set HTTP proxy authentication by using the environment variables `HTTPPR
 ### Other Commands
 - `test [port] [host] [url]`: Test a proxy connection
 - `monitor [interval]`: Monitor all containers for health
+- `version`: Display script version information
 
 ## Configuration
 
@@ -319,6 +320,83 @@ Proxy2VPN supports HTTP proxy authentication to secure your proxy connections. Y
    ```
 
 When HTTP proxy authentication is enabled, clients must provide the username and password when connecting to the proxy.
+
+## Development
+
+### Automated Tests
+
+This project includes automated tests to ensure the functionality works as expected. The tests are located in the `tests/` directory and can be run with:
+
+```bash
+# Run all tests
+make test
+
+# Or run the test runner directly
+./tests/run_tests.sh
+```
+
+The testing system:
+- Tests for import functionality to ensure no duplicate fields
+- Verifies bug fixes and critical functionality
+- Is automatically run by GitHub Actions on all PRs and commits
+
+To add new tests, create a shell script in the `tests/` directory with the prefix `verify_` (e.g., `verify_my_feature.sh`).
+
+### Shell Script Linting and Formatting
+
+This project uses ShellCheck for linting and shfmt for formatting to maintain high-quality shell scripts. A GitHub Action automatically runs these checks on all `.sh` files when changes are pushed.
+
+#### Running ShellCheck locally:
+
+```bash
+# Install shellcheck
+# macOS
+brew install shellcheck
+
+# Ubuntu/Debian
+sudo apt-get install shellcheck
+
+# Run shellcheck on all shell scripts
+shellcheck --shell=bash --enable=all --exclude=SC2317 *.sh
+```
+
+#### Using Make for development:
+
+```bash
+# Install dependencies (macOS)
+brew install shellcheck shfmt
+
+# View available tasks
+make help
+
+# Run shellcheck linting
+make lint
+
+# Check formatting without modifying files
+make fmt-check
+
+# Format all shell scripts
+make fmt
+
+# Run tests
+make test
+
+# Run all checks, formatting, and tests
+make all
+```
+
+The formatting options used:
+- `-i 2`: Use 2 spaces for indentation
+- `-ci`: Indent switch cases
+- `-bn`: Place binaries like `&&` and `|` at the start of a line
+- `-kp`: Keep column alignment padding
+
+### Coding Standards
+
+- Use `[[` instead of `[` for test expressions
+- Always use braces around variable references: `${variable}` instead of `$variable`
+- Double-quote variables when appropriate
+- Maintain consistent indentation (2 spaces)
 
 ## License
 
