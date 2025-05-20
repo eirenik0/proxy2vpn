@@ -1,4 +1,4 @@
-# Enhanced Proxy2VPN
+# Proxy2VPN
 
 An advanced bash script to manage multiple VPN containers using Docker.
 
@@ -11,9 +11,10 @@ This tool simplifies the management of multiple VPN containers, each running the
 - **User Profiles**: Store VPN credentials securely in profile files
 - **Batch Operations**: Create multiple containers from a single command
 - **Connection Health Monitoring**: Auto-restart non-responsive containers
-- **Enhanced Preset System**: Support for cities and specific server hostnames
+- **Preset System**: Support for cities and specific server hostnames
 - **Docker Compose Import**: Import your existing Docker Compose setup
 - **Granular OpenVPN Settings**: Configure specific server hostnames and cities
+- **Dynamic Server Lists**: Fetch and use server information directly from gluetun
 
 ## Installation
 
@@ -117,6 +118,11 @@ Start the monitoring service to automatically check and restart containers:
 - `apply-preset <preset> <container>`: Apply a preset to create a container
 - `create-preset <container> <preset>`: Create a preset from existing container
 
+### Server Information Commands
+- `update-server-lists`: Fetches and caches all server information
+- `list-countries <provider>`: Shows available countries for a provider
+- `list-cities <provider> <country_code>`: Shows available cities in a country
+
 ### Other Commands
 - `test [port] [host] [url]`: Test a proxy connection
 - `monitor [interval]`: Monitor all containers for health
@@ -130,6 +136,84 @@ The script creates a configuration file at `config.json` on first run. Edit this
 - Health check intervals
 - Auto-restart behavior
 - TUN device usage
+- Server cache TTL (default: 86400 seconds/24 hours)
+- Server location validation (enabled by default)
+
+## Dynamic Server Lists
+
+Proxy2VPN uses the official gluetun server list from:
+```
+https://raw.githubusercontent.com/qdm12/gluetun/master/internal/storage/servers.json
+```
+
+### Key Features
+
+1. **Real-time Server Information**: 
+   - Dynamically fetches and caches the most up-to-date server information from gluetun's repository
+   - Ensures you always have access to the latest available servers for each provider
+
+2. **Automatic Caching**:
+   - Server information is cached locally to improve performance
+   - Cache is automatically refreshed after the configured TTL (default: 24 hours)
+   - All cache files are stored in the `/cache` directory
+
+3. **Location Validation**:
+   - Validates country and city names against the official server list
+   - Provides helpful suggestions when location names don't match expected values
+   - Can be disabled via configuration if needed
+
+### Using Server Information
+
+#### Viewing Available Locations
+
+```bash
+# Update all server lists to the latest version
+./proxy2vpn.sh update-server-lists
+
+# List all available countries for a provider
+./proxy2vpn.sh list-countries protonvpn
+
+# List all available cities in a country
+./proxy2vpn.sh list-cities protonvpn US
+```
+
+#### Creating VPN Containers with Validation
+
+When creating containers, server locations are automatically validated against the official server list:
+
+```bash
+# Create a container with city validation
+./proxy2vpn.sh create-from-profile vpn1 8888 myprofile "New York" "" protonvpn
+
+# Create a container by country
+./proxy2vpn.sh create vpn2 8889 mullvad "United States"
+```
+
+### Benefits of Dynamic Server Lists
+
+1. **Accuracy**: Always use the correct server names as defined by the VPN provider
+2. **Completeness**: Access to all available server locations
+3. **Maintainability**: No need to manually update server lists when providers change their infrastructure
+4. **Discovery**: Easily view all available options without searching provider websites
+
+## Supported VPN Providers
+
+The script supports all VPN providers available in gluetun, including:
+
+- Cyberghost
+- ExpressVPN
+- HideMyAss
+- Mullvad
+- NordVPN
+- Perfect Privacy
+- Private Internet Access (PIA)
+- PrivateVPN
+- ProtonVPN
+- PureVPN
+- Surfshark
+- TorGuard
+- VyprVPN
+- Windscribe
 
 ## Docker Compose Migration
 

@@ -2,9 +2,9 @@
 #
 # proxy2vpn.sh - Advanced script to manage multiple gluetun VPN containers
 #
-# This is an enhanced version of proxy2vpn that supports user profiles,
-# health monitoring, and batch operations. It manages multiple VPN containers
-# using the qmcgaw/gluetun image.
+# Proxy2vpn supports user profiles, health monitoring, batch operations,
+# and dynamic server list fetching.
+# It manages multiple VPN containers using the qmcgaw/gluetun image.
 #
 # Usage: proxy2vpn.sh <command> [arguments]
 #
@@ -21,6 +21,10 @@ PRESETS_FILE="${SCRIPT_DIR}/presets/presets.json"
 PROFILES_DIR="${SCRIPT_DIR}/profiles"
 CONFIG_FILE="${SCRIPT_DIR}/config.json"
 HEALTH_CHECK_INTERVAL=60  # Check container health every 60 seconds
+CACHE_DIR="${SCRIPT_DIR}/cache"
+CACHE_TTL=86400  # Cache validity in seconds (24 hours)
+GLUETUN_SERVERS_URL="https://raw.githubusercontent.com/qdm12/gluetun/master/internal/storage/servers.json"
+SERVERS_CACHE_FILE="${CACHE_DIR}/gluetun_servers.json"
 
 # Default config values (can be overridden in config.json)
 DEFAULT_VPN_PROVIDER="protonvpn"
@@ -76,14 +80,14 @@ check_dependencies() {
         exit 1
     fi
 
-    if ! command_exists jq && [[ -f "$PRESETS_FILE" ]]; then
-        print_error "jq is not installed but required for preset functionality."
+    if ! command_exists jq; then
+        print_error "jq is not installed but required for preset functionality and server list parsing."
         print_info "Install jq with: brew install jq (macOS) or apt install jq (Ubuntu/Debian)"
         exit 1
     fi
 
     if ! command_exists curl; then
-        print_error "curl is not installed but required for testing connections."
+        print_error "curl is not installed but required for testing connections and fetching server lists."
         print_info "Install curl with: brew install curl (macOS) or apt install curl (Ubuntu/Debian)"
         exit 1
     fi
@@ -97,6 +101,12 @@ init_environment() {
         mkdir -p "$PROFILES_DIR"
     fi
 
+    # Create cache directory if it doesn't exist
+    if [ ! -d "$CACHE_DIR" ]; then
+        print_info "Creating cache directory: $CACHE_DIR"
+        mkdir -p "$CACHE_DIR"
+    fi
+
     # Create a default config file if it doesn't exist
     if [ ! -f "$CONFIG_FILE" ]; then
         print_info "Creating default configuration file: $CONFIG_FILE"
@@ -107,7 +117,9 @@ init_environment() {
     "default_proxy_port": 8888,
     "health_check_interval": ${HEALTH_CHECK_INTERVAL},
     "auto_restart_containers": true,
-    "use_device_tun": true
+    "use_device_tun": true,
+    "server_cache_ttl": ${CACHE_TTL},
+    "validate_server_locations": true
 }
 EOF
     fi
@@ -117,6 +129,7 @@ EOF
         DEFAULT_VPN_PROVIDER=$(jq -r '.default_vpn_provider // "protonvpn"' "$CONFIG_FILE")
         CONTAINER_NAMING_CONVENTION=$(jq -r '.container_naming_convention // "numeric"' "$CONFIG_FILE")
         HEALTH_CHECK_INTERVAL=$(jq -r '.health_check_interval // 60' "$CONFIG_FILE")
+        CACHE_TTL=$(jq -r '.server_cache_ttl // 86400' "$CONFIG_FILE")
     fi
 }
 
@@ -127,6 +140,370 @@ ensure_network() {
         print_info "Creating Docker network: $network_name"
         docker network create "$network_name" >/dev/null
     fi
+}
+
+# ======================================================
+# VPN Server List Management
+# ======================================================
+
+# Fetch and cache server list from gluetun
+fetch_server_list() {
+    print_info "Fetching VPN server list from gluetun..."
+    
+    # Check if the cache exists and is still valid
+    if [ -f "$SERVERS_CACHE_FILE" ]; then
+        local file_age=$(($(date +%s) - $(date -r "$SERVERS_CACHE_FILE" +%s)))
+        if [ $file_age -lt $CACHE_TTL ]; then
+            print_info "Using cached server list (age: $(($file_age / 60 / 60)) hours)"
+            return 0
+        else
+            print_info "Cached server list is outdated, refreshing..."
+        fi
+    else
+        print_info "No cached server list found, downloading..."
+    fi
+    
+    # Fetch server list from GitHub
+    if ! curl -s -o "$SERVERS_CACHE_FILE" "$GLUETUN_SERVERS_URL"; then
+        print_error "Failed to download server list from $GLUETUN_SERVERS_URL"
+        return 1
+    fi
+    
+    # Validate that the file is valid JSON
+    if ! jq empty "$SERVERS_CACHE_FILE" >/dev/null 2>&1; then
+        print_error "Downloaded server list is not valid JSON"
+        rm -f "$SERVERS_CACHE_FILE"
+        return 1
+    fi
+    
+    print_success "Server list fetched and cached successfully"
+    return 0
+}
+
+# Extract countries list for a provider
+get_countries_for_provider() {
+    local provider="$1"
+    
+    # Ensure we have the server list
+    if ! [ -f "$SERVERS_CACHE_FILE" ]; then
+        fetch_server_list || return 1
+    fi
+    
+    # Create provider-specific cache file for countries
+    local cache_file="${CACHE_DIR}/${provider}_countries.json"
+    
+    # Check if the cache file exists and is valid
+    if [ -f "$cache_file" ]; then
+        local file_age=$(($(date +%s) - $(date -r "$cache_file" +%s)))
+        if [ $file_age -lt $CACHE_TTL ]; then
+            return 0
+        fi
+    fi
+    
+    print_info "Extracting countries for $provider..."
+    
+    # Extract countries based on provider from the server list
+    if [[ "$provider" == "private internet access" ]]; then
+        provider="pia"
+    elif [[ "$provider" == "private internet access" ]]; then
+        provider="pia"
+    fi
+    
+    # Process providers with different schemas
+    if jq -e --arg provider "$provider" '.[$provider]' "$SERVERS_CACHE_FILE" >/dev/null 2>&1; then
+        jq -r --arg provider "$provider" '
+            .[$provider].servers | 
+            group_by(.country) | 
+            map({
+                country: (.[0].country // "Unknown"),
+                code: (.[0].country_code // .[0].region // 
+                      (if .[0].country then (.[0].country | split(" ") | .[0][0:2] | ascii_upcase) else "??" end))
+            }) | 
+            unique_by(.country)
+        ' "$SERVERS_CACHE_FILE" > "$cache_file"
+    else
+        print_error "Provider $provider not found in server list"
+        echo "[]" > "$cache_file"
+        return 1
+    fi
+    
+    print_success "Extracted and cached countries for $provider"
+    return 0
+}
+
+# Extract cities for a provider in a country
+get_cities_for_country() {
+    local provider="$1"
+    local country_code="$2"
+    
+    # Ensure we have the server list
+    if ! [ -f "$SERVERS_CACHE_FILE" ]; then
+        fetch_server_list || return 1
+    fi
+    
+    # Create provider-specific cache file for cities
+    local cache_file="${CACHE_DIR}/${provider}_cities.json"
+    
+    # Check if the cache file exists and is valid
+    if [ -f "$cache_file" ]; then
+        local file_age=$(($(date +%s) - $(date -r "$cache_file" +%s)))
+        if [ $file_age -lt $CACHE_TTL ]; then
+            return 0
+        fi
+    fi
+    
+    print_info "Extracting cities for $provider..."
+    
+    # Normalize provider name for lookup
+    if [[ "$provider" == "private internet access" ]]; then
+        provider="pia"
+    fi
+    
+    # Process providers with different schemas
+    if jq -e --arg provider "$provider" '.[$provider]' "$SERVERS_CACHE_FILE" >/dev/null 2>&1; then
+        jq -r --arg provider "$provider" '
+            .[$provider].servers | 
+            group_by(.country) | 
+            map({
+                country_code: (.[0].country_code // .[0].region // 
+                              (if .[0].country then (.[0].country | split(" ") | .[0][0:2] | ascii_upcase) else "??" end)),
+                country: (.[0].country // "Unknown"),
+                cities: (
+                    map(.city) | 
+                    map(select(. != null)) | 
+                    unique | 
+                    sort
+                )
+            })
+        ' "$SERVERS_CACHE_FILE" > "$cache_file"
+    else
+        print_error "Provider $provider not found in server list"
+        echo "[]" > "$cache_file"
+        return 1
+    fi
+    
+    print_success "Extracted and cached cities for $provider"
+    return 0
+}
+
+# Get server hostnames for a provider in a city
+get_servers_for_city() {
+    local provider="$1"
+    local country_code="$2"
+    local city="$3"
+    
+    # Ensure we have the server list
+    if ! [ -f "$SERVERS_CACHE_FILE" ]; then
+        fetch_server_list || return 1
+    fi
+    
+    # Create provider-specific cache file for server hostnames
+    local cache_file="${CACHE_DIR}/${provider}_format_servers.json"
+    
+    # Check if the cache file exists and is valid
+    if [ -f "$cache_file" ]; then
+        local file_age=$(($(date +%s) - $(date -r "$cache_file" +%s)))
+        if [ $file_age -lt $CACHE_TTL ]; then
+            return 0
+        fi
+    fi
+    
+    print_info "Extracting server hostnames for $provider..."
+    
+    # Normalize provider name for lookup
+    if [[ "$provider" == "private internet access" ]]; then
+        provider="pia"
+    fi
+    
+    # Process providers with different schemas
+    if jq -e --arg provider "$provider" '.[$provider]' "$SERVERS_CACHE_FILE" >/dev/null 2>&1; then
+        jq -r --arg provider "$provider" '
+            .[$provider].servers |
+            map({
+                hostname: (.hostname // .server_name // null),
+                country: (.country // "Unknown"),
+                country_code: (.country_code // .region // "??"),
+                city: (.city // null),
+                ip: (if .ips then .ips[0] else null end),
+                type: (.vpn // "openvpn")
+            }) |
+            map(select(.hostname != null))
+        ' "$SERVERS_CACHE_FILE" > "$cache_file"
+    else
+        print_error "Provider $provider not found in server list"
+        echo "[]" > "$cache_file"
+        return 1
+    fi
+    
+    print_success "Extracted and cached servers for $provider"
+    return 0
+}
+
+# Validate if a country exists for a provider
+validate_country() {
+    local provider="$1"
+    local country="$2"
+    
+    # Ensure we have countries for this provider
+    get_countries_for_provider "$provider" || return 1
+    
+    local country_file="${CACHE_DIR}/${provider}_countries.json"
+    if ! [ -f "$country_file" ]; then
+        print_error "Country cache file not found"
+        return 1
+    fi
+    
+    # Check if the country exists in the provider's list
+    if jq -e --arg country "$country" '.[] | select(.country == $country or .code == $country)' "$country_file" >/dev/null 2>&1; then
+        return 0
+    else
+        print_error "Country '$country' not found for provider '$provider'"
+        return 1
+    fi
+}
+
+# Validate if a city exists within a country for a provider
+validate_city() {
+    local provider="$1"
+    local country_code="$2"
+    local city="$3"
+    
+    # Ensure we have cities for this provider
+    get_cities_for_country "$provider" "$country_code" || return 1
+    
+    local city_file="${CACHE_DIR}/${provider}_cities.json"
+    if ! [ -f "$city_file" ]; then
+        print_error "City cache file not found"
+        return 1
+    fi
+    
+    # Check if the city exists in the provider's list for the specified country
+    if jq -e --arg country "$country_code" --arg city "$city" '.[] | select(.country_code == $country or .country == $country) | .cities | index($city)' "$city_file" >/dev/null 2>&1; then
+        return 0
+    else
+        print_error "City '$city' not found in country '$country_code' for provider '$provider'"
+        return 1
+    fi
+}
+
+# List available countries for a provider
+list_countries() {
+    local provider="${1:-$DEFAULT_VPN_PROVIDER}"
+    
+    # Ensure we have countries for this provider
+    get_countries_for_provider "$provider" || return 1
+    
+    local country_file="${CACHE_DIR}/${provider}_countries.json"
+    if ! [ -f "$country_file" ]; then
+        print_error "Country cache file not found"
+        return 1
+    fi
+    
+    print_header "Available Countries for $provider:"
+    echo
+    
+    printf "%-25s %-20s\n" "COUNTRY" "CODE"
+    printf "%-25s %-20s\n" "-------" "----"
+    
+    jq -r '.[] | "\(.country)|\(.code)"' "$country_file" | while read -r line; do
+        country=$(echo "$line" | cut -d'|' -f1)
+        code=$(echo "$line" | cut -d'|' -f2)
+        printf "%-25s %-20s\n" "$country" "$code"
+    done
+}
+
+# List available cities for a country and provider
+list_cities() {
+    local provider="${1:-$DEFAULT_VPN_PROVIDER}"
+    local country_code="$2"
+    
+    if [ -z "$country_code" ]; then
+        print_error "Country code is required"
+        echo "Usage: $0 list-cities <provider> <country_code>"
+        return 1
+    fi
+    
+    # Special case mapping for common country codes
+    case "$country_code" in
+        US|USA|UNITED_STATES|UNITEDSTATES)
+            country_code="United States"
+            ;;
+        UK|GB|GREAT_BRITAIN|UNITED_KINGDOM|UNITEDKINGDOM)
+            country_code="United Kingdom"
+            ;;
+        UAE|AE|UNITED_ARAB_EMIRATES)
+            country_code="United Arab Emirates"
+            ;;
+    esac
+    
+    # Ensure we have cities for this provider
+    get_cities_for_country "$provider" "$country_code" || return 1
+    
+    local city_file="${CACHE_DIR}/${provider}_cities.json"
+    if ! [ -f "$city_file" ]; then
+        print_error "City cache file not found"
+        return 1
+    fi
+    
+    print_header "Available Cities for $provider in $country_code:"
+    echo
+    
+    printf "%-30s\n" "CITY"
+    printf "%-30s\n" "----"
+    
+    # Extract cities for the specified country
+    # First try exact country code, then try fuzzy match with country name
+    country_name=$(jq -r --arg code "$country_code" '.[] | select(.country_code == $code) | .country' "$city_file" | head -1)
+
+    # If a 2-letter code was provided but no match found, try to find matching countries
+    if [ -z "$country_name" ] && [[ ${#country_code} -eq 2 ]]; then
+        country_name=$(jq -r --arg code "$country_code" '.[] | select(.country | test("^" + $code; "i")) | .country' "$city_file" | head -1)
+        
+        # Try matching countries that start with this code
+        if [ -z "$country_name" ]; then
+            country_name=$(jq -r '.[] | .country' "$city_file" | grep -i "^$country_code" | head -1)
+        fi
+        
+        # As a last resort, look for countries that have this code
+        if [ -z "$country_name" ]; then
+            country_code_upper=$(echo "$country_code" | tr '[:lower:]' '[:upper:]')
+            country_name=$(jq -r --arg code "$country_code_upper" '.[] | select(.country_code == $code) | .country' "$city_file" | head -1)
+        fi
+    fi
+    
+    if [ -n "$country_name" ]; then
+        print_info "Found matching country: $country_name"
+        jq -r --arg country "$country_name" '.[] | select(.country == $country) | .cities[]' "$city_file" | sort | while read -r city; do
+            printf "%-30s\n" "$city"
+        done
+    else
+        # Fallback to original search
+        jq -r --arg country "$country_code" '.[] | select(.country_code == $country or .country == $country) | .cities[]' "$city_file" | sort | while read -r city; do
+            printf "%-30s\n" "$city"
+        done
+    fi
+}
+
+# Update all server lists for all supported providers
+update_all_server_lists() {
+    print_header "Updating server lists for all providers..."
+    echo
+    
+    # Fetch main server list
+    fetch_server_list || return 1
+    
+    # Extract all providers from the server list
+    local providers=$(jq -r 'keys | .[]' "$SERVERS_CACHE_FILE" | grep -v "version" | sort | uniq)
+    
+    for provider in $providers; do
+        print_info "Updating data for provider: $provider"
+        get_countries_for_provider "$provider"
+        get_cities_for_country "$provider" ""
+        get_servers_for_city "$provider" "" ""
+    done
+    
+    print_success "All server lists updated successfully"
+    return 0
 }
 
 # ======================================================
@@ -234,6 +611,24 @@ create_vpn_from_profile() {
 
     # Add optional location parameters
     if [ -n "$server_city" ]; then
+        # Validate city if server validation is enabled
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
+            # Fetch server list if needed
+            if ! [ -f "$SERVERS_CACHE_FILE" ]; then
+                fetch_server_list || exit 1
+            fi
+            
+            # Get country for the city
+            local country_code=""
+            if [ -f "${CACHE_DIR}/${provider}_cities.json" ]; then
+                country_code=$(jq -r --arg city "$server_city" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+            fi
+            
+            if [ -n "$country_code" ]; then
+                env_vars+=("-e SERVER_COUNTRIES=${country_code}")
+            fi
+        fi
+        
         env_vars+=("-e SERVER_CITIES=${server_city}")
         location_type="city"
         location_value="$server_city"
@@ -283,7 +678,7 @@ create_vpn_from_profile() {
     fi
 }
 
-# Create a regular VPN container (legacy method)
+# Create a regular VPN container with validation
 create_vpn() {
     local name="$1"
     local port="$2"
@@ -318,9 +713,51 @@ create_vpn() {
         "-e HTTPPROXY_LISTENING_ADDRESS=:8888"
     )
 
-    # Add optional env vars
+    # Add optional location with validation
     if [ -n "$location" ]; then
-        env_vars+=("-e SERVER_COUNTRIES=${location}")
+        # Fetch server list if needed
+        if ! [ -f "$SERVERS_CACHE_FILE" ]; then
+            fetch_server_list || exit 1
+        fi
+        
+        # Try to determine if location is a country, city, or hostname
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
+            # Check if it's a country
+            if validate_country "$provider" "$location"; then
+                env_vars+=("-e SERVER_COUNTRIES=${location}")
+                location_type="country"
+            else
+                # Check major cities
+                get_cities_for_country "$provider" ""
+                
+                # See if any cities match
+                if [ -f "${CACHE_DIR}/${provider}_cities.json" ]; then
+                    if jq -e --arg city "$location" '.[] | select(.cities | index($city) >= 0)' "${CACHE_DIR}/${provider}_cities.json" >/dev/null 2>&1; then
+                        env_vars+=("-e SERVER_CITIES=${location}")
+                        location_type="city"
+                        
+                        # Also try to find which country this city belongs to
+                        local country_code=$(jq -r --arg city "$location" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                        if [ -n "$country_code" ]; then
+                            env_vars+=("-e SERVER_COUNTRIES=${country_code}")
+                        fi
+                    else
+                        # Assume it's a hostname or just pass it as country anyway
+                        env_vars+=("-e SERVER_COUNTRIES=${location}")
+                        location_type="country"
+                        print_warning "Location '$location' not found in provider server list. Using as country name anyway."
+                    fi
+                else
+                    # If no city file, just use as country
+                    env_vars+=("-e SERVER_COUNTRIES=${location}")
+                    location_type="country"
+                fi
+            fi
+        else
+            # If validation is disabled, just use as country
+            env_vars+=("-e SERVER_COUNTRIES=${location}")
+            location_type="country"
+        fi
     fi
 
     if [ -n "$username" ]; then
@@ -356,6 +793,7 @@ create_vpn() {
         --label "${PREFIX}.internal_port=8888" \
         --label "${PREFIX}.provider=${provider}" \
         --label "${PREFIX}.location=${location}" \
+        --label "${PREFIX}.location_type=${location_type}" \
         ${env_vars[@]} \
         qmcgaw/gluetun:latest
 
@@ -369,7 +807,7 @@ create_vpn() {
     fi
 }
 
-# List all VPN containers with enhanced details
+# List all VPN containers with details
 list_containers() {
     print_header "VPN Containers:"
     echo
@@ -482,7 +920,7 @@ view_logs() {
     docker logs --tail "$lines" "$full_container_name"
 }
 
-# Update container configuration
+# Update container configuration with validation
 update_container() {
     local name="$1"
     local key="$2"
@@ -550,9 +988,33 @@ update_container() {
 
     # Update location labels based on what was updated
     if [ "$key" = "SERVER_COUNTRIES" ]; then
+        # Validate country if server validation is enabled
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
+            if ! validate_country "$provider" "$value"; then
+                print_warning "Country '$value' not found in provider server list. Using anyway."
+            fi
+        fi
+        
         location="$value"
         location_type="country"
     elif [ "$key" = "SERVER_CITIES" ]; then
+        # Validate city if server validation is enabled
+        if jq -e '.validate_server_locations // true' "$CONFIG_FILE" | grep -q "true"; then
+            get_cities_for_country "$provider" ""
+            
+            # Try to find which country this city belongs to
+            if [ -f "${CACHE_DIR}/${provider}_cities.json" ]; then
+                local country_code=$(jq -r --arg city "$value" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+                
+                if [ -n "$country_code" ]; then
+                    # Also update the country if we found a match
+                    new_env_vars+=("-e SERVER_COUNTRIES=${country_code}")
+                else
+                    print_warning "City '$value' not found in any country for provider '$provider'. Using anyway."
+                fi
+            fi
+        fi
+        
         location="$value"
         location_type="city"
     elif [ "$key" = "SERVER_HOSTNAMES" ]; then
@@ -908,7 +1370,7 @@ import_from_compose() {
 # Preset Management
 # ======================================================
 
-# Enhanced listing of presets
+# Listing of presets
 list_presets() {
     if [ ! -f "$PRESETS_FILE" ]; then
         print_error "Presets file not found: $PRESETS_FILE"
@@ -954,7 +1416,7 @@ list_presets() {
     done
 }
 
-# Apply a preset with enhanced options
+# Apply a preset with  options
 apply_preset() {
     local preset_name="$1"
     local container_name="$2"
@@ -1221,7 +1683,7 @@ show_usage() {
     echo
     echo "Container Commands:"
     echo "  create <container> <port> <provider> [location] [username] [password]"
-    echo "                           Create a new VPN container (legacy method)"
+    echo "                           Create a new VPN container"
     echo "  create-from-profile <container> <port> <profile> [server_city] [server_hostname] [provider]"
     echo "                           Create a container using a profile"
     echo "  list                     List all VPN containers"
@@ -1231,6 +1693,12 @@ show_usage() {
     echo "  logs <container> [lines] View container logs"
     echo "  start <container>        Start a container"
     echo "  stop <container>         Stop a container"
+    echo
+    echo "Server Information Commands:"
+    echo "  update-server-lists       Update server lists for all providers"
+    echo "  list-countries <provider> List available countries for a provider"
+    echo "  list-cities <provider> <country_code>"
+    echo "                           List available cities for a country and provider"
     echo
     echo "Batch Operations:"
     echo "  create-batch [file]      Create multiple containers from a batch file"
@@ -1253,12 +1721,14 @@ show_usage() {
     echo "  $0 create-from-profile vpn1 8888 myuser \"New York\""
     echo "  $0 test 8888"
     echo "  $0 apply-preset protonvpn-us vpn2"
+    echo "  $0 list-countries protonvpn"
     echo
     echo "Notes:"
     echo "  - Container names can be specified with or without the '$PREFIX' prefix"
     echo "  - When using numeric naming (vpn1, vpn2, etc.), no prefix is added"
     echo "  - Profiles are stored in ${PROFILES_DIR}/*.env files"
     echo "  - Presets are stored in $PRESETS_FILE"
+    echo "  - Server lists are cached in $CACHE_DIR"
 }
 
 # ======================================================
@@ -1315,6 +1785,17 @@ main() {
             ;;
         stop)
             stop_container "$@"
+            ;;
+
+        # Server Information commands
+        update-server-lists)
+            update_all_server_lists
+            ;;
+        list-countries)
+            list_countries "$@"
+            ;;
+        list-cities)
+            list_cities "$@"
             ;;
 
         # Batch operations
