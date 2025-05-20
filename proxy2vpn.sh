@@ -11,7 +11,7 @@
 # License: MIT
 
 # Script version
-VERSION="0.1.1"
+VERSION="0.1.2"
 
 set -e
 
@@ -1568,6 +1568,104 @@ monitor_containers() {
   done
 }
 
+# Diagnose problematic containers and check logs for errors
+diagnose_containers() {
+    local logs_lines="${1:-100}"  # Default to last 100 lines of logs
+    
+    print_header "Diagnosing problematic VPN containers:"
+    echo
+    
+    # Find all VPN containers that are not running or are restarting
+    local containers=$(docker ps -a --filter "status=created" --filter "status=exited" --filter "status=dead" \
+                              --filter "status=restarting" --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}")
+    
+    if [[ -z "${containers}" ]]; then
+        print_info "No problematic VPN containers found."
+        return 0
+    fi
+    
+    # Process each container
+    for container in ${containers}; do
+        local short_name=$(basename "${container}")
+        if [[ "${short_name}" == "${PREFIX}_"* ]]; then
+            short_name=${short_name#"${PREFIX}"_}
+        fi
+        
+        local status=$(docker inspect --format='{{.State.Status}}' "${container}" 2>/dev/null)
+        local exit_code=$(docker inspect --format='{{.State.ExitCode}}' "${container}" 2>/dev/null)
+        
+        print_info "Container: ${short_name} (Status: ${status}, Exit Code: ${exit_code})"
+        
+        # Get container details
+        local port=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.port"}}' "${container}" 2>/dev/null)
+        local provider=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.provider"}}' "${container}" 2>/dev/null)
+        local profile=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.profile" | printf "%s"}}' "${container}" 2>/dev/null)
+        local location=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location"}}' "${container}" 2>/dev/null)
+        
+        echo "  Provider: ${provider:-unknown}"
+        echo "  Profile: ${profile:-none}"
+        echo "  Location: ${location:-unspecified}"
+        echo "  Port: ${port:-N/A}"
+        echo
+        
+        # Check container logs for common errors
+        print_info "Analyzing logs for ${short_name}:"
+        echo
+        
+        # Get the logs and search for common error patterns
+        local logs=$(docker logs --tail "${logs_lines}" "${container}" 2>&1)
+        
+        # Special handling for restarting containers
+        if [[ "${status}" == "restarting" ]]; then
+            print_error "  Container is stuck in a restart loop"
+            echo "  This usually indicates a persistent issue preventing the container from starting properly."
+            
+            # Show recent restart history
+            echo "  Recent restart history:"
+            docker inspect "${container}" --format='{{range .RestartCount}}Restart Count: {{.}}{{end}}' 2>/dev/null || echo "  Unable to get restart count"
+            
+            # Continue with normal error detection
+        fi
+        
+        # Identify common error patterns
+        if echo "${logs}" | grep -qi "authentication failed"; then
+            print_error "  Authentication failure detected"
+            echo "  This typically indicates incorrect VPN credentials. Check your username/password."
+            echo "  Consider updating the container with correct credentials or profile."
+        elif echo "${logs}" | grep -qi "certificate verification failed"; then
+            print_error "  Certificate verification failure detected"
+            echo "  This may indicate SSL/TLS issues connecting to the VPN server."
+            echo "  Consider trying a different server location."
+        elif echo "${logs}" | grep -qi "connection refused"; then
+            print_error "  Connection refused error detected"
+            echo "  The VPN server may be unreachable or blocking connections."
+            echo "  Consider trying a different server location."
+        elif echo "${logs}" | grep -qi "network is unreachable"; then
+            print_error "  Network unreachable error detected"
+            echo "  There may be network connectivity issues."
+            echo "  Check your internet connection and Docker network configuration."
+        elif echo "${logs}" | grep -qi "error"; then
+            print_error "  General errors detected in logs"
+            # Extract and display the lines containing errors (limited to avoid overwhelming output)
+            echo "${logs}" | grep -i "error" | head -10
+            if [[ $(echo "${logs}" | grep -c -i "error") -gt 10 ]]; then
+                echo "  ... (more error lines omitted)"
+            fi
+        else
+            print_info "  No obvious errors found in the logs."
+            echo "  Last few log lines:"
+            echo "${logs}" | tail -5
+        fi
+        
+        echo
+        echo "  For full logs, use: ${0} logs ${short_name} [lines]"
+        echo "-------------------------------------------------------------"
+        echo
+    done
+    
+    print_info "Diagnosis complete. Use '${0} logs <container_name>' for more details."
+}
+
 # ======================================================
 # Batch Operations
 # ======================================================
@@ -2473,6 +2571,7 @@ show_usage() {
     echo "Monitoring Commands:"
     echo "  test [port] [host] [url] Test VPN proxy connection"
     echo "  monitor [interval]       Monitor all containers and auto-restart if needed"
+    echo "  diagnose [lines]         Check problematic containers and analyze logs for errors"
     echo
     echo "Bulk Operations:"
     echo "  up                       Start all VPN containers"
@@ -2589,6 +2688,9 @@ main() {
             ;;
         monitor)
             monitor_containers "$@"
+            ;;
+        diagnose)
+            diagnose_containers "$@"
             ;;
 
         # Bulk operations
