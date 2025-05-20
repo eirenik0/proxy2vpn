@@ -29,6 +29,8 @@ SERVERS_CACHE_FILE="${CACHE_DIR}/gluetun_servers.json"
 # Default config values (can be overridden in config.json)
 DEFAULT_VPN_PROVIDER="protonvpn"
 CONTAINER_NAMING_CONVENTION="numeric" # 'numeric' for vpn1, vpn2, etc. or 'descriptive' for vpn_us_east, etc.
+HTTPPROXY_USER=""
+HTTPPROXY_PASSWORD=""
 
 # ======================================================
 # Colors for output
@@ -119,7 +121,9 @@ init_environment() {
     "auto_restart_containers": true,
     "use_device_tun": true,
     "server_cache_ttl": ${CACHE_TTL},
-    "validate_server_locations": true
+    "validate_server_locations": true,
+    "httpproxy_user": "",
+    "httpproxy_password": ""
 }
 EOF
     fi
@@ -130,6 +134,14 @@ EOF
         CONTAINER_NAMING_CONVENTION=$(jq -r '.container_naming_convention // "numeric"' "$CONFIG_FILE")
         HEALTH_CHECK_INTERVAL=$(jq -r '.health_check_interval // 60' "$CONFIG_FILE")
         CACHE_TTL=$(jq -r '.server_cache_ttl // 86400' "$CONFIG_FILE")
+        
+        # Load HTTP proxy authentication settings if not provided via environment variables
+        if [ -z "${HTTPPROXY_USER}" ]; then
+            HTTPPROXY_USER=$(jq -r '.httpproxy_user // ""' "$CONFIG_FILE")
+        fi
+        if [ -z "${HTTPPROXY_PASSWORD}" ]; then
+            HTTPPROXY_PASSWORD=$(jq -r '.httpproxy_password // ""' "$CONFIG_FILE")
+        fi
     fi
 }
 
@@ -579,6 +591,7 @@ create_vpn_from_profile() {
         print_error "Missing required parameters."
         echo "Usage: $0 create-from-profile <container_name> <port> <profile_name> [server_city] [server_hostname] [provider]"
         echo "Example: $0 create-from-profile vpn1 8888 myprofile \"New York\" \"\" protonvpn"
+        echo "Note: You can set HTTPPROXY_USER and HTTPPROXY_PASSWORD environment variables to enable HTTP proxy authentication"
         exit 1
     fi
 
@@ -691,6 +704,7 @@ create_vpn() {
         print_error "Missing required parameters."
         echo "Usage: $0 create <container_name> <port> <provider> [location] [username] [password]"
         echo "Example: $0 create vpn1 8888 protonvpn \"United States\" myuser mypass"
+        echo "Note: You can set HTTPPROXY_USER and HTTPPROXY_PASSWORD environment variables to enable HTTP proxy authentication"
         exit 1
     fi
 
@@ -712,6 +726,15 @@ create_vpn() {
         "-e HTTPPROXY=on"
         "-e HTTPPROXY_LISTENING_ADDRESS=:8888"
     )
+    
+    # Add HTTP proxy authentication if specified
+    if [[ -n "${HTTPPROXY_USER:-}" ]]; then
+        env_vars+=("-e HTTPPROXY_USER=${HTTPPROXY_USER}")
+    fi
+    
+    if [[ -n "${HTTPPROXY_PASSWORD:-}" ]]; then
+        env_vars+=("-e HTTPPROXY_PASSWORD=${HTTPPROXY_PASSWORD}")
+    fi
 
     # Add optional location with validation
     if [ -n "$location" ]; then
@@ -1020,6 +1043,9 @@ update_container() {
     elif [ "$key" = "SERVER_HOSTNAMES" ]; then
         location="$value"
         location_type="hostname"
+    elif [ "$key" = "HTTPPROXY_USER" ] || [ "$key" = "HTTPPROXY_PASSWORD" ]; then
+        # No special handling for HTTP proxy auth, just update the env var
+        :  # No-op, just use the value as-is
     fi
 
     # Add device tun if configured
@@ -1262,8 +1288,30 @@ create_batch() {
         print_info "Creating container: $container_name (port: $port)"
 
         if [ -n "$profile" ] && [ -f "${PROFILES_DIR}/${profile}.env" ]; then
+            # Check for environment variables in the batch file
+            local env_vars=$(jq -r --arg name "$name" '.[$name].environment // {}' "$batch_file")
+            if [ "$env_vars" != "{}" ]; then
+                # Set HTTP proxy authentication if specified in environment section
+                local proxy_user=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_USER // ""' "$batch_file")
+                local proxy_pass=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_PASSWORD // ""' "$batch_file")
+                
+                if [ -n "$proxy_user" ]; then
+                    export HTTPPROXY_USER="$proxy_user"
+                fi
+                
+                if [ -n "$proxy_pass" ]; then
+                    export HTTPPROXY_PASSWORD="$proxy_pass"
+                fi
+            fi
+            
             # Create container with profile
             create_vpn_from_profile "$container_name" "$port" "$profile" "$server_city" "$server_hostname" "$provider" >/dev/null 2>&1
+            
+            # Clear environment variables to avoid affecting other containers
+            if [ "$env_vars" != "{}" ]; then
+                unset HTTPPROXY_USER
+                unset HTTPPROXY_PASSWORD
+            fi
         else
             # Fall back to regular create if profile doesn't exist
             local username=$(jq -r --arg name "$name" '.[$name].username // ""' "$batch_file")
@@ -1272,8 +1320,30 @@ create_batch() {
             if [ -z "$location" ]; then
                 location="$server_hostname"
             fi
+            
+            # Check for environment variables in the batch file
+            local env_vars=$(jq -r --arg name "$name" '.[$name].environment // {}' "$batch_file")
+            if [ "$env_vars" != "{}" ]; then
+                # Set HTTP proxy authentication if specified in environment section
+                local proxy_user=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_USER // ""' "$batch_file")
+                local proxy_pass=$(jq -r --arg name "$name" '.[$name].environment.HTTPPROXY_PASSWORD // ""' "$batch_file")
+                
+                if [ -n "$proxy_user" ]; then
+                    export HTTPPROXY_USER="$proxy_user"
+                fi
+                
+                if [ -n "$proxy_pass" ]; then
+                    export HTTPPROXY_PASSWORD="$proxy_pass"
+                fi
+            fi
 
             create_vpn "$container_name" "$port" "$provider" "$location" "$username" "$password" >/dev/null 2>&1
+            
+            # Clear environment variables to avoid affecting other containers
+            if [ "$env_vars" != "{}" ]; then
+                unset HTTPPROXY_USER
+                unset HTTPPROXY_PASSWORD
+            fi
         fi
 
         local exit_code=$?
@@ -1497,6 +1567,15 @@ apply_preset() {
         "-e HTTPPROXY=on"
         "-e HTTPPROXY_LISTENING_ADDRESS=:8888"
     )
+    
+    # Add HTTP proxy authentication if specified
+    if [[ -n "${HTTPPROXY_USER:-}" ]]; then
+        env_vars+=("-e HTTPPROXY_USER=${HTTPPROXY_USER}")
+    fi
+    
+    if [[ -n "${HTTPPROXY_PASSWORD:-}" ]]; then
+        env_vars+=("-e HTTPPROXY_PASSWORD=${HTTPPROXY_PASSWORD}")
+    fi
 
     # Add profile env file if specified
     if [ -n "$profile" ] && [ -f "${PROFILES_DIR}/${profile}.env" ]; then
@@ -1729,6 +1808,8 @@ show_usage() {
     echo "  - Profiles are stored in ${PROFILES_DIR}/*.env files"
     echo "  - Presets are stored in $PRESETS_FILE"
     echo "  - Server lists are cached in $CACHE_DIR"
+    echo "  - HTTP proxy authentication can be enabled by setting HTTPPROXY_USER and HTTPPROXY_PASSWORD"
+    echo "    environment variables, or by adding them to config.json"
 }
 
 # ======================================================

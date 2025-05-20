@@ -15,6 +15,7 @@ This tool simplifies the management of multiple VPN containers, each running the
 - **Docker Compose Import**: Import your existing Docker Compose setup
 - **Granular OpenVPN Settings**: Configure specific server hostnames and cities
 - **Dynamic Server Lists**: Fetch and use server information directly from gluetun
+- **HTTP Proxy Authentication**: Set username and password for HTTP proxy access
 
 ## Installation
 
@@ -85,6 +86,31 @@ Create multiple containers at once using a JSON batch file:
 ./proxy2vpn.sh create-batch vpn_batch_example.json
 ```
 
+Example batch file with HTTP proxy authentication:
+
+```json
+{
+  "vpn1": {
+    "container_name": "vpn1",
+    "port": 8888,
+    "user_profile": "myprofile",
+    "server_city": "New York",
+    "vpn_provider": "protonvpn"
+  },
+  "authenticated_proxy": {
+    "container_name": "vpn2",
+    "port": 8889,
+    "user_profile": "myprofile",
+    "server_city": "Chicago",
+    "vpn_provider": "protonvpn",
+    "environment": {
+      "HTTPPROXY_USER": "proxyuser",
+      "HTTPPROXY_PASSWORD": "proxypassword"
+    }
+  }
+}
+```
+
 Or import directly from Docker Compose:
 
 ```bash
@@ -113,6 +139,8 @@ Start the monitoring service to automatically check and restart containers:
 - `logs <container> [lines]`: View container logs
 - `start/stop <container>`: Start or stop a container
 
+You can set HTTP proxy authentication by using the environment variables `HTTPPROXY_USER` and `HTTPPROXY_PASSWORD` when creating containers.
+
 ### Preset Commands
 - `presets`: List all presets
 - `apply-preset <preset> <container>`: Apply a preset to create a container
@@ -138,6 +166,7 @@ The script creates a configuration file at `config.json` on first run. Edit this
 - TUN device usage
 - Server cache TTL (default: 86400 seconds/24 hours)
 - Server location validation (enabled by default)
+- HTTP proxy authentication settings (username and password)
 
 ## Dynamic Server Lists
 
@@ -187,6 +216,9 @@ When creating containers, server locations are automatically validated against t
 
 # Create a container by country
 ./proxy2vpn.sh create vpn2 8889 mullvad "United States"
+
+# Create a container with HTTP proxy authentication
+HTTPPROXY_USER=myuser HTTPPROXY_PASSWORD=mypassword ./proxy2vpn.sh create vpn3 8890 protonvpn
 ```
 
 ### Benefits of Dynamic Server Lists
@@ -224,6 +256,44 @@ If you're migrating from Docker Compose, use the import feature:
 ```
 
 The script will automatically create user profiles and containers based on your Docker Compose configuration.
+
+## HTTP Proxy Authentication
+
+Proxy2VPN supports HTTP proxy authentication to secure your proxy connections. You can enable this in several ways:
+
+1. **Environment Variables**: Set these before running create commands
+   ```bash
+   HTTPPROXY_USER=myuser HTTPPROXY_PASSWORD=mypassword ./proxy2vpn.sh create vpn1 8888 protonvpn
+   ```
+
+2. **Config File**: Add these settings to `config.json`
+   ```json
+   {
+     "httpproxy_user": "myuser",
+     "httpproxy_password": "mypassword"
+   }
+   ```
+
+3. **Update Existing Container**: Use the update command
+   ```bash
+   ./proxy2vpn.sh update vpn1 HTTPPROXY_USER myuser
+   ./proxy2vpn.sh update vpn1 HTTPPROXY_PASSWORD mypassword
+   ```
+
+4. **Batch File**: Include authentication in batch operations
+   ```json
+   "vpn1": {
+     "container_name": "vpn1",
+     "port": 8888,
+     "user_profile": "myprofile",
+     "environment": {
+       "HTTPPROXY_USER": "proxyuser",
+       "HTTPPROXY_PASSWORD": "proxypassword"
+     }
+   }
+   ```
+
+When HTTP proxy authentication is enabled, clients must provide the username and password when connecting to the proxy.
 
 ## License
 

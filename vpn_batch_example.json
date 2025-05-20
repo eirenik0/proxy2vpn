@@ -47,5 +47,16 @@
     "user_profile": "andr",
     "server_hostname": "node-us-123.protonvpn.net",
     "vpn_provider": "protonvpn"
+  },
+  "authenticated_proxy": {
+    "container_name": "vpn8",
+    "port": 8895,
+    "user_profile": "andr",
+    "server_city": "Chicago",
+    "vpn_provider": "protonvpn",
+    "environment": {
+      "HTTPPROXY_USER": "proxyuser",
+      "HTTPPROXY_PASSWORD": "proxypassword"
+    }
   }
 }
