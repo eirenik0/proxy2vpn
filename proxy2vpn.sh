@@ -48,6 +48,23 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # ======================================================
+# Include utility files (if available)
+# ======================================================
+if [[ -f "${SCRIPT_DIR}/server_utils.sh" ]]; then
+    source "${SCRIPT_DIR}/server_utils.sh"
+    SERVER_UTILS_LOADED=true
+else
+    SERVER_UTILS_LOADED=false
+fi
+
+if [[ -f "${SCRIPT_DIR}/server_display.sh" ]]; then
+    source "${SCRIPT_DIR}/server_display.sh"
+    SERVER_DISPLAY_LOADED=true
+else
+    SERVER_DISPLAY_LOADED=false
+fi
+
+# ======================================================
 # Helper Functions
 # ======================================================
 print_error() {
@@ -166,8 +183,20 @@ ensure_network() {
 # VPN Server List Management
 # ======================================================
 
+# These functions are now provided by server_utils.sh and server_display.sh
+# This section contains wrapper functions that use the loaded
+# utility files if available, or provide a simplified implementation
+# for standalone operation.
+
 # Fetch and cache server list from gluetun
 fetch_server_list() {
+    # Use the server_utils.sh implementation if available
+    if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
+        # The function has been loaded from server_utils.sh
+        command -v fetch_server_list >/dev/null 2>&1 && fetch_server_list "$@"
+        return $?
+    fi
+
     print_info "Fetching VPN server list from gluetun..."
 
     # Check if the cache exists and is still valid
@@ -176,283 +205,181 @@ fetch_server_list() {
         if [[ ${file_age} -lt ${CACHE_TTL} ]]; then
             print_info "Using cached server list (age: $((file_age / 60 / 60)) hours)"
             return 0
-    else
+        else
             print_info "Cached server list is outdated, refreshing..."
-    fi
-  else
+        fi
+    else
         print_info "No cached server list found, downloading..."
-  fi
+    fi
 
     # Fetch server list from GitHub
     if ! curl -s -o "${SERVERS_CACHE_FILE}" "${GLUETUN_SERVERS_URL}"; then
         print_error "Failed to download server list from ${GLUETUN_SERVERS_URL}"
         return 1
-  fi
+    fi
 
     # Validate that the file is valid JSON
     if ! jq empty "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         print_error "Downloaded server list is not valid JSON"
         rm -f "${SERVERS_CACHE_FILE}"
         return 1
-  fi
+    fi
 
     print_success "Server list fetched and cached successfully"
     return 0
 }
 
-# Extract countries list for a provider
-get_countries_for_provider() {
-    local provider="${1}"
+# List available VPN providers - wrapper function
+# This function doesn't actually use arguments, but we include "$@" for
+# consistency with other wrappers and to silence shellcheck warnings
+list_providers_wrapper() {
+    # Use server_display.sh implementation if available
+    if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
+        source "${SCRIPT_DIR}/server_display.sh"
+        list_providers "$@"
+        return $?
+    fi
 
+    # Fallback implementation
+    print_header "Available VPN Providers:"
+    echo
+    
+    printf "%-25s\n" "PROVIDER"
+    printf "%-25s\n" "--------"
+    
+    # Extract all providers from the server list
+    fetch_server_list || return 1
+    jq -r 'keys | .[] | select(. != "version")' "${SERVERS_CACHE_FILE}" | sort | while read -r provider; do
+        printf "%-25s\n" "${provider}"
+    done
+}
+
+# Normalize provider name
+normalize_provider_name() {
+    # Use server_utils.sh implementation if available
+    if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
+        command -v normalize_provider_name >/dev/null 2>&1 && normalize_provider_name "$@"
+        return $?
+    fi
+
+    # Fallback implementation
+    local provider="${1}"
+    
+    # Convert to lowercase for case-insensitive matching
+    provider=$(echo "${provider}" | tr '[:upper:]' '[:lower:]')
+    
+    case "${provider}" in
+        "private internet access"|"private"|"privacy"|"pia")
+            echo "private internet access"
+            ;;
+        "perfect"|"perfect privacy")
+            echo "perfect privacy"
+            ;;
+        "vpnunlimited"|"vpn unlimited")
+            echo "vpn unlimited"
+            ;;
+        # Add other provider aliases as needed
+        *)
+            echo "${provider}"
+            ;;
+    esac
+}
+
+# Check if a provider exists
+provider_exists() {
+    # Use server_utils.sh implementation if available
+    if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
+        command -v provider_exists >/dev/null 2>&1 && provider_exists "$@"
+        return $?
+    fi
+
+    # Fallback implementation
+    local provider="${1}"
+    # Adding "set -e;" to ensure error status propagates through command substitution
+    local normalized_provider="$(set -e; normalize_provider_name "${provider}")"
+    
     # Ensure we have the server list
     if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
         fetch_server_list || return 1
-  fi
-
-    # Create provider-specific cache file for countries
-    local cache_file="${CACHE_DIR}/${provider}_countries.json"
-
-    # Check if the cache file exists and is valid
-    if [[ -f "${cache_file}" ]]; then
-        local file_age=$(($(date +%s) - $(date -r "${cache_file}" +%s)))
-        if [[ ${file_age} -lt ${CACHE_TTL} ]]; then
-            return 0
     fi
-  fi
-
-    print_info "Extracting countries for ${provider}..."
-
-    # Extract countries based on provider from the server list
-    if [[ "${provider}" == "private internet access" || "${provider}" == "private" ]]; then
-        provider="private internet access"
-    elif [[ "${provider}" == "perfect" ]]; then
-        provider="perfect privacy"
-    elif [[ "${provider}" == "privacy" ]]; then
-        provider="private internet access"
-  fi
-
-    # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
-        jq -r --arg provider "${provider}" '
-            .[$provider].servers |
-            group_by(.country) |
-            map({
-                country: (.[0].country // "Unknown"),
-                code: (.[0].country_code // .[0].region //
-                      (if .[0].country then (.[0].country | split(" ") | .[0][0:2] | ascii_upcase) else "??" end))
-            }) |
-            unique_by(.country)
-        ' "${SERVERS_CACHE_FILE}" >"${cache_file}"
-  else
-        print_error "Provider ${provider} not found in server list"
-        echo "[]" >"${cache_file}"
-        return 1
-  fi
-
-    print_success "Extracted and cached countries for ${provider}"
-    return 0
-}
-
-# Extract cities for a provider in a country
-get_cities_for_country() {
-    local provider="${1}"
-    local country_code="${2}"
-
-    # Ensure we have the server list
-    if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
-        fetch_server_list || return 1
-  fi
-
-    # Create provider-specific cache file for cities
-    local cache_file="${CACHE_DIR}/${provider}_cities.json"
-
-    # Check if the cache file exists and is valid
-    if [[ -f "${cache_file}" ]]; then
-        local file_age=$(($(date +%s) - $(date -r "${cache_file}" +%s)))
-        if [[ ${file_age} -lt ${CACHE_TTL} ]]; then
-            return 0
-    fi
-  fi
-
-    print_info "Extracting cities for ${provider}..."
-
-    # Normalize provider name for lookup
-    if [[ "${provider}" == "private internet access" || "${provider}" == "private" ]]; then
-        provider="private internet access"
-    elif [[ "${provider}" == "perfect" ]]; then
-        provider="perfect privacy"
-    elif [[ "${provider}" == "privacy" ]]; then
-        provider="private internet access"
-  fi
-
-    # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
-        jq -r --arg provider "${provider}" '
-            .[$provider].servers |
-            group_by(.country) |
-            map({
-                country_code: (.[0].country_code // .[0].region //
-                              (if .[0].country then (.[0].country | split(" ") | .[0][0:2] | ascii_upcase) else "??" end)),
-                country: (.[0].country // "Unknown"),
-                cities: (
-                    map(.city) |
-                    map(select(. != null)) |
-                    unique |
-                    sort
-                )
-            })
-        ' "${SERVERS_CACHE_FILE}" >"${cache_file}"
-  else
-        print_error "Provider ${provider} not found in server list"
-        echo "[]" >"${cache_file}"
-        return 1
-  fi
-
-    print_success "Extracted and cached cities for ${provider}"
-    return 0
-}
-
-# Get server hostnames for a provider in a city
-get_servers_for_city() {
-    local provider="${1}"
-    local country_code="${2}"
-    local city="${3}"
-
-    # Ensure we have the server list
-    if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
-        fetch_server_list || return 1
-  fi
-
-    # Create provider-specific cache file for server hostnames
-    local cache_file="${CACHE_DIR}/${provider}_format_servers.json"
-
-    # Check if the cache file exists and is valid
-    if [[ -f "${cache_file}" ]]; then
-        local file_age=$(($(date +%s) - $(date -r "${cache_file}" +%s)))
-        if [[ ${file_age} -lt ${CACHE_TTL} ]]; then
-            return 0
-    fi
-  fi
-
-    print_info "Extracting server hostnames for ${provider}..."
-
-    # Normalize provider name for lookup
-    if [[ "${provider}" == "private internet access" || "${provider}" == "private" ]]; then
-        provider="private internet access"
-    elif [[ "${provider}" == "perfect" ]]; then
-        provider="perfect privacy"
-    elif [[ "${provider}" == "privacy" ]]; then
-        provider="private internet access"
-  fi
-
-    # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
-        jq -r --arg provider "${provider}" '
-            .[$provider].servers |
-            map({
-                hostname: (.hostname // .server_name // null),
-                country: (.country // "Unknown"),
-                country_code: (.country_code // .region // "??"),
-                city: (.city // null),
-                ip: (if .ips then .ips[0] else null end),
-                type: (.vpn // "openvpn")
-            }) |
-            map(select(.hostname != null))
-        ' "${SERVERS_CACHE_FILE}" >"${cache_file}"
-  else
-        print_error "Provider ${provider} not found in server list"
-        echo "[]" >"${cache_file}"
-        return 1
-  fi
-
-    print_success "Extracted and cached servers for ${provider}"
-    return 0
-}
-
-# Validate if a country exists for a provider
-validate_country() {
-    local provider="${1}"
-    local country="${2}"
-
-    # Ensure we have countries for this provider
-    get_countries_for_provider "${provider}" || return 1
-
-    local country_file="${CACHE_DIR}/${provider}_countries.json"
-    if ! [[ -f "${country_file}" ]]; then
-        print_error "Country cache file not found"
-        return 1
-  fi
-
-    # Check if the country exists in the provider's list
-    if jq -e --arg country "${country}" '.[] | select(.country == ${country} or .code == ${country})' "${country_file}" >/dev/null 2>&1; then
+    
+    if jq -e --arg provider "${normalized_provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         return 0
-  else
-        print_error "Country '${country}' not found for provider '${provider}'"
+    else
         return 1
-  fi
+    fi
 }
 
-# Validate if a city exists within a country for a provider
-validate_city() {
-    local provider="${1}"
-    local country_code="${2}"
-    local city="${3}"
+# List available countries for a provider - wrapper function
+list_countries_wrapper() {
+    # Use server_display.sh implementation if available
+    if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
+        source "${SCRIPT_DIR}/server_display.sh"
+        list_countries "$@"
+        return $?
+    fi
 
-    # Ensure we have cities for this provider
-    get_cities_for_country "${provider}" "${country_code}" || return 1
-
-    local city_file="${CACHE_DIR}/${provider}_cities.json"
-    if ! [[ -f "${city_file}" ]]; then
-        print_error "City cache file not found"
-        return 1
-  fi
-
-    # Check if the city exists in the provider's list for the specified country
-    if jq -e --arg country "${country_code}" --arg city "${city}" '.[] | select(.country_code == $country or .country == $country) | .cities | index($city)' "${city_file}" >/dev/null 2>&1; then
-        return 0
-  else
-        print_error "City '${city}' not found in country '${country_code}' for provider '${provider}'"
-        return 1
-  fi
-}
-
-# List available countries for a provider
-list_countries() {
+    # Fallback to the original implementation
     local provider="${1:-${DEFAULT_VPN_PROVIDER}}"
-
-    # Ensure we have countries for this provider
-    get_countries_for_provider "${provider}" || return 1
-
-    local country_file="${CACHE_DIR}/${provider}_countries.json"
-    if ! [[ -f "${country_file}" ]]; then
-        print_error "Country cache file not found"
-        return 1
-  fi
-
+    # Adding "set -e;" to ensure error status propagates through command substitution
+    local normalized_provider="$(set -e; normalize_provider_name "${provider}")"
+    
+    # Ensure we have the server list
+    if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
+        fetch_server_list || return 1
+    fi
+    
     print_header "Available Countries for ${provider}:"
     echo
-
+    
     printf "%-25s %-20s\n" "COUNTRY" "CODE"
     printf "%-25s %-20s\n" "-------" "----"
-
-    jq -r '.[] | "\(.country)|\(.code)"' "${country_file}" | while read -r line; do
+    
+    # Extract countries directly from the server list
+    jq -r --arg provider "${normalized_provider}" '
+        .[$provider].servers |
+        group_by(.country) |
+        map({
+            country: (.[0].country // "Unknown"),
+            code: (.[0].country_code // .[0].region //
+                  (if .[0].country then (.[0].country | split(" ") | .[0][0:2] | ascii_upcase) else "??" end))
+        }) |
+        unique_by(.country) |
+        sort_by(.country) |
+        .[] |
+        "\(.country)|\(.code)"
+    ' "${SERVERS_CACHE_FILE}" | while read -r line; do
+        if [[ -z "${line}" ]]; then
+            continue
+        fi
+        
         country=$(echo "${line}" | cut -d'|' -f1)
         code=$(echo "${line}" | cut -d'|' -f2)
         printf "%-25s %-20s\n" "${country}" "${code}"
-  done
+    done
 }
 
-# List available cities for a country and provider
-list_cities() {
+# List available cities for a country and provider - wrapper function
+list_cities_wrapper() {
+    # Use server_display.sh implementation if available
+    if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
+        source "${SCRIPT_DIR}/server_display.sh"
+        list_cities "$@"
+        return $?
+    fi
+
+    # Fallback implementation
     local provider="${1:-${DEFAULT_VPN_PROVIDER}}"
     local country_code="${2}"
-
+    # Adding "set -e;" to ensure error status propagates through command substitution
+    local normalized_provider="$(set -e; normalize_provider_name "${provider}")"
+    
     if [[ -z "${country_code}" ]]; then
         print_error "Country code is required"
         echo "Usage: ${0} list-cities <provider> <country_code>"
         return 1
-  fi
-
+    fi
+    
     # Special case mapping for common country codes
     case "${country_code}" in
         US | USA | UNITED_STATES | UNITEDSTATES)
@@ -467,86 +394,141 @@ list_cities() {
         *)
             # Keep original country code
             ;;
-  esac
-
-    # Ensure we have cities for this provider
-    get_cities_for_country "${provider}" "${country_code}" || return 1
-
-    local city_file="${CACHE_DIR}/${provider}_cities.json"
-    if ! [[ -f "${city_file}" ]]; then
-        print_error "City cache file not found"
-        return 1
-  fi
-
+    esac
+    
+    # Ensure we have the server list
+    if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
+        fetch_server_list || return 1
+    fi
+    
     print_header "Available Cities for ${provider} in ${country_code}:"
     echo
-
-    printf "%-30s\n" "CITY"
-    printf "%-30s\n" "----"
-
-    # Extract cities for the specified country
-    # First try exact country code, then try fuzzy match with country name
-    country_name=$(jq -r --arg code "${country_code}" '.[] | select(.country_code == ${code}) | .country' "${city_file}" | head -1)
-
-    # If a 2-letter code was provided but no match found, try to find matching countries
-    if [[ -z "${country_name}" && ${#country_code} -eq 2 ]]; then
-        country_name=$(jq -r --arg code "${country_code}" '.[] | select(.country | test("^" + ${code}; "i")) | .country' "${city_file}" | head -1)
-
-        # Try matching countries that start with this code
-        if [[ -z "${country_name}" ]]; then
-            country_name=$(jq -r '.[] | .country' "${city_file}" | grep -i "^${country_code}" | head -1)
-    fi
-
-        # As a last resort, look for countries that have this code
-        if [[ -z "${country_name}" ]]; then
-            country_code_upper=$(echo "${country_code}" | tr '[:lower:]' '[:upper:]')
-            country_name=$(jq -r --arg code "${country_code_upper}" '.[] | select(.country_code == ${code}) | .country' "${city_file}" | head -1)
-    fi
-  fi
-
-    if [[ -n "${country_name}" ]]; then
-        print_info "Found matching country: ${country_name}"
-        jq -r --arg country "${country_name}" '.[] | select(.country == ${country}) | .cities[]' "${city_file}" | sort | while read -r city; do
-            printf "%-30s\n" "${city}"
+    
+    printf "%-25s\n" "CITY"
+    printf "%-25s\n" "----"
+    
+    # Extract cities directly from the server list
+    jq -r --arg provider "${normalized_provider}" --arg country "${country_code}" '
+        .[$provider].servers |
+        map(select(.country == $country or .country_code == $country or .region == $country)) |
+        map(.city) |
+        map(select(. != null)) |
+        unique |
+        sort[]
+    ' "${SERVERS_CACHE_FILE}" | while read -r city; do
+        if [[ -z "${city}" ]]; then
+            continue
+        fi
+        
+        printf "%-25s\n" "${city}"
     done
-  else
-        # Fallback to original search
-        jq -r --arg country "${country_code}" '.[] | select(.country_code == ${country} or .country == ${country}) | .cities[]' "${city_file}" | sort | while read -r city; do
-            printf "%-30s\n" "${city}"
-    done
-  fi
 }
 
-# Update all server lists for all supported providers
-update_all_server_lists() {
-    print_header "Updating server lists for all providers..."
+# List available servers for a provider, optionally filtered by country and city - wrapper function
+list_servers_wrapper() {
+    # Use server_display.sh implementation if available
+    if [[ "${SERVER_DISPLAY_LOADED}" == "true" ]]; then
+        print_info "Using server_display.sh implementation"
+        source "${SCRIPT_DIR}/server_display.sh"
+        list_servers "$@"
+        return $?
+    fi
+
+    # Fallback implementation
+    local provider="${1:-${DEFAULT_VPN_PROVIDER}}"
+    local country="${2:-}"
+    local city="${3:-}"
+    # Adding "set -e;" to ensure error status propagates through command substitution
+    local normalized_provider="$(set -e; normalize_provider_name "${provider}")"
+    
+    print_info "Provider: ${provider}, Normalized: ${normalized_provider}"
+    
+    local location="${provider}"
+    if [[ -n "${country}" ]]; then
+        location="${location} in ${country}"
+        if [[ -n "${city}" ]]; then
+            location="${location}, ${city}"
+        fi
+    fi
+    
+    # Ensure we have the server list
+    if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
+        fetch_server_list || return 1
+    fi
+    
+    print_info "Using server list file: ${SERVERS_CACHE_FILE}"
+    print_info "Checking server count: $(jq -r --arg provider "${normalized_provider}" '.[$provider].servers | length' "${SERVERS_CACHE_FILE}") servers found"
+    
+    print_header "Available Servers for ${location}:"
     echo
-
-    # Fetch main server list
-    fetch_server_list || return 1
-
-    # Extract all providers from the server list
-    local providers
-    providers=$(jq -r 'keys | .[] | select(. != "version")' "${SERVERS_CACHE_FILE}" | sort | uniq)
-
-    # Use a safer IFS setting to handle spaces in provider names
-    local OLD_IFS="${IFS}"
-    IFS=$'\n'
-    for provider in ${providers}; do
-        IFS="${OLD_IFS}"
-        print_info "Updating data for provider: ${provider}"
-        get_countries_for_provider "${provider}"
-        get_cities_for_country "${provider}" ""
-        get_servers_for_city "${provider}" "" ""
-        # Make sure to restore IFS at the end of each iteration
-        IFS=$'\n'
+    
+    printf "%-40s %-20s %-15s %-15s\n" "HOSTNAME" "COUNTRY" "CITY" "TYPE"
+    printf "%-40s %-20s %-15s %-15s\n" "--------" "-------" "----" "----"
+    
+    # Build jq filter based on parameters
+    local jq_filter=".[\$provider].servers"
+    
+    # Add country filter if specified
+    if [[ -n "${country}" ]]; then
+        jq_filter+=" | map(select(.country == \$country or .country_code == \$country or .region == \$country))"
+        print_info "Added country filter for: ${country}"
+    fi
+    
+    # Add city filter if specified
+    if [[ -n "${city}" ]]; then
+        jq_filter+=" | map(select(.city == \$city))"
+        print_info "Added city filter for: ${city}"
+    fi
+    
+    # Format output
+    jq_filter+=" | map({
+        hostname: (.hostname // .server_name // null),
+        country: (.country // \"Unknown\"),
+        city: (.city // null),
+        type: (.vpn // \"openvpn\")
+    }) | map(select(.hostname != null))"
+    
+    # Debug: Show count of servers before output formatting
+    local cmd="jq -r --arg provider \"${normalized_provider}\" --arg country \"${country}\" --arg city \"${city}\" '${jq_filter} | length' \"${SERVERS_CACHE_FILE}\""
+    print_info "Count check command: ${cmd}"
+    local count=$(eval "${cmd}")
+    print_info "Filtered server count: ${count}"
+    
+    # Add output formatting
+    jq_filter+=" | .[] | \"\(.hostname)|\(.country)|\(.city // \"N/A\")|\(.type)\""
+    
+    jq -r --arg provider "${normalized_provider}" --arg country "${country}" --arg city "${city}" "${jq_filter}" "${SERVERS_CACHE_FILE}" | while read -r line; do
+        if [[ -z "${line}" ]]; then
+            continue
+        fi
+        
+        hostname=$(echo "${line}" | cut -d'|' -f1)
+        country=$(echo "${line}" | cut -d'|' -f2)
+        city=$(echo "${line}" | cut -d'|' -f3)
+        type=$(echo "${line}" | cut -d'|' -f4)
+        
+        printf "%-40s %-20s %-15s %-15s\n" "${hostname}" "${country}" "${city}" "${type}"
     done
+}
 
-    # Restore original IFS
-    IFS="${OLD_IFS}"
+# Update the server list - wrapper function
+# This function doesn't actually use arguments, but we include "$@" for
+# consistency with other wrappers and to silence shellcheck warnings
+update_server_list_wrapper() {
+    # Use server_utils.sh implementation if available
+    if [[ "${SERVER_UTILS_LOADED}" == "true" ]]; then
+        # Call the external function directly from the source file
+        source "${SCRIPT_DIR}/server_utils.sh"
+        update_server_list "$@"
+        return $?
+    fi
 
-    print_success "All server lists updated successfully"
-    return 0
+    # Fallback implementation
+    print_header "Updating server list..."
+    
+    # Force refresh of the server list
+    rm -f "${SERVERS_CACHE_FILE}"
+    fetch_server_list
 }
 
 # ======================================================
@@ -2546,10 +2528,13 @@ show_usage() {
     echo "  stop <container>         Stop a container"
     echo
     echo "Server Information Commands:"
-    echo "  update-server-lists       Update server lists for all providers"
+    echo "  list-providers            List all available VPN providers"
+    echo "  update-server-list        Update server lists for all providers"
     echo "  list-countries <provider> List available countries for a provider"
     echo "  list-cities <provider> <country_code>"
     echo "                           List available cities for a country and provider"
+    echo "  list-servers <provider> [country] [city]"
+    echo "                           List available servers for a provider"
     echo
     echo "Batch Operations:"
     echo "  create-batch [file]      Create multiple containers from a batch file"
@@ -2653,14 +2638,20 @@ main() {
             ;;
 
         # Server Information commands
-        update-server-lists)
-            update_all_server_lists
+        list-providers)
+            list_providers_wrapper "$@"
+            ;;
+        update-server-list|update-server-lists)
+            update_server_list_wrapper "$@"
             ;;
         list-countries)
-            list_countries "$@"
+            list_countries_wrapper "$@"
             ;;
         list-cities)
-            list_cities "$@"
+            list_cities_wrapper "$@"
+            ;;
+        list-servers)
+            list_servers_wrapper "$@"
             ;;
 
         # Batch operations
@@ -2707,6 +2698,9 @@ main() {
         # System commands
         version)
             show_version
+            ;;
+        help)
+            show_usage
             ;;
 
         # Help
