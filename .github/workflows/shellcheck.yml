@@ -1,0 +1,43 @@
+name: Main Shell Script Lint
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.sh'
+      - 'Makefile'
+      - '!tests/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.sh'
+      - 'Makefile'
+      - '!tests/**'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  shellcheck:
+    name: Shellcheck and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          curl -sS https://webinstall.dev/shfmt | bash
+          export PATH="$HOME/.local/bin:$PATH"
+          
+      - name: Run ShellCheck
+        run: make lint-main
+      
+      - name: Check Formatting
+        run: make fmt-check-main
+          
+      - name: Format Instructions
+        if: failure()
+        run: |
+          echo "Some shell scripts are not properly formatted."
+          echo "To automatically format scripts, run this command locally:"
+          echo "make fmt-main"
