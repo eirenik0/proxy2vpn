@@ -223,14 +223,18 @@ get_countries_for_provider() {
     print_info "Extracting countries for ${provider}..."
 
     # Extract countries based on provider from the server list
-    if [[ "${provider}" == "private internet access" ]]; then
-        provider="pia"
+    if [[ "${provider}" == "private internet access" || "${provider}" == "private" ]]; then
+        provider="private internet access"
+    elif [[ "${provider}" == "perfect" ]]; then
+        provider="perfect privacy"
+    elif [[ "${provider}" == "privacy" ]]; then
+        provider="private internet access"
   fi
 
     # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[${provider}]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
+    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         jq -r --arg provider "${provider}" '
-            .[${provider}].servers |
+            .[$provider].servers |
             group_by(.country) |
             map({
                 country: (.[0].country // "Unknown"),
@@ -273,14 +277,18 @@ get_cities_for_country() {
     print_info "Extracting cities for ${provider}..."
 
     # Normalize provider name for lookup
-    if [[ "${provider}" == "private internet access" ]]; then
-        provider="pia"
+    if [[ "${provider}" == "private internet access" || "${provider}" == "private" ]]; then
+        provider="private internet access"
+    elif [[ "${provider}" == "perfect" ]]; then
+        provider="perfect privacy"
+    elif [[ "${provider}" == "privacy" ]]; then
+        provider="private internet access"
   fi
 
     # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[${provider}]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
+    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         jq -r --arg provider "${provider}" '
-            .[${provider}].servers |
+            .[$provider].servers |
             group_by(.country) |
             map({
                 country_code: (.[0].country_code // .[0].region //
@@ -329,14 +337,18 @@ get_servers_for_city() {
     print_info "Extracting server hostnames for ${provider}..."
 
     # Normalize provider name for lookup
-    if [[ "${provider}" == "private internet access" ]]; then
-        provider="pia"
+    if [[ "${provider}" == "private internet access" || "${provider}" == "private" ]]; then
+        provider="private internet access"
+    elif [[ "${provider}" == "perfect" ]]; then
+        provider="perfect privacy"
+    elif [[ "${provider}" == "privacy" ]]; then
+        provider="private internet access"
   fi
 
     # Process providers with different schemas
-    if jq -e --arg provider "${provider}" '.[${provider}]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
+    if jq -e --arg provider "${provider}" '.[$provider]' "${SERVERS_CACHE_FILE}" >/dev/null 2>&1; then
         jq -r --arg provider "${provider}" '
-            .[${provider}].servers |
+            .[$provider].servers |
             map({
                 hostname: (.hostname // .server_name // null),
                 country: (.country // "Unknown"),
@@ -515,14 +527,23 @@ update_all_server_lists() {
 
     # Extract all providers from the server list
     local providers
-    providers=$(jq -r 'keys | .[]' "${SERVERS_CACHE_FILE}" | grep -v "version" | sort | uniq)
+    providers=$(jq -r 'keys | .[] | select(. != "version")' "${SERVERS_CACHE_FILE}" | sort | uniq)
 
+    # Use a safer IFS setting to handle spaces in provider names
+    local OLD_IFS="${IFS}"
+    IFS=$'\n'
     for provider in ${providers}; do
+        IFS="${OLD_IFS}"
         print_info "Updating data for provider: ${provider}"
         get_countries_for_provider "${provider}"
         get_cities_for_country "${provider}" ""
         get_servers_for_city "${provider}" "" ""
-  done
+        # Make sure to restore IFS at the end of each iteration
+        IFS=$'\n'
+    done
+
+    # Restore original IFS
+    IFS="${OLD_IFS}"
 
     print_success "All server lists updated successfully"
     return 0
