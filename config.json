@@ -6,7 +6,6 @@
     "auto_restart_containers": true,
     "use_device_tun": true,
     "server_cache_ttl": 86400,
-    "validate_server_locations": true,
     "httpproxy_user": "",
     "httpproxy_password": ""
 }

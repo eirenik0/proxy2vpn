@@ -15,6 +15,9 @@ VERSION="0.1.2"
 
 set -e
 
+# Set restrictive permissions for sensitive files
+umask 077
+
 # ======================================================
 # Configuration
 # ======================================================
@@ -97,6 +100,45 @@ print_config() {
     echo -e "${CYAN}Config: ${1}${NC}"
 }
 
+# ======================================================
+# Input Validation Functions
+# ======================================================
+validate_port() {
+    local port="$1"
+    if ! [[ "${port}" =~ ^[0-9]+$ ]] || [[ "${port}" -lt 1 ]] || [[ "${port}" -gt 65535 ]]; then
+        print_error "Invalid port: ${port} (must be between 1-65535)"
+        return 1
+    fi
+    return 0
+}
+
+validate_container_name() {
+    local name="$1"
+    if ! [[ "${name}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        print_error "Invalid container name: ${name} (only alphanumeric, underscore, and hyphen allowed)"
+        return 1
+    fi
+    return 0
+}
+
+validate_profile_name() {
+    local name="$1"
+    if ! [[ "${name}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        print_error "Invalid profile name: ${name} (only alphanumeric, underscore, and hyphen allowed)"
+        return 1
+    fi
+    return 0
+}
+
+is_port_available() {
+    local port="$1"
+    if docker ps --format '{{.Ports}}' | grep -q "0.0.0.0:${port}"; then
+        print_error "Port ${port} is already in use"
+        return 1
+    fi
+    return 0
+}
+
 # Validate if a command exists
 command_exists() {
     command -v "${1}" >/dev/null 2>&1
@@ -148,7 +190,6 @@ init_environment() {
     "auto_restart_containers": true,
     "use_device_tun": true,
     "server_cache_ttl": ${CACHE_TTL},
-    "validate_server_locations": true,
     "httpproxy_user": "",
     "httpproxy_password": ""
 }
@@ -557,7 +598,12 @@ create_profile() {
         print_error "Missing required parameters."
         echo "Usage: ${0} create-profile <profile_name> <username> <password>"
         exit 1
-  fi
+    fi
+
+    # Validate profile name
+    if ! validate_profile_name "${profile_name}"; then
+        exit 1
+    fi
 
     local profile_file="${PROFILES_DIR}/${profile_name}.env"
 
@@ -567,11 +613,15 @@ create_profile() {
         exit 1
   fi
 
-    # Create profile file
-    cat >"${profile_file}"  <<EOF
+    # Create profile file with secure permissions
+    # Use a single operation to avoid race conditions
+    cat >"${profile_file}" <<EOF
 OPENVPN_USER=${username}
 OPENVPN_PASSWORD=${password}
 EOF
+    
+    # Set secure permissions after content is written
+    chmod 600 "${profile_file}"
 
     print_success "Created user profile: ${profile_name}"
 }
@@ -618,14 +668,32 @@ create_vpn_from_profile() {
         echo "Example: ${0} create-from-profile vpn1 8888 myprofile \"New York\" \"\" protonvpn"
         echo "Note: You can set HTTPPROXY_USER and HTTPPROXY_PASSWORD environment variables to enable HTTP proxy authentication"
         exit 1
-  fi
+    fi
+
+    # Validate inputs
+    if ! validate_container_name "${container_name}"; then
+        exit 1
+    fi
+    
+    if ! validate_port "${port}"; then
+        exit 1
+    fi
+    
+    if ! is_port_available "${port}"; then
+        exit 1
+    fi
+    
+    # Validate provider
+    if ! validate_provider "${provider}"; then
+        exit 1
+    fi
 
     # Check if profile exists
     local profile_file="${PROFILES_DIR}/${profile_name}.env"
     if [[ ! -f "${profile_file}" ]]; then
         print_error "Profile '${profile_name}' not found"
         exit 1
-  fi
+    fi
 
     # Full container name - if using numeric naming convention, keep as is
     local full_container_name="${container_name}"
@@ -658,33 +726,31 @@ create_vpn_from_profile() {
 
     # Add optional location parameters
     if [[ -n "${server_city}" ]]; then
-        # Validate city if server validation is enabled
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
-            # Fetch server list if needed
-            if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
-                fetch_server_list || exit 1
-      fi
+        # Validate city
+        # Fetch server list if needed
+        if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
+            fetch_server_list || exit 1
+        fi
 
-            # Get country for the city
-            local country_code=""
-            if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                country_code=$(jq -r --arg city "${server_city}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
-      fi
+        # Get country for the city
+        local country_code=""
+        if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
+            country_code=$(jq -r --arg city "${server_city}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
+        fi
 
-            # For ProtonVPN US cities, we need to set the country to "United States"
-            # regardless of whether we found a country code or not since most city detection
-            # doesn't properly set the country
-            if [[ "${provider}" == "protonvpn" && ( "${server_city}" == "Salt Lake City" || "${server_city}" == "New York" || "${server_city}" == "Chicago" || "${server_city}" == "Dallas" || "${server_city}" == "Denver" || "${server_city}" == "Los Angeles" || "${server_city}" == "Miami" || "${server_city}" == "Phoenix" || "${server_city}" == "San Jose" || "${server_city}" == "Seattle" || "${server_city}" == "Washington" || "${server_city}" == "Boston" || "${server_city}" == "Ashburn" || "${server_city}" == "Secaucus" || "${server_city}" == "Atlanta" ) ]]; then
-                # Use "United States" for ProtonVPN US cities
-                echo "SERVER_COUNTRIES=United States" >> "${temp_env_file}"
-                print_info "Setting country to 'United States' for US city: ${server_city}"
-            elif [[ -n "${country_code}" ]]; then
-                echo "SERVER_COUNTRIES=${country_code}" >> "${temp_env_file}"
-                print_info "Using country code from city lookup: ${country_code}"
-            else
-                print_warning "No country code found for city: ${server_city}. This might cause connection issues."
-            fi
-    fi
+        # For ProtonVPN US cities, we need to set the country to "United States"
+        # regardless of whether we found a country code or not since most city detection
+        # doesn't properly set the country
+        if [[ "${provider}" == "protonvpn" && ( "${server_city}" == "Salt Lake City" || "${server_city}" == "New York" || "${server_city}" == "Chicago" || "${server_city}" == "Dallas" || "${server_city}" == "Denver" || "${server_city}" == "Los Angeles" || "${server_city}" == "Miami" || "${server_city}" == "Phoenix" || "${server_city}" == "San Jose" || "${server_city}" == "Seattle" || "${server_city}" == "Washington" || "${server_city}" == "Boston" || "${server_city}" == "Ashburn" || "${server_city}" == "Secaucus" || "${server_city}" == "Atlanta" ) ]]; then
+            # Use "United States" for ProtonVPN US cities
+            echo "SERVER_COUNTRIES=United States" >> "${temp_env_file}"
+            print_info "Setting country to 'United States' for US city: ${server_city}"
+        elif [[ -n "${country_code}" ]]; then
+            echo "SERVER_COUNTRIES=${country_code}" >> "${temp_env_file}"
+            print_info "Using country code from city lookup: ${country_code}"
+        else
+            print_warning "No country code found for city: ${server_city}. This might cause connection issues."
+        fi
 
         # Format city name properly - maintain spaces
         echo "SERVER_CITIES=${server_city}" >> "${temp_env_file}"
@@ -774,6 +840,11 @@ create_vpn() {
         echo "Note: You can set HTTPPROXY_USER and HTTPPROXY_PASSWORD environment variables to enable HTTP proxy authentication"
         exit 1
   fi
+    
+    # Validate provider
+    if ! validate_provider "${provider}"; then
+        exit 1
+    fi
 
     # Full container name - if using numeric naming convention, keep as is
     local full_container_name="${name}"
@@ -809,47 +880,32 @@ create_vpn() {
         # Fetch server list if needed
         if ! [[ -f "${SERVERS_CACHE_FILE}" ]]; then
             fetch_server_list || exit 1
-    fi
+        fi
 
         # Try to determine if location is a country, city, or hostname
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
-            # Check if it's a country
-            if validate_country "${provider}" "${location}"; then
-                env_vars+=("-e SERVER_COUNTRIES=${location}")
-                location_type="country"
-      else
-                # Check major cities
-                get_cities_for_country "${provider}" ""
-
-                # See if any cities match
-                if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                    if jq -e --arg city "${location}" '.[] | select(.cities | index($city) >= 0)' "${CACHE_DIR}/${provider}_cities.json" >/dev/null 2>&1; then
-                        env_vars+=("-e SERVER_CITIES=${location}")
-                        location_type="city"
-
-                        # Also try to find which country this city belongs to
-                        local country_code=$(jq -r --arg city "${location}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
-                        if [[ -n "${country_code}" ]]; then
-                            env_vars+=("-e SERVER_COUNTRIES=${country_code}")
-            fi
-          else
-                        # Assume it's a hostname or just pass it as country anyway
-                        env_vars+=("-e SERVER_COUNTRIES=${location}")
-                        location_type="country"
-                        print_warning "Location '${location}' not found in provider server list. Using as country name anyway."
-          fi
-        else
-                    # If no city file, just use as country
-                    env_vars+=("-e SERVER_COUNTRIES=${location}")
-                    location_type="country"
-        fi
-      fi
-    else
-            # If validation is disabled, just use as country
+        # Check if it's a country
+        if validate_country "${provider}" "${location}"; then
             env_vars+=("-e SERVER_COUNTRIES=${location}")
             location_type="country"
+        else
+            # Check if it's a city
+            if validate_city "${provider}" "${location}"; then
+                # It's a valid city, find its country
+                local city_country
+                city_country=$(set -e; find_country_for_city "${provider}" "${location}")
+                env_vars+=("-e SERVER_CITIES=${location}")
+                if [[ -n "${city_country}" ]]; then
+                    env_vars+=("-e SERVER_COUNTRIES=${city_country}")
+                fi
+                location_type="city"
+            else
+                # Not a valid city, assume it's a country or hostname
+                env_vars+=("-e SERVER_COUNTRIES=${location}")
+                location_type="country"
+                print_warning "Location '${location}' not found in provider server list. Using as country name anyway."
+            fi
+        fi
     fi
-  fi
 
     if [[ -n "${username}" ]]; then
         env_vars+=("-e OPENVPN_USER=${username}")
@@ -1133,32 +1189,26 @@ update_container() {
 
     # Update location labels based on what was updated
     if [[ "${key}" = "SERVER_COUNTRIES" ]]; then
-        # Validate country if server validation is enabled
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
-            if ! validate_country "${provider}" "${value}"; then
-                print_warning "Country '${value}' not found in provider server list. Using anyway."
-      fi
-    fi
+        # Validate country
+        if ! validate_country "${provider}" "${value}"; then
+            print_warning "Country '${value}' not found in provider server list. Using anyway."
+        fi
 
         location="${value}"
         location_type="country"
   elif   [[ "${key}" = "SERVER_CITIES" ]]; then
-        # Validate city if server validation is enabled
-        if jq -e '.validate_server_locations // true' "${CONFIG_FILE}" | grep -q "true"; then
-            get_cities_for_country "${provider}" ""
-
-            # Try to find which country this city belongs to
-            if [[ -f "${CACHE_DIR}/${provider}_cities.json" ]]; then
-                local country_code=$(jq -r --arg city "${value}" '.[] | select(.cities | index($city) >= 0) | .country_code' "${CACHE_DIR}/${provider}_cities.json" | head -1)
-
-                if [[ -n "${country_code}" ]]; then
-                    # Also update the country if we found a match
-                    new_env_vars+=("-e SERVER_COUNTRIES=${country_code}")
+        # Validate city
+        if validate_city "${provider}" "${value}"; then
+            # Valid city, try to find its country
+            local country_code
+            country_code=$(set -e; find_country_for_city "${provider}" "${value}")
+            if [[ -n "${country_code}" ]]; then
+                # Also update the country if we found a match
+                new_env_vars+=("-e SERVER_COUNTRIES=${country_code}")
+            fi
         else
-                    print_warning "City '${value}' not found in any country for provider '${provider}'. Using anyway."
+            print_warning "City '${value}' not found in provider '${provider}' server list. Using anyway."
         fi
-      fi
-    fi
 
         location="${value}"
         location_type="city"
@@ -1809,6 +1859,12 @@ create_batch() {
         local server_city=$(jq -r --arg name "${name}" '.[$name].server_city // ""' "${batch_file}")
         local server_hostname=$(jq -r --arg name "${name}" '.[$name].server_hostname // ""' "${batch_file}")
 
+        # Validate provider
+        if ! validate_provider "${provider}"; then
+            print_error "Skipping container ${container_name} due to invalid provider: ${provider}"
+            continue
+        fi
+
         print_info "Creating container: ${container_name} (port: ${port})"
 
         if [[ -n "${profile}" && -f "${PROFILES_DIR}/${profile}.env" ]]; then
@@ -2287,6 +2343,11 @@ apply_preset() {
     # Extract preset data
     local provider=$(jq -r --arg name "${preset_name}" '.[$name].vpn_provider' "${PRESETS_FILE}")
     local port=$(jq -r --arg name "${preset_name}" '.[$name].port' "${PRESETS_FILE}")
+    
+    # Validate provider
+    if ! validate_provider "${provider}"; then
+        exit 1
+    fi
 
     # Check for different location types in the preset
     local location=$(jq -r --arg name "${preset_name}" '.[$name].server_location // ""' "${PRESETS_FILE}")
@@ -2524,7 +2585,9 @@ create_preset() {
     env_vars_str=$(docker inspect --format='{{range .Config.Env}}{{.}} {{end}}' "${full_container_name}")
 
     # Create a temporary file for the environment
-    local env_file="/tmp/preset_env_$$.json"
+    local env_file
+    env_file="$(mktemp -t preset_env.XXXXXX.json)"
+    trap 'rm -f "'"${env_file}"'"' EXIT INT TERM
     echo "{" >"${env_file}"
 
     # Add environment variables
@@ -2565,6 +2628,15 @@ create_preset() {
         echo "{}" >"${preset_file}"
   fi
 
+    # Read env file content and convert to JSON
+    local env_json="{}"
+    if [[ -f "${env_file}" ]]; then
+        # Convert env file to JSON format more safely
+        env_json=$(jq -Rs 'split("\n") | 
+            map(select(length > 0) | split("=") | {(.[0]): .[1]}) | 
+            add // {}' "${env_file}" 2>/dev/null || echo "{}")
+    fi
+    
     # Add the new preset
     jq --arg name "${preset_name}" \
        --arg provider "${provider}" \
@@ -2572,27 +2644,17 @@ create_preset() {
        --arg port "${port}" \
        --arg desc "${description:-Created from container ${container_name}}" \
        --arg profile "${profile}" \
-       --arg location_type "${location_type}"
-       # Read env file content safely
-       local env_file_content
-       env_file_content="$(cat "${env_file}" || true)"
-       jq --arg name "${preset_name}" \
-       --arg provider "${provider}" \
-       --arg location "${location}" \
-       --arg port "${port}" \
-       --arg desc "${description:-Created from container ${container_name}}" \
-       --arg profile "${profile}" \
        --arg location_type "${location_type}" \
-       --argjson env "${env_file_content}" \
+       --argjson env "${env_json}" \
        '.[$name] = {
-         "name": ${name},
-         "vpn_provider": ${provider},
-         "server_location": ${location},
-         "port": (${port} | tonumber),
-         "user_profile": ${profile},
-         "location_type": ${location_type},
-         "environment": ${env},
-         "description": ${desc},
+         "name": $name,
+         "vpn_provider": $provider,
+         "server_location": $location,
+         "port": ($port | tonumber),
+         "user_profile": $profile,
+         "location_type": $location_type,
+         "environment": $env,
+         "description": $desc,
          "created_at": (now | todate),
          "updated_at": (now | todate)
        }' "${preset_file}" >"${preset_file}.new"
