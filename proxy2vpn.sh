@@ -1422,11 +1422,11 @@ cleanup_containers() {
 
         if [[ ${rm_result} -eq 0 ]]; then
             echo -e "${GREEN}✓${NC}"
-            ((success_count++))
+            ((success_count++)) || true
         else
             echo -e "${RED}✗${NC}"
             print_debug "Failed to remove ${container}, error code: ${rm_result}"
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     done
 
@@ -1514,11 +1514,11 @@ start_all_containers() {
 
         if [[ ${start_result} -eq 0 ]]; then
             echo -e "${GREEN}✓${NC}"
-            ((success_count++))
+            ((success_count++)) || true
         else
             echo -e "${RED}✗${NC}"
             print_debug "Failed to start ${container}, error code: ${start_result}"
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     done
 
@@ -1596,11 +1596,11 @@ stop_all_containers() {
 
         if [[ ${stop_result} -eq 0 ]]; then
             echo -e "${GREEN}✓${NC}"
-            ((success_count++))
+            ((success_count++)) || true
         else
             echo -e "${RED}✗${NC}"
             print_debug "Failed to stop ${container}, error code: ${stop_result}"
-            ((fail_count++))
+            ((fail_count++)) || true
         fi
     done
 
