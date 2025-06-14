@@ -2084,11 +2084,26 @@ import_from_compose() {
         echo "    \"container_name\": \"${container_name}\"," >>"${batch_file}"
 
         # Extract port from the service block (look for port mapping)
-        # First, extract the entire service definition
-        local service_block=$(awk "/^[[:space:]]*${service}:/{flag=1;next} /^[[:space:]]*[a-zA-Z0-9_-]+:/{flag=0} flag" "${compose_file}")
-
-        # Extract the ports section
-        local port_lines=$(echo "${service_block}" | grep -A 10 "ports:")
+        # First, extract the entire service definition with proper indentation handling
+        local service_block=""
+        local in_service=false
+        local indent_level=""
+        while IFS= read -r line; do
+            if [[ "${line}" =~ ^[[:space:]]*${service}: ]]; then
+                in_service=true
+                # Capture the indentation level of the service
+                indent_level=$(echo "${line}" | grep -o '^[[:space:]]*' | head -1)
+                continue
+            fi
+            
+            if [[ "${in_service}" == true ]]; then
+                # Check if we've reached another service at the same level
+                if [[ "${line}" =~ ^${indent_level}[a-zA-Z0-9_-]+: ]] && [[ ! "${line}" =~ ^${indent_level}[[:space:]] ]]; then
+                    break
+                fi
+                service_block+="${line}"$'\n'
+            fi
+        done < "${compose_file}"
 
         # Parse Docker Compose style port mappings
         # Try different formats: "host:container", "0.0.0.0:host:container", or "host:container/protocol"
@@ -2098,27 +2113,21 @@ import_from_compose() {
         print_debug "Service block for ${service}: ${service_block}"
 
         # Extract port directly from compose-style port mappings
-        if [[ "${service_block}" =~ ports:[[:space:]]*- ]]; then
-            # First, try direct regex extraction for the 0.0.0.0:PORT:8888 format
-            # This format is used in your compose.yml
-            if [[ "${service_block}" =~ [0-9\.]+:([0-9]+):[0-9]+ ]]; then
-                port="${BASH_REMATCH[1]}"
+        if echo "${service_block}" | grep -q "ports:"; then
+            # Look for port mapping in various formats
+            local port_line=$(echo "${service_block}" | grep -A 3 "ports:" | grep -E "^[[:space:]]*-" | head -1)
+            
+            # Try to extract port from different formats
+            # Format: "0.0.0.0:8888:8888/tcp" or "8888:8888" or "127.0.0.1:8888:8888"
+            if [[ "${port_line}" =~ \"?([0-9.]+:)?([0-9]+):([0-9]+) ]]; then
+                port="${BASH_REMATCH[2]}"
                 print_info "Extracted port from Docker Compose style port mapping for ${service}: ${port}"
-      fi
-
-            # If that didn't work, try a more general approach
-            if [[ -z "${port}" ]]; then
-                # Split the ports section for better parsing
-                local port_entries=$(echo "${service_block}" | grep -A 5 "ports:" | grep -E -- "- ")
-                print_debug "Port entries: ${port_entries}"
-
-                # Extract the first port number that seems to be a host port (8888:8888, etc.)
-                if [[ "${port_entries}" =~ ([0-9]+):[0-9]+ ]]; then
-                    port="${BASH_REMATCH[1]}"
-                    print_info "Extracted port from Docker Compose port entries for ${service}: ${port}"
+            elif [[ "${port_line}" =~ -[[:space:]]+([0-9]+) ]]; then
+                # Simple port number
+                port="${BASH_REMATCH[1]}"
+                print_info "Extracted simple port for ${service}: ${port}"
+            fi
         fi
-      fi
-    fi
 
         if [[ -z "${port}" ]]; then
             # If no port found in direct mapping, look for environment variables with port
