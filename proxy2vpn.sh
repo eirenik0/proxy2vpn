@@ -2271,6 +2271,217 @@ import_from_compose() {
     rm -f "${batch_file}"
 }
 
+# Export containers to Docker Compose file
+export_to_compose() {
+    local output_file="${1:-export-compose.yml}"
+    local include_env_files="${2:-true}"
+
+    print_header "Exporting VPN containers to Docker Compose file: ${output_file}"
+    echo
+
+    # Get all VPN containers
+    local containers=$(docker ps -a --filter "label=${PREFIX}.type=vpn" --format "{{.Names}}" | sort)
+
+    if [[ -z "${containers}" ]]; then
+        print_error "No VPN containers found to export"
+        exit 1
+    fi
+
+    print_info "Found $(echo "${containers}" | wc -w) containers to export"
+
+    # Start writing the compose file
+    cat > "${output_file}" << 'EOF'
+# Docker Compose file exported from proxy2vpn containers
+# Generated automatically - edit with caution
+
+EOF
+
+    # Get unique profiles and create base templates
+    local profiles=()
+    local container_array=()
+    
+    # Store containers in an array
+    while IFS= read -r container; do
+        if [[ -n "${container}" ]]; then
+            container_array+=("${container}")
+        fi
+    done <<< "${containers}"
+
+    # Collect unique profiles
+    for container in "${container_array[@]}"; do
+        local profile=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.profile" | printf "%s"}}' "${container}" 2>/dev/null)
+        if [[ -n "${profile}" && "${profile}" != "none" ]]; then
+            # Check if profile is already in the array
+            local found=false
+            for existing_profile in "${profiles[@]}"; do
+                if [[ "${existing_profile}" == "${profile}" ]]; then
+                    found=true
+                    break
+                fi
+            done
+            if [[ "${found}" == "false" ]]; then
+                profiles+=("${profile}")
+            fi
+        fi
+    done
+
+    # Write base templates for each profile
+    if [[ ${#profiles[@]} -gt 0 ]]; then
+        for profile in "${profiles[@]}"; do
+            # Get provider from any container using this profile
+            local provider=""
+            for container in "${container_array[@]}"; do
+                local container_profile=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.profile" | printf "%s"}}' "${container}" 2>/dev/null)
+                if [[ "${container_profile}" == "${profile}" ]]; then
+                    provider=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.provider"}}' "${container}" 2>/dev/null)
+                    break
+                fi
+            done
+            
+            {
+                echo "x-vpn-base-${profile}: &vpn-base-${profile}"
+                echo "  image: qmcgaw/gluetun"
+                echo "  cap_add:"
+                echo "    - NET_ADMIN"
+                
+                # Add device if configured
+                if jq -e '.use_device_tun // true' "${CONFIG_FILE}" | grep -q "true"; then
+                    echo "  devices:"
+                    echo "    - /dev/net/tun:/dev/net/tun"
+                fi
+                
+                if [[ "${include_env_files}" == "true" ]]; then
+                    echo "  env_file:"
+                    echo "    - env.${profile}"
+                fi
+                
+                if [[ -n "${provider}" ]]; then
+                    echo "  environment:"
+                    echo "    - VPN_SERVICE_PROVIDER=${provider}"
+                fi
+                
+                echo ""
+            } >> "${output_file}"
+        done
+    fi
+
+    # Write services section
+    echo "services:" >> "${output_file}"
+
+    # Export each container
+    for container in "${container_array[@]}"; do
+        local short_name=$(basename "${container}")
+        if [[ "${short_name}" == "${PREFIX}_"* ]]; then
+            short_name=${short_name#"${PREFIX}"_}
+        fi
+
+        local port=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.port"}}' "${container}" 2>/dev/null)
+        local provider=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.provider"}}' "${container}" 2>/dev/null)
+        local profile=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.profile" | printf "%s"}}' "${container}" 2>/dev/null)
+        local location_type=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location_type" | printf "%s"}}' "${container}" 2>/dev/null)
+        local location=$(docker inspect --format='{{index .Config.Labels "'"${PREFIX}"'.location"}}' "${container}" 2>/dev/null)
+
+        echo "  ${short_name}:" >> "${output_file}"
+        
+        # Add base template reference if profile exists
+        if [[ -n "${profile}" && "${profile}" != "none" ]]; then
+            echo "    <<: *vpn-base-${profile}" >> "${output_file}"
+        else
+            # No profile, add basic gluetun config
+            echo "    image: qmcgaw/gluetun" >> "${output_file}"
+            echo "    cap_add:" >> "${output_file}"
+            echo "      - NET_ADMIN" >> "${output_file}"
+            
+            if jq -e '.use_device_tun // true' "${CONFIG_FILE}" | grep -q "true"; then
+                echo "    devices:" >> "${output_file}"
+                echo "      - /dev/net/tun:/dev/net/tun" >> "${output_file}"
+            fi
+        fi
+        
+        # Add container name if it differs from service name
+        if [[ "${container}" != "${short_name}" ]]; then
+            echo "    container_name: ${short_name}" >> "${output_file}"
+        fi
+        
+        # Add port mapping
+        if [[ -n "${port}" ]]; then
+            echo "    ports:" >> "${output_file}"
+            echo "      - \"0.0.0.0:${port}:8888/tcp\"" >> "${output_file}"
+        fi
+        
+        # Add environment variables
+        local has_env=false
+        if [[ -n "${provider}" ]]; then
+            if [[ "${has_env}" == "false" ]]; then
+                echo "    environment:" >> "${output_file}"
+                has_env=true
+            fi
+            echo "      - VPN_SERVICE_PROVIDER=${provider}" >> "${output_file}"
+        fi
+        
+        # Add location environment variables
+        if [[ "${location_type}" == "city" && -n "${location}" ]]; then
+            if [[ "${has_env}" == "false" ]]; then
+                echo "    environment:" >> "${output_file}"
+                has_env=true
+            fi
+            echo "      - SERVER_CITIES=${location}" >> "${output_file}"
+        elif [[ "${location_type}" == "country" && -n "${location}" ]]; then
+            if [[ "${has_env}" == "false" ]]; then
+                echo "    environment:" >> "${output_file}"
+                has_env=true
+            fi
+            echo "      - SERVER_COUNTRIES=${location}" >> "${output_file}"
+        elif [[ "${location_type}" == "hostname" && -n "${location}" ]]; then
+            if [[ "${has_env}" == "false" ]]; then
+                echo "    environment:" >> "${output_file}"
+                has_env=true
+            fi
+            echo "      - SERVER_HOSTNAMES=${location}" >> "${output_file}"
+        fi
+        
+        # Add labels
+        echo "    labels:" >> "${output_file}"
+        echo "      ${PREFIX}.type: vpn" >> "${output_file}"
+        if [[ -n "${port}" ]]; then
+            echo "      ${PREFIX}.port: \"${port}\"" >> "${output_file}"
+            echo "      ${PREFIX}.internal_port: \"8888\"" >> "${output_file}"
+        fi
+        if [[ -n "${provider}" ]]; then
+            echo "      ${PREFIX}.provider: ${provider}" >> "${output_file}"
+        fi
+        if [[ -n "${profile}" && "${profile}" != "none" ]]; then
+            echo "      ${PREFIX}.profile: ${profile}" >> "${output_file}"
+        fi
+        if [[ -n "${location_type}" ]]; then
+            echo "      ${PREFIX}.location_type: ${location_type}" >> "${output_file}"
+        fi
+        if [[ -n "${location}" ]]; then
+            echo "      ${PREFIX}.location: \"${location}\"" >> "${output_file}"
+        fi
+        
+        echo "" >> "${output_file}"
+    done
+
+    print_success "Exported ${#container_array[@]} containers to ${output_file}"
+    
+    if [[ "${include_env_files}" == "true" && ${#profiles[@]} -gt 0 ]]; then
+        echo
+        print_info "Required profile files:"
+        for profile in "${profiles[@]}"; do
+            if [[ -f "${PROFILES_DIR}/${profile}.env" ]]; then
+                echo "  ✓ env.${profile} (copy from ${PROFILES_DIR}/${profile}.env)"
+            else
+                echo "  ✗ env.${profile} (missing profile file)"
+            fi
+        done
+        echo
+        print_info "To use this compose file:"
+        echo "1. Copy the required env.* files to the same directory as ${output_file}"
+        echo "2. Run: docker-compose -f ${output_file} up -d"
+    fi
+}
+
 # ======================================================
 # Preset Management
 # ======================================================
@@ -2732,6 +2943,9 @@ show_usage() {
     echo "  import-compose <file> [auto_create]"
     echo "                           Import containers from a Docker Compose file"
     echo "                           If auto_create=true, will attempt to copy env.* files to profiles/"
+    echo "  export-compose [file] [include_env_files]"
+    echo "                           Export containers to a Docker Compose file"
+    echo "                           (Default: export-compose.yml, include_env_files: true)"
     echo
     echo "Preset Commands:"
     echo "  presets                  List all presets"
@@ -2760,6 +2974,7 @@ show_usage() {
     echo "  ${0} apply-preset protonvpn-us vpn2"
     echo "  ${0} list-countries protonvpn"
     echo "  ${0} import-compose ./compose.yml true  # Auto-create profiles from env.* files"
+    echo "  ${0} export-compose ./my-vpns.yml true  # Export containers to compose file"
     echo
     echo "Notes:"
     echo "  - Container names can be specified with or without the '${PREFIX}' prefix"
@@ -2850,6 +3065,9 @@ main() {
             ;;
         import-compose)
             import_from_compose "$@"
+            ;;
+        export-compose)
+            export_to_compose "$@"
             ;;
 
         # Preset commands
