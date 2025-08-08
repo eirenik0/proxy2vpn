@@ -2388,13 +2388,17 @@ EOF
             echo "    <<: *vpn-base-${profile}" >> "${output_file}"
         else
             # No profile, add basic gluetun config
-            echo "    image: qmcgaw/gluetun" >> "${output_file}"
-            echo "    cap_add:" >> "${output_file}"
-            echo "      - NET_ADMIN" >> "${output_file}"
-            
+            {
+              echo "    image: qmcgaw/gluetun"
+              echo "    cap_add:"
+              echo "      - NET_ADMIN"
+            } >> "${output_file}"
+
             if jq -e '.use_device_tun // true' "${CONFIG_FILE}" | grep -q "true"; then
-                echo "    devices:" >> "${output_file}"
-                echo "      - /dev/net/tun:/dev/net/tun" >> "${output_file}"
+              {
+                echo "    devices:"
+                echo "      - /dev/net/tun:/dev/net/tun"
+              } >> "${output_file}"
             fi
         fi
         
