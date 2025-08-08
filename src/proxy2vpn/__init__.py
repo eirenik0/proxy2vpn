@@ -6,4 +6,6 @@ __all__ = [
     "docker_ops",
     "compose_manager",
     "models",
+    "config",
+    "server_manager",
 ]
