@@ -140,7 +140,7 @@ set -e
 echo "  ↳ Down command exit code: ${down_result}"
 
 # We're being more lenient with the result now that we have more robust error handling
-check_result "Stop all containers" 0
+check_result "Stop all containers" ${down_result}
 
 # Verify containers are stopped - we'll do it manually if the command failed
 if [[ "${down_result}" -ne 0 ]]; then
@@ -173,7 +173,7 @@ set -e
 echo "  ↳ Up command exit code: ${up_result}"
 
 # We're being more lenient with the result now that we have more robust error handling
-check_result "Start all containers" 0
+check_result "Start all containers" ${up_result}
 
 # Start containers manually if the command failed
 if [[ "${up_result}" -ne 0 ]]; then
@@ -216,7 +216,7 @@ set -e
 echo "  ↳ Cleanup command exit code: ${cleanup_result}"
 
 # We're being more lenient with the result now that we have more robust error handling
-check_result "Cleanup all containers" 0
+check_result "Cleanup all containers" ${cleanup_result}
 
 # Manually remove any remaining containers if the command failed
 if [[ "${cleanup_result}" -ne 0 ]]; then
