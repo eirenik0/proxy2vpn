@@ -35,6 +35,18 @@ This will:
 - Set up the required directory structure
 - Add the bin directory to your PATH (if needed)
 
+#### Python installer
+
+For environments where running a shell script is inconvenient, a Python-based
+installer is also available:
+
+```bash
+curl -s https://raw.githubusercontent.com/eirenik0/proxy2vpn/main/install.py | python3 -
+```
+
+This performs the same installation steps as the bash script, setting up the
+wrapper and required directories under your home folder.
+
 ### Uninstalling
 
 To remove proxy2vpn from your system:
