@@ -4,7 +4,8 @@ An advanced bash script to manage multiple VPN containers using Docker.
 
 ## Overview
 
-This tool simplifies the management of multiple VPN containers, each running their own proxy server using the [gluetun](https://github.com/qdm12/gluetun) image. You can create, configure, and monitor VPN proxies for different locations with minimal effort.
+This tool simplifies the management of multiple VPN containers, each running their own proxy server using the [gluetun](https://github.com/qdm12/gluetun) image.
+You can create, configure, and monitor VPN proxies for different locations with minimal effort.
 
 ## Features
 
