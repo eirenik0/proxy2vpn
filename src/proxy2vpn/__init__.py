@@ -4,4 +4,6 @@ __all__ = [
     "cli",
     "compose_utils",
     "docker_ops",
+    "compose_manager",
+    "models",
 ]
