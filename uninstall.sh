@@ -54,21 +54,31 @@ if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
+# Determine label prefix from installed script or fall back to default
+LABEL_PREFIX="vpn"
+if [[ -f "${INSTALL_DIR}/proxy2vpn.sh" ]]; then
+  LABEL_PREFIX=$(awk -F'"' '/^PREFIX=/ {print $2; exit}' "${INSTALL_DIR}/proxy2vpn.sh")
+  LABEL_PREFIX=${LABEL_PREFIX:-vpn}
+fi
+
 # Check for running containers
 if command -v docker &>/dev/null; then
-    running_containers=$(docker ps --filter "label=vpn.type=vpn" --format "{{.Names}}" 2>/dev/null || echo "")
-    if [[ -n "${running_containers}" ]]; then
-        print_error "There are still running VPN containers managed by proxy2vpn:"
-        echo "${running_containers}"
-        echo
-        print_info "Please stop these containers before uninstalling."
-        read -p "Do you want to force uninstall anyway? (y/n) " -n 1 -r
-        echo
-        if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
-            print_info "Uninstallation cancelled."
-            exit 0
+  running_containers=$(docker ps --filter "label=${LABEL_PREFIX}.type=vpn" --format "{{.Names}}" 2>/dev/null || echo "")
+  if [[ -z "${running_containers}" ]]; then
+    running_containers=$(docker ps --format '{{.Names}}\t{{.Labels}}' 2>/dev/null | awk -F'\t' '$2 ~ /\.type=vpn/ {print $1}')
+  fi
+  if [[ -n "${running_containers}" ]]; then
+    print_error "There are still running VPN containers managed by proxy2vpn:"
+    echo "${running_containers}"
+    echo
+    print_info "Please stop these containers before uninstalling."
+    read -p "Do you want to force uninstall anyway? (y/n) " -n 1 -r
+    echo
+    if [[ ! ${REPLY} =~ ^[Yy]$ ]]; then
+      print_info "Uninstallation cancelled."
+      exit 0
     fi
-        print_info "Proceeding with forced uninstallation..."
+    print_info "Proceeding with forced uninstallation..."
   fi
 fi
 
