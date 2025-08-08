@@ -5,40 +5,136 @@ from pathlib import Path
 
 import typer
 
-from . import compose_utils, docker_ops
+from . import config
+from .compose_manager import ComposeManager
+from .models import Profile, VPNService
+from .server_manager import ServerManager
 
 app = typer.Typer(help="proxy2vpn command line interface")
 
-@app.command()
-def create(name: str, image: str, command: str = "sleep 60"):
-    """Create a container with a given NAME and IMAGE."""
-    docker_ops.create_container(name=name, image=image, command=command.split())
-    typer.echo(f"Container '{name}' created from image '{image}'.")
+profile_app = typer.Typer(help="Manage VPN profiles")
+vpn_app = typer.Typer(help="Manage VPN services")
+server_app = typer.Typer(help="Manage cached server lists")
 
-@app.command()
-def start(name: str):
-    """Start a container by NAME."""
-    docker_ops.start_container(name)
-    typer.echo(f"Container '{name}' started.")
+app.add_typer(profile_app, name="profile")
+app.add_typer(vpn_app, name="vpn")
+app.add_typer(server_app, name="servers")
 
-@app.command()
-def stop(name: str):
-    """Stop a container by NAME."""
-    docker_ops.stop_container(name)
-    typer.echo(f"Container '{name}' stopped.")
 
-@app.command("list")
-def list_cmd():
-    """List containers."""
-    containers = docker_ops.list_containers(all=True)
-    for c in containers:
-        typer.echo(f"{c.name}: {c.status}")
+# ---------------------------------------------------------------------------
+# Profile commands
+# ---------------------------------------------------------------------------
 
-@app.command()
-def set_image(compose_file: Path, service: str, image: str):
-    """Set the IMAGE of a SERVICE in a COMPOSE_FILE."""
-    compose_utils.set_service_image(compose_file, service, image)
-    typer.echo(f"Service '{service}' image set to '{image}'.")
+
+@profile_app.command("create")
+def profile_create(name: str, env_file: Path):
+    """Create a new VPN profile."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    profile = Profile(name=name, env_file=str(env_file))
+    manager.add_profile(profile)
+    typer.echo(f"Profile '{name}' created.")
+
+
+@profile_app.command("list")
+def profile_list():
+    """List available profiles."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    for profile in manager.list_profiles():
+        typer.echo(profile.name)
+
+
+@profile_app.command("delete")
+def profile_delete(name: str):
+    """Delete a profile by NAME."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    manager.remove_profile(name)
+    typer.echo(f"Profile '{name}' deleted.")
+
+
+# ---------------------------------------------------------------------------
+# VPN container commands
+# ---------------------------------------------------------------------------
+
+
+@vpn_app.command("create")
+def vpn_create(
+    name: str,
+    profile: str,
+    port: int = typer.Option(0, help="Host port to expose; 0 for auto"),
+    provider: str = typer.Option(config.DEFAULT_PROVIDER),
+    location: str = typer.Option("", help="Optional location, e.g. city"),
+):
+    """Create a VPN service entry in the compose file."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    if port == 0:
+        port = manager.next_available_port(config.DEFAULT_PORT_START)
+    env = {"VPN_SERVICE_PROVIDER": provider}
+    if location:
+        env["SERVER_CITIES"] = location
+    labels = {
+        "vpn.type": "vpn",
+        "vpn.port": str(port),
+        "vpn.provider": provider,
+        "vpn.profile": profile,
+        "vpn.location": location,
+    }
+    svc = VPNService(
+        name=name,
+        port=port,
+        provider=provider,
+        profile=profile,
+        location=location,
+        environment=env,
+        labels=labels,
+    )
+    manager.add_service(svc)
+    typer.echo(f"Service '{name}' created on port {port}.")
+
+
+@vpn_app.command("list")
+def vpn_list():
+    """List VPN services defined in the compose file."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    for svc in manager.list_services():
+        typer.echo(f"{svc.name}\t{svc.port}\t{svc.profile}")
+
+
+@vpn_app.command("delete")
+def vpn_delete(name: str):
+    """Remove a VPN service from the compose file."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    manager.remove_service(name)
+    typer.echo(f"Service '{name}' deleted.")
+
+
+# ---------------------------------------------------------------------------
+# Server commands
+# ---------------------------------------------------------------------------
+
+
+@server_app.command("update")
+def servers_update():
+    """Download and cache the latest server list."""
+
+    mgr = ServerManager()
+    mgr.update_servers()
+    typer.echo("Server list updated.")
+
+
+@server_app.command("list-providers")
+def servers_list_providers():
+    """List VPN providers from the cached server list."""
+
+    mgr = ServerManager()
+    for provider in mgr.list_providers():
+        typer.echo(provider)
+
 
 if __name__ == "__main__":
     app()
