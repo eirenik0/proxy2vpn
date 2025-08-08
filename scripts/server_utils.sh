@@ -232,6 +232,7 @@ get_servers() {
     local country="${2:-}"
     local city="${3:-}"
 
+    local normalized_provider="$(normalize_provider_name "${provider}")"
     print_info "UTILS: get_servers called with Provider: ${provider}, Country: ${country}, City: ${city}"
 
     # Ensure we have the server list
@@ -241,7 +242,7 @@ get_servers() {
 
     # Extract the servers to a temporary file
     local tmp_servers=$(mktemp)
-    jq -r --arg provider "${provider}" '.[$provider].servers // []' "${SERVERS_CACHE_FILE}" > "${tmp_servers}"
+    jq -r --arg provider "${normalized_provider}" '.[$provider].servers // []' "${SERVERS_CACHE_FILE}" > "${tmp_servers}"
 
     # Check if we got any servers
     if ! jq -e '.[0]' "${tmp_servers}" >/dev/null 2>&1; then
@@ -252,7 +253,7 @@ get_servers() {
 
     # Count servers
     local count=$(jq '. | length' "${tmp_servers}")
-    print_info "UTILS: Found ${count} servers for ${provider}"
+    print_info "UTILS: Found ${count} servers for ${normalized_provider}"
 
     # Now create a new array with just the fields we need
     local tmp_formatted=$(mktemp)
