@@ -13,6 +13,7 @@ dependencies = [
     "typer",
     "ruamel.yaml",
     "docker",
+    "requests",
 ]
 
 [project.scripts]

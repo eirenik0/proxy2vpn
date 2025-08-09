@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import requests
+import typer
 
 from . import config
 
@@ -35,12 +36,28 @@ class ServerManager:
         age = time.time() - self.cache_file.stat().st_mtime
         return age < self.ttl
 
-    def update_servers(self) -> Dict[str, Dict]:
-        """Fetch the server list, using the cache when possible."""
+    def update_servers(self, verify: bool = True) -> Dict[str, Dict]:
+        """Fetch the server list, using the cache when possible.
+
+        Parameters
+        ----------
+        verify:
+            Whether to verify SSL certificates when downloading the server
+            list. Set to ``False`` for troubleshooting.
+        """
 
         if not self._is_cache_valid():
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            response = requests.get(config.SERVER_LIST_URL, timeout=30)
+            try:
+                response = requests.get(
+                    config.SERVER_LIST_URL, timeout=30, verify=verify
+                )
+            except requests.exceptions.SSLError:
+                typer.echo(
+                    "Failed to download server list—check network connection or CA certificates",
+                    err=True,
+                )
+                raise typer.Exit(1)
             response.raise_for_status()
             self.cache_file.write_text(response.text, encoding="utf-8")
         with self.cache_file.open("r", encoding="utf-8") as f:
