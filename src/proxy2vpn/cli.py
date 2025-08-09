@@ -119,11 +119,18 @@ def vpn_delete(name: str):
 
 
 @server_app.command("update")
-def servers_update():
+def servers_update(
+    insecure: bool = typer.Option(
+        False,
+        "--insecure",
+        help="Disable SSL certificate verification (for troubleshooting)",
+    ),
+):
     """Download and cache the latest server list."""
 
     mgr = ServerManager()
-    mgr.update_servers()
+    verify = not insecure
+    mgr.update_servers(verify=verify)
     typer.echo("Server list updated.")
 
 
