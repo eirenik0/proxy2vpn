@@ -36,3 +36,20 @@ def test_update_servers_insecure_flag(tmp_path, monkeypatch):
     mgr = ServerManager(cache_dir=tmp_path)
     mgr.update_servers(verify=False)
     assert called["verify"] is False
+
+
+def test_location_helpers():
+    mgr = ServerManager()
+    mgr.data = {
+        "prov": {
+            "servers": [
+                {"country": "US", "city": "New York"},
+                {"country": "US", "city": "Los Angeles"},
+                {"country": "CA", "city": "Toronto"},
+            ]
+        }
+    }
+    assert mgr.list_countries("prov") == ["CA", "US"]
+    assert mgr.list_cities("prov", "US") == ["Los Angeles", "New York"]
+    assert mgr.validate_location("prov", "Toronto")
+    assert not mgr.validate_location("prov", "Paris")

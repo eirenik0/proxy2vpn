@@ -70,9 +70,38 @@ class ServerManager:
 
     def list_providers(self) -> List[str]:
         data = self.data or self.update_servers()
-        return sorted(data.keys())
+        return sorted(k for k in data.keys() if k != "version")
 
     def list_countries(self, provider: str) -> List[str]:
+        """Return available countries for PROVIDER."""
+
         data = self.data or self.update_servers()
         prov = data.get(provider, {})
-        return sorted(prov.keys())
+        servers = prov.get("servers", [])
+        countries = {srv.get("country") for srv in servers if srv.get("country")}
+        return sorted(countries)
+
+    def list_cities(self, provider: str, country: str) -> List[str]:
+        """Return available cities for PROVIDER in COUNTRY."""
+
+        data = self.data or self.update_servers()
+        prov = data.get(provider, {})
+        servers = prov.get("servers", [])
+        cities = {
+            srv.get("city")
+            for srv in servers
+            if srv.get("country") == country and srv.get("city")
+        }
+        return sorted(cities)
+
+    def validate_location(self, provider: str, location: str) -> bool:
+        """Return ``True`` if LOCATION exists for PROVIDER."""
+
+        data = self.data or self.update_servers()
+        prov = data.get(provider, {})
+        servers = prov.get("servers", [])
+        loc = location.lower()
+        for srv in servers:
+            if srv.get("city", "").lower() == loc or srv.get("country", "").lower() == loc:
+                return True
+        return False
