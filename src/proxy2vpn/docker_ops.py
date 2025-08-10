@@ -1,7 +1,7 @@
 """Interactions with Docker using the docker SDK."""
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Iterator
 
 import docker
 import requests
@@ -34,11 +34,39 @@ def stop_container(name: str) -> Container:
     container.stop()
     return container
 
+
+def restart_container(name: str) -> Container:
+    """Restart a container by name and return it."""
+    client = _client()
+    container = client.containers.get(name)
+    container.restart()
+    container.reload()
+    return container
+
 def remove_container(name: str) -> None:
     """Remove a container by name."""
     client = _client()
     container = client.containers.get(name)
     container.remove(force=True)
+
+
+def container_logs(name: str, lines: int = 100, follow: bool = False) -> Iterator[str]:
+    """Yield log lines from a container.
+
+    If ``follow`` is ``True`` the generator will yield new log lines as they
+    arrive until the container stops or the caller interrupts.  Otherwise the
+    last ``lines`` lines are returned.
+    """
+
+    client = _client()
+    container = client.containers.get(name)
+    if follow:
+        for line in container.logs(stream=True, follow=True, tail=lines):
+            yield line.decode().rstrip()
+    else:
+        output = container.logs(tail=lines).decode().splitlines()
+        for line in output:
+            yield line
 
 def list_containers(all: bool = False) -> list[Container]:
     """List containers."""

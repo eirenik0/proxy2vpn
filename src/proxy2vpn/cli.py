@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from docker.errors import APIError, NotFound
 
 from . import config
 from .compose_manager import ComposeManager
@@ -120,11 +121,128 @@ def vpn_list():
         typer.echo(f"{svc.name:<15} {svc.port:<8} {svc.profile:<12} {status:<10} {ip:<15}")
 
 
-@vpn_app.command("delete")
-def vpn_delete(name: str):
-    """Remove a VPN service from the compose file."""
+@vpn_app.command("start")
+def vpn_start(name: str):
+    """Start the container for a VPN service."""
 
     manager = ComposeManager(config.COMPOSE_FILE)
+    try:
+        manager.get_service(name)
+    except KeyError:
+        typer.echo(f"Service '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    from .docker_ops import start_container
+
+    try:
+        start_container(name)
+        typer.echo(f"Started '{name}'.")
+    except NotFound:
+        typer.echo(f"Container '{name}' does not exist.", err=True)
+        raise typer.Exit(1)
+    except APIError as exc:
+        typer.echo(f"Failed to start '{name}': {exc.explanation}", err=True)
+        raise typer.Exit(1)
+
+
+@vpn_app.command("stop")
+def vpn_stop(name: str):
+    """Stop the container for a VPN service."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    try:
+        manager.get_service(name)
+    except KeyError:
+        typer.echo(f"Service '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    from .docker_ops import stop_container
+
+    try:
+        stop_container(name)
+        typer.echo(f"Stopped '{name}'.")
+    except NotFound:
+        typer.echo(f"Container '{name}' does not exist.", err=True)
+        raise typer.Exit(1)
+    except APIError as exc:
+        typer.echo(f"Failed to stop '{name}': {exc.explanation}", err=True)
+        raise typer.Exit(1)
+
+
+@vpn_app.command("restart")
+def vpn_restart(name: str):
+    """Restart a VPN container."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    try:
+        manager.get_service(name)
+    except KeyError:
+        typer.echo(f"Service '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    from .docker_ops import restart_container
+
+    try:
+        restart_container(name)
+        typer.echo(f"Restarted '{name}'.")
+    except NotFound:
+        typer.echo(f"Container '{name}' does not exist.", err=True)
+        raise typer.Exit(1)
+    except APIError as exc:
+        typer.echo(f"Failed to restart '{name}': {exc.explanation}", err=True)
+        raise typer.Exit(1)
+
+
+@vpn_app.command("logs")
+def vpn_logs(
+    name: str,
+    lines: int = typer.Option(100, "--lines", help="Number of lines to show"),
+    follow: bool = typer.Option(False, "--follow", help="Follow log output"),
+):
+    """Show logs for a VPN container."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    try:
+        manager.get_service(name)
+    except KeyError:
+        typer.echo(f"Service '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    from .docker_ops import container_logs
+
+    try:
+        for line in container_logs(name, lines=lines, follow=follow):
+            typer.echo(line)
+    except NotFound:
+        typer.echo(f"Container '{name}' does not exist.", err=True)
+        raise typer.Exit(1)
+
+
+@vpn_app.command("delete")
+def vpn_delete(name: str, force: bool = typer.Option(False, "--force", "-f", help="Do not prompt")):
+    """Delete a VPN service and remove its container."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    try:
+        manager.get_service(name)
+    except KeyError:
+        typer.echo(f"Service '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    if not force and not typer.confirm(f"Delete service '{name}'?"):
+        raise typer.Exit()
+
+    from .docker_ops import remove_container, stop_container
+
+    try:
+        stop_container(name)
+    except NotFound:
+        pass
+    try:
+        remove_container(name)
+    except NotFound:
+        pass
+
     manager.remove_service(name)
     typer.echo(f"Service '{name}' deleted.")
 
