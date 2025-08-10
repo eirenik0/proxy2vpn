@@ -31,3 +31,17 @@ def test_container_lifecycle():
     docker_ops.remove_container(name)
     containers = [c.name for c in docker_ops.list_containers(all=True)]
     assert name not in containers
+
+
+@pytest.mark.skipif(not docker_available(), reason="Docker is not available")
+def test_restart_and_logs():
+    name = "proxy2vpn-test-logs"
+    image = "alpine"
+    docker_ops.create_container(name=name, image=image, command=["sh", "-c", "echo ready && sleep 5"])
+    docker_ops.start_container(name)
+    logs = list(docker_ops.container_logs(name, lines=10))
+    assert any("ready" in line for line in logs)
+    container = docker_ops.restart_container(name)
+    assert container.status == "running"
+    docker_ops.stop_container(name)
+    docker_ops.remove_container(name)
