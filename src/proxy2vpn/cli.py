@@ -15,10 +15,12 @@ app = typer.Typer(help="proxy2vpn command line interface")
 profile_app = typer.Typer(help="Manage VPN profiles")
 vpn_app = typer.Typer(help="Manage VPN services")
 server_app = typer.Typer(help="Manage cached server lists")
+bulk_app = typer.Typer(help="Bulk container operations")
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(vpn_app, name="vpn")
 app.add_typer(server_app, name="servers")
+app.add_typer(bulk_app, name="bulk")
 
 
 # ---------------------------------------------------------------------------
@@ -97,11 +99,25 @@ def vpn_create(
 
 @vpn_app.command("list")
 def vpn_list():
-    """List VPN services defined in the compose file."""
+    """List VPN services with their status and IP addresses."""
 
     manager = ComposeManager(config.COMPOSE_FILE)
-    for svc in manager.list_services():
-        typer.echo(f"{svc.name}\t{svc.port}\t{svc.profile}")
+    from .docker_ops import get_vpn_containers, get_container_ip
+
+    services = manager.list_services()
+    containers = {c.name: c for c in get_vpn_containers(all=True)}
+
+    typer.echo(f"{'NAME':<15} {'PORT':<8} {'PROFILE':<12} {'STATUS':<10} {'IP':<15}")
+    typer.echo("-" * 65)
+    for svc in services:
+        container = containers.get(svc.name)
+        if container:
+            status = container.status
+            ip = get_container_ip(container) if status == 'running' else 'N/A'
+        else:
+            status = 'not created'
+            ip = 'N/A'
+        typer.echo(f"{svc.name:<15} {svc.port:<8} {svc.profile:<12} {status:<10} {ip:<15}")
 
 
 @vpn_app.command("delete")
@@ -111,6 +127,63 @@ def vpn_delete(name: str):
     manager = ComposeManager(config.COMPOSE_FILE)
     manager.remove_service(name)
     typer.echo(f"Service '{name}' deleted.")
+
+
+# ---------------------------------------------------------------------------
+# Bulk container commands
+# ---------------------------------------------------------------------------
+
+
+@bulk_app.command("up")
+def bulk_up():
+    """Start all VPN containers."""
+
+    from .docker_ops import start_all_vpn_containers
+
+    results = start_all_vpn_containers()
+    for name, started in results:
+        if started:
+            typer.echo(f"\u2713 Started {name}")
+        else:
+            typer.echo(f"\u2192 {name} already running")
+
+
+@bulk_app.command("down")
+def bulk_down():
+    """Stop all running VPN containers."""
+
+    from .docker_ops import stop_all_vpn_containers
+
+    results = stop_all_vpn_containers()
+    for name in results:
+        typer.echo(f"\u2713 Stopped {name}")
+
+
+@bulk_app.command("status")
+def bulk_status():
+    """Show status and IP address for VPN containers."""
+
+    from .docker_ops import get_vpn_containers, get_container_ip
+
+    containers = get_vpn_containers(all=True)
+    typer.echo(f"{'NAME':<15} {'STATUS':<10} {'PORT':<8} {'IP':<15}")
+    typer.echo("-" * 50)
+    for container in containers:
+        port = container.labels.get('vpn.port', 'N/A')
+        ip = get_container_ip(container) if container.status == 'running' else 'N/A'
+        typer.echo(f"{container.name:<15} {container.status:<10} {port:<8} {ip:<15}")
+
+
+@bulk_app.command("ips")
+def bulk_ips():
+    """Show IP addresses of running VPN containers."""
+
+    from .docker_ops import get_vpn_containers, get_container_ip
+
+    containers = get_vpn_containers(all=False)
+    for container in containers:
+        ip = get_container_ip(container)
+        typer.echo(f"{container.name}: {ip}")
 
 
 # ---------------------------------------------------------------------------
