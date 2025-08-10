@@ -133,3 +133,26 @@ def get_container_ip(container: Container) -> str:
         return response.text.strip()
     except Exception:
         return "N/A"
+
+
+def test_vpn_connection(name: str) -> bool:
+    """Return ``True`` if the VPN proxy for NAME appears to work."""
+
+    client = _client()
+    try:
+        container = client.containers.get(name)
+    except Exception:
+        return False
+    port = container.labels.get("vpn.port")
+    if not port or container.status != "running":
+        return False
+    try:
+        direct = requests.get("https://ifconfig.me", timeout=5).text.strip()
+        proxied = requests.get(
+            "https://ifconfig.me",
+            proxies={"http": f"http://localhost:{port}", "https": f"http://localhost:{port}"},
+            timeout=5,
+        ).text.strip()
+        return proxied != "" and proxied != direct
+    except Exception:
+        return False

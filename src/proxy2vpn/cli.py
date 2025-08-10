@@ -17,11 +17,13 @@ profile_app = typer.Typer(help="Manage VPN profiles")
 vpn_app = typer.Typer(help="Manage VPN services")
 server_app = typer.Typer(help="Manage cached server lists")
 bulk_app = typer.Typer(help="Bulk container operations")
+preset_app = typer.Typer(help="Manage presets")
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(vpn_app, name="vpn")
 app.add_typer(server_app, name="servers")
 app.add_typer(bulk_app, name="bulk")
+app.add_typer(preset_app, name="preset")
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +334,78 @@ def servers_list_providers():
     mgr = ServerManager()
     for provider in mgr.list_providers():
         typer.echo(provider)
+
+
+@server_app.command("list-countries")
+def servers_list_countries(provider: str):
+    """List countries for a VPN provider."""
+
+    mgr = ServerManager()
+    for country in mgr.list_countries(provider):
+        typer.echo(country)
+
+
+@server_app.command("list-cities")
+def servers_list_cities(provider: str, country: str):
+    """List cities for a VPN provider in a country."""
+
+    mgr = ServerManager()
+    for city in mgr.list_cities(provider, country):
+        typer.echo(city)
+
+
+@server_app.command("validate-location")
+def servers_validate_location(provider: str, location: str):
+    """Validate that a location exists for a provider."""
+
+    mgr = ServerManager()
+    if mgr.validate_location(provider, location):
+        typer.echo("valid")
+    else:
+        typer.echo("invalid", err=True)
+        raise typer.Exit(1)
+
+
+@preset_app.command("list")
+def preset_list():
+    """List available presets."""
+
+    from .preset_manager import list_available_presets
+
+    for preset in list_available_presets():
+        typer.echo(preset)
+
+
+@preset_app.command("apply")
+def preset_apply(
+    preset: str,
+    service: str,
+    port: int = typer.Option(0, help="Host port to expose; 0 for auto"),
+):
+    """Create a VPN service from a preset."""
+
+    manager = ComposeManager(config.COMPOSE_FILE)
+    if port == 0:
+        port = manager.next_available_port(config.DEFAULT_PORT_START)
+    from .preset_manager import apply_preset
+
+    apply_preset(preset, service, port)
+    typer.echo(
+        f"Service '{service}' created from preset '{preset}' on port {port}."
+    )
+
+
+@app.command("test")
+def test(service: str):
+    """Test that a VPN service proxy is working."""
+
+    from .docker_ops import test_vpn_connection
+
+    if test_vpn_connection(service):
+        typer.echo("VPN connection is active.")
+    else:
+        typer.echo("VPN connection failed.", err=True)
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
