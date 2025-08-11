@@ -11,30 +11,33 @@ Python command-line interface for managing multiple VPN containers with Docker.
 
 ## Installation
 
-### Quick install
-```bash
-curl -s https://raw.githubusercontent.com/eirenik0/proxy2vpn/main/install.py | python3 -
-```
-This installs the `proxy2vpn` CLI to `~/.local/bin` (ensure it's on your `PATH`).
-
-### Manual install
+### Using uv (recommended)
 ```bash
 git clone https://github.com/eirenik0/proxy2vpn.git
 cd proxy2vpn
-pip install .
+uv sync
+uv run proxy2vpn --help
+```
+
+### Using pip
+```bash
+git clone https://github.com/eirenik0/proxy2vpn.git
+cd proxy2vpn
+pip install -e .
+proxy2vpn --help
 ```
 
 ## Quick Start
 1. Create a profile file with your VPN credentials:
    ```bash
    mkdir -p profiles
-   cat <<'EOF2' > profiles/myprofile.env
-   OPENVPN_USER=username
-   OPENVPN_PASSWORD=password
-   EOF2
+   cat <<'EOF' > profiles/myprofile.env
+   OPENVPN_USER=your_username
+   OPENVPN_PASSWORD=your_password
+   EOF
    ```
 
-2. Register the profile with proxy2vpn:
+2. Register the profile:
    ```bash
    proxy2vpn profile create myprofile profiles/myprofile.env
    ```
@@ -88,9 +91,33 @@ pip install .
 - `proxy2vpn test SERVICE` – verify that a proxy container is reachable
 
 ## Development
-Run tests with:
+
+### Setup
 ```bash
+# Install with development dependencies
+uv sync
+# or
+pip install -e ".[dev]"
+```
+
+### Testing
+```bash
+# Run tests (if available)
 pytest
+```
+
+### Changelog Management
+This project uses [Towncrier](https://towncrier.readthedocs.io/) for changelog management:
+
+```bash
+# Add a news fragment for your changes
+echo "Your feature description" > news/<PR_NUMBER>.feature.md
+
+# Preview the changelog
+make changelog-draft
+
+# Build the changelog (maintainers)
+make changelog VERSION=x.y.z
 ```
 
 ## License
