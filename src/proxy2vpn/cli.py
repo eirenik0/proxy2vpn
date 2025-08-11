@@ -223,9 +223,7 @@ def vpn_start(ctx: typer.Context, name: str):
         if results:
             typer.echo("Diagnostic hints:", err=True)
             for res in results:
-                typer.echo(
-                    f" - {res.message}: {res.recommendation}", err=True
-                )
+                typer.echo(f" - {res.message}: {res.recommendation}", err=True)
         raise typer.Exit(1)
 
 
@@ -259,9 +257,7 @@ def vpn_stop(ctx: typer.Context, name: str):
         if results:
             typer.echo("Diagnostic hints:", err=True)
             for res in results:
-                typer.echo(
-                    f" - {res.message}: {res.recommendation}", err=True
-                )
+                typer.echo(f" - {res.message}: {res.recommendation}", err=True)
         raise typer.Exit(1)
 
 
@@ -295,9 +291,7 @@ def vpn_restart(ctx: typer.Context, name: str):
         if results:
             typer.echo("Diagnostic hints:", err=True)
             for res in results:
-                typer.echo(
-                    f" - {res.message}: {res.recommendation}", err=True
-                )
+                typer.echo(f" - {res.message}: {res.recommendation}", err=True)
         raise typer.Exit(1)
 
 
@@ -535,7 +529,9 @@ def test(service: str):
 
 @app.command("diagnose")
 def diagnose_command(
-    lines: int = typer.Option(100, "--lines", "-n", help="Number of log lines to analyze"),
+    lines: int = typer.Option(
+        100, "--lines", "-n", help="Number of log lines to analyze"
+    ),
     all_containers: bool = typer.Option(
         False, "--all", help="Check all containers, not only problematic ones"
     ),

@@ -99,9 +99,11 @@ def get_problematic_containers(all: bool = False) -> list[Container]:
     for container in containers:
         container.reload()
         state = container.attrs.get("State", {})
-        if container.status != "running" or state.get("ExitCode", 0) != 0 or state.get(
-            "RestartCount", 0
-        ) > 0:
+        if (
+            container.status != "running"
+            or state.get("ExitCode", 0) != 0
+            or state.get("RestartCount", 0) > 0
+        ):
             problematic.append(container)
     return problematic
 
