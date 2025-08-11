@@ -6,8 +6,6 @@ project can be used on systems without Bash.  It verifies that the required
 external dependencies are available and adds ``~/.local/bin`` to the user's
 ``PATH`` if necessary.
 """
-from __future__ import annotations
-
 import os
 import shutil
 import subprocess
