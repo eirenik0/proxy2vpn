@@ -58,7 +58,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
     env.update(service.environment)
     network_name = "proxy2vpn_network"
     if not client.networks.list(names=[network_name]):
-        client.networks.create(network_name, driver="bridge", name=network_name)
+        client.networks.create(name=network_name, driver="bridge")
     return client.containers.create(
         profile.image,
         name=service.name,
