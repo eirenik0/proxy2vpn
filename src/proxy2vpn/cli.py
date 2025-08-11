@@ -12,6 +12,7 @@ from . import config
 from .compose_manager import ComposeManager
 from .models import Profile, VPNService
 from .server_manager import ServerManager
+from .compose_validator import validate_compose
 
 app = HelpfulTyper(help="proxy2vpn command line interface")
 
@@ -397,6 +398,18 @@ def preset_apply(
 
     apply_preset(preset, service, port)
     typer.echo(f"Service '{service}' created from preset '{preset}' on port {port}.")
+
+
+@app.command("validate")
+def validate(compose_file: Path = typer.Option(config.COMPOSE_FILE)):
+    """Validate that the compose file is well formed."""
+
+    errors = validate_compose(compose_file)
+    if errors:
+        for err in errors:
+            typer.echo(f"- {err}", err=True)
+        raise typer.Exit(1)
+    typer.echo("compose file is valid.")
 
 
 @app.command("test")
