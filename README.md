@@ -5,7 +5,7 @@ Python command-line interface for managing multiple VPN containers with Docker.
 ## Features
 - Manage VPN credentials as reusable profiles
 - Create and control VPN services
-- Bulk start/stop operations
+- Multi-service control with `--all` flags
 - Query and validate provider server locations
 - Apply predefined presets for common setups
 
@@ -41,7 +41,7 @@ proxy2vpn --help
 ## Quick Start
 1. Initialize the compose file:
    ```bash
-   proxy2vpn init
+   proxy2vpn system init
    ```
 
 2. Create a profile file with your VPN credentials:
@@ -67,13 +67,15 @@ proxy2vpn --help
 5. View status and test connectivity:
    ```bash
    proxy2vpn vpn list
-   proxy2vpn test vpn1
+   proxy2vpn vpn test vpn1
    ```
 
 ## Command overview
 
-### Initialization
-- `proxy2vpn init [--force]`
+### System operations
+- `proxy2vpn system init [--force]`
+- `proxy2vpn system validate`
+- `proxy2vpn system diagnose [--lines N] [--all] [--verbose] [--json]`
 
 ### Profiles
 - `proxy2vpn profile create NAME ENV_FILE`
@@ -82,18 +84,13 @@ proxy2vpn --help
 
 ### VPN services
 - `proxy2vpn vpn create NAME PROFILE [--port PORT] [--provider PROVIDER] [--location LOCATION]`
-- `proxy2vpn vpn list [--diagnose]`
-- `proxy2vpn vpn start NAME`
-- `proxy2vpn vpn stop NAME`
-- `proxy2vpn vpn restart NAME`
+- `proxy2vpn vpn list [--diagnose] [--ips-only]`
+- `proxy2vpn vpn start [NAME | --all]`
+- `proxy2vpn vpn stop [NAME | --all]`
+- `proxy2vpn vpn restart [NAME | --all]`
 - `proxy2vpn vpn logs NAME [--lines N] [--follow]`
-- `proxy2vpn vpn delete NAME`
-
-### Bulk operations
-- `proxy2vpn bulk up`
-- `proxy2vpn bulk down`
-- `proxy2vpn bulk status`
-- `proxy2vpn bulk ips`
+- `proxy2vpn vpn delete [NAME | --all]`
+- `proxy2vpn vpn test NAME`
 
 ### Server database
 - `proxy2vpn servers update`
@@ -105,10 +102,6 @@ proxy2vpn --help
 ### Presets
 - `proxy2vpn preset list`
 - `proxy2vpn preset apply PRESET SERVICE [--port PORT]`
-
-### Testing & Diagnostics
-- `proxy2vpn test SERVICE` – verify that a proxy container is reachable
-- `proxy2vpn diagnose [--all] [--lines N] [--verbose] [--json]` – analyze container health and logs
 
 ## Development
 

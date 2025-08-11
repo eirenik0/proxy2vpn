@@ -33,17 +33,17 @@ uv run proxy2vpn profile create myprofile profiles/myprofile.env
 uv run proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn
 uv run proxy2vpn vpn start vpn1
 uv run proxy2vpn vpn list --diagnose
-uv run proxy2vpn bulk up
+uv run proxy2vpn vpn start --all
 uv run proxy2vpn servers list-providers
-uv run proxy2vpn test vpn1
-uv run proxy2vpn diagnose --verbose
+uv run proxy2vpn vpn test vpn1
+uv run proxy2vpn system diagnose --verbose
 ```
 
 ## High-Level Architecture
 
 ### Application Organization
 The Python application (`src/proxy2vpn/`) is modular with these components:
-1. **cli.py**: Main CLI interface using Typer with command groups (profile, vpn, servers, bulk, preset, diagnose)
+1. **cli.py**: Main CLI interface using Typer with command groups (profile, vpn, servers, system, preset)
 2. **config.py**: Configuration constants and defaults (compose file paths, cache dir, default provider)
 3. **models.py**: Data models for VPNService and Profile with compose file serialization
 4. **compose_manager.py**: Docker Compose file management using ruamel.yaml for profiles and services
@@ -110,7 +110,7 @@ ServerManager class handles:
 Containers are managed through:
 - Docker Compose YAML files with YAML anchors for profiles
 - Automatic port allocation starting from 20000
-- Container labeling with `vpn.type=vpn` for bulk operations
+- Container labeling with `vpn.type=vpn` for multi-service operations
 - Profile-based configuration using environment file references
 
 ## Development Guidelines

@@ -20,14 +20,16 @@ app = HelpfulTyper(help="proxy2vpn command line interface")
 profile_app = HelpfulTyper(help="Manage VPN profiles")
 vpn_app = HelpfulTyper(help="Manage VPN services")
 server_app = HelpfulTyper(help="Manage cached server lists")
+system_app = HelpfulTyper(help="System level operations")
 bulk_app = HelpfulTyper(help="Bulk container operations")
 preset_app = HelpfulTyper(help="Manage presets")
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(vpn_app, name="vpn")
 app.add_typer(server_app, name="servers")
-app.add_typer(bulk_app, name="bulk")
+app.add_typer(system_app, name="system")
 app.add_typer(preset_app, name="preset")
+app.add_typer(bulk_app, name="bulk", hidden=True)
 
 
 @app.callback(invoke_without_command=True)
@@ -56,12 +58,12 @@ def main(
 
 
 # ---------------------------------------------------------------------------
-# Initialization command
+# System commands
 # ---------------------------------------------------------------------------
 
 
-@app.command("init")
-def init_command(
+@system_app.command("init")
+def system_init(
     ctx: typer.Context,
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing compose file if it exists"
@@ -166,6 +168,9 @@ def vpn_list(
     diagnose: bool = typer.Option(
         False, "--diagnose", help="Include diagnostic health scores"
     ),
+    ips_only: bool = typer.Option(
+        False, "--ips-only", help="Show only container IP addresses"
+    ),
 ):
     """List VPN services with their status and IP addresses."""
 
@@ -177,6 +182,13 @@ def vpn_list(
         analyze_container_logs,
     )
     from .diagnostics import DiagnosticAnalyzer
+
+    if ips_only:
+        containers = get_vpn_containers(all=False)
+        for container in containers:
+            ip = get_container_ip(container)
+            typer.echo(f"{container.name}: {ip}")
+        return
 
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
@@ -207,18 +219,40 @@ def vpn_list(
 
 
 @vpn_app.command("start")
-def vpn_start(ctx: typer.Context, name: str):
-    """Start the container for a VPN service."""
+def vpn_start(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None),
+    all: bool = typer.Option(False, "--all", help="Start all VPN services"),
+):
+    """Start one or all VPN containers."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
+    if all and name is not None:
+        typer.echo("Cannot specify NAME when using --all", err=True)
+        raise typer.Exit(1)
+    if all:
+        from .docker_ops import start_all_vpn_containers
+
+        results = start_all_vpn_containers()
+        for svc_name, started in results:
+            if started:
+                typer.echo(f"\u2713 Started {svc_name}")
+            else:
+                typer.echo(f"\u2192 {svc_name} already running")
+        return
+
+    if name is None:
+        typer.echo("Specify a service NAME or use --all", err=True)
+        raise typer.Exit(1)
     try:
         manager.get_service(name)
     except KeyError:
         typer.echo(f"Service '{name}' not found.", err=True)
         raise typer.Exit(1)
 
-    from .docker_ops import start_container
+    from .docker_ops import start_container, analyze_container_logs
+    from .diagnostics import DiagnosticAnalyzer
 
     try:
         start_container(name)
@@ -228,9 +262,6 @@ def vpn_start(ctx: typer.Context, name: str):
         raise typer.Exit(1)
     except APIError as exc:
         typer.echo(f"Failed to start '{name}': {exc.explanation}", err=True)
-        from .docker_ops import analyze_container_logs
-        from .diagnostics import DiagnosticAnalyzer
-
         analyzer = DiagnosticAnalyzer()
         results = analyze_container_logs(name, analyzer=analyzer)
         if results:
@@ -241,18 +272,37 @@ def vpn_start(ctx: typer.Context, name: str):
 
 
 @vpn_app.command("stop")
-def vpn_stop(ctx: typer.Context, name: str):
-    """Stop the container for a VPN service."""
+def vpn_stop(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None),
+    all: bool = typer.Option(False, "--all", help="Stop all VPN services"),
+):
+    """Stop one or all VPN containers."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
+    if all and name is not None:
+        typer.echo("Cannot specify NAME when using --all", err=True)
+        raise typer.Exit(1)
+    if all:
+        from .docker_ops import stop_all_vpn_containers
+
+        results = stop_all_vpn_containers()
+        for svc_name in results:
+            typer.echo(f"\u2713 Stopped {svc_name}")
+        return
+
+    if name is None:
+        typer.echo("Specify a service NAME or use --all", err=True)
+        raise typer.Exit(1)
     try:
         manager.get_service(name)
     except KeyError:
         typer.echo(f"Service '{name}' not found.", err=True)
         raise typer.Exit(1)
 
-    from .docker_ops import stop_container
+    from .docker_ops import stop_container, analyze_container_logs
+    from .diagnostics import DiagnosticAnalyzer
 
     try:
         stop_container(name)
@@ -262,9 +312,6 @@ def vpn_stop(ctx: typer.Context, name: str):
         raise typer.Exit(1)
     except APIError as exc:
         typer.echo(f"Failed to stop '{name}': {exc.explanation}", err=True)
-        from .docker_ops import analyze_container_logs
-        from .diagnostics import DiagnosticAnalyzer
-
         analyzer = DiagnosticAnalyzer()
         results = analyze_container_logs(name, analyzer=analyzer)
         if results:
@@ -275,18 +322,45 @@ def vpn_stop(ctx: typer.Context, name: str):
 
 
 @vpn_app.command("restart")
-def vpn_restart(ctx: typer.Context, name: str):
-    """Restart a VPN container."""
+def vpn_restart(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(None),
+    all: bool = typer.Option(False, "--all", help="Restart all VPN services"),
+):
+    """Restart one or all VPN containers."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
+    if all and name is not None:
+        typer.echo("Cannot specify NAME when using --all", err=True)
+        raise typer.Exit(1)
+    if all:
+        from .docker_ops import get_vpn_containers, restart_container
+
+        containers = get_vpn_containers(all=True)
+        for container in containers:
+            try:
+                restart_container(container.name)
+                typer.echo(f"\u2713 Restarted {container.name}")
+            except NotFound:
+                typer.echo(f"Container '{container.name}' does not exist.", err=True)
+            except APIError as exc:
+                typer.echo(
+                    f"Failed to restart '{container.name}': {exc.explanation}", err=True
+                )
+        return
+
+    if name is None:
+        typer.echo("Specify a service NAME or use --all", err=True)
+        raise typer.Exit(1)
     try:
         manager.get_service(name)
     except KeyError:
         typer.echo(f"Service '{name}' not found.", err=True)
         raise typer.Exit(1)
 
-    from .docker_ops import restart_container
+    from .docker_ops import restart_container, analyze_container_logs
+    from .diagnostics import DiagnosticAnalyzer
 
     try:
         restart_container(name)
@@ -296,9 +370,6 @@ def vpn_restart(ctx: typer.Context, name: str):
         raise typer.Exit(1)
     except APIError as exc:
         typer.echo(f"Failed to restart '{name}': {exc.explanation}", err=True)
-        from .docker_ops import analyze_container_logs
-        from .diagnostics import DiagnosticAnalyzer
-
         analyzer = DiagnosticAnalyzer()
         results = analyze_container_logs(name, analyzer=analyzer)
         if results:
@@ -338,13 +409,39 @@ def vpn_logs(
 @vpn_app.command("delete")
 def vpn_delete(
     ctx: typer.Context,
-    name: str,
+    name: str | None = typer.Argument(None),
+    all: bool = typer.Option(False, "--all", help="Delete all VPN services"),
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt"),
 ):
-    """Delete a VPN service and remove its container."""
+    """Delete one or all VPN services and remove their containers."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
+    from .docker_ops import remove_container, stop_container
+
+    if all and name is not None:
+        typer.echo("Cannot specify NAME when using --all", err=True)
+        raise typer.Exit(1)
+    if all:
+        services = manager.list_services()
+        if not force and not typer.confirm("Delete all services?"):
+            raise typer.Exit()
+        for svc in services:
+            try:
+                stop_container(svc.name)
+            except NotFound:
+                pass
+            try:
+                remove_container(svc.name)
+            except NotFound:
+                pass
+            manager.remove_service(svc.name)
+            typer.echo(f"Service '{svc.name}' deleted.")
+        return
+
+    if name is None:
+        typer.echo("Specify a service NAME or use --all", err=True)
+        raise typer.Exit(1)
     try:
         manager.get_service(name)
     except KeyError:
@@ -353,8 +450,6 @@ def vpn_delete(
 
     if not force and not typer.confirm(f"Delete service '{name}'?"):
         raise typer.Exit()
-
-    from .docker_ops import remove_container, stop_container
 
     try:
         stop_container(name)
@@ -369,6 +464,27 @@ def vpn_delete(
     typer.echo(f"Service '{name}' deleted.")
 
 
+@vpn_app.command("test")
+def vpn_test(ctx: typer.Context, name: str):
+    """Test that a VPN service proxy is working."""
+
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
+    try:
+        manager.get_service(name)
+    except KeyError:
+        typer.echo(f"Service '{name}' not found.", err=True)
+        raise typer.Exit(1)
+
+    from .docker_ops import test_vpn_connection
+
+    if test_vpn_connection(name):
+        typer.echo("VPN connection is active.")
+    else:
+        typer.echo("VPN connection failed.", err=True)
+        raise typer.Exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Bulk container commands
 # ---------------------------------------------------------------------------
@@ -378,6 +494,7 @@ def vpn_delete(
 def bulk_up():
     """Start all VPN containers."""
 
+    typer.echo("Deprecated: use 'vpn start --all' instead.", err=True)
     from .docker_ops import start_all_vpn_containers
 
     results = start_all_vpn_containers()
@@ -392,6 +509,7 @@ def bulk_up():
 def bulk_down():
     """Stop all running VPN containers."""
 
+    typer.echo("Deprecated: use 'vpn stop --all' instead.", err=True)
     from .docker_ops import stop_all_vpn_containers
 
     results = stop_all_vpn_containers()
@@ -400,30 +518,19 @@ def bulk_down():
 
 
 @bulk_app.command("status")
-def bulk_status():
+def bulk_status(ctx: typer.Context):
     """Show status and IP address for VPN containers."""
 
-    from .docker_ops import get_vpn_containers, get_container_ip
-
-    containers = get_vpn_containers(all=True)
-    typer.echo(f"{'NAME':<15} {'STATUS':<10} {'PORT':<8} {'IP':<15}")
-    typer.echo("-" * 50)
-    for container in containers:
-        port = container.labels.get("vpn.port", "N/A")
-        ip = get_container_ip(container) if container.status == "running" else "N/A"
-        typer.echo(f"{container.name:<15} {container.status:<10} {port:<8} {ip:<15}")
+    typer.echo("Deprecated: use 'vpn list' instead.", err=True)
+    vpn_list(ctx)
 
 
 @bulk_app.command("ips")
-def bulk_ips():
+def bulk_ips(ctx: typer.Context):
     """Show IP addresses of running VPN containers."""
 
-    from .docker_ops import get_vpn_containers, get_container_ip
-
-    containers = get_vpn_containers(all=False)
-    for container in containers:
-        ip = get_container_ip(container)
-        typer.echo(f"{container.name}: {ip}")
+    typer.echo("Deprecated: use 'vpn list --ips-only' instead.", err=True)
+    vpn_list(ctx, ips_only=True)
 
 
 # ---------------------------------------------------------------------------
@@ -515,8 +622,8 @@ def preset_apply(
     typer.echo(f"Service '{service}' created from preset '{preset}' on port {port}.")
 
 
-@app.command("validate")
-def validate(compose_file: Path = typer.Option(config.COMPOSE_FILE)):
+@system_app.command("validate")
+def system_validate(compose_file: Path = typer.Option(config.COMPOSE_FILE)):
     """Validate that the compose file is well formed."""
 
     errors = validate_compose(compose_file)
@@ -527,21 +634,8 @@ def validate(compose_file: Path = typer.Option(config.COMPOSE_FILE)):
     typer.echo("compose file is valid.")
 
 
-@app.command("test")
-def test(service: str):
-    """Test that a VPN service proxy is working."""
-
-    from .docker_ops import test_vpn_connection
-
-    if test_vpn_connection(service):
-        typer.echo("VPN connection is active.")
-    else:
-        typer.echo("VPN connection failed.", err=True)
-        raise typer.Exit(1)
-
-
-@app.command("diagnose")
-def diagnose_command(
+@system_app.command("diagnose")
+def system_diagnose(
     lines: int = typer.Option(
         100, "--lines", "-n", help="Number of log lines to analyze"
     ),

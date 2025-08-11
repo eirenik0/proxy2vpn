@@ -329,11 +329,11 @@ class HelpfulTyper(typer.Typer):
                 f"{command_path} list-providers",
                 f"{command_path} list-countries nordvpn",
             ]
-        elif "bulk" in command_path:
+        elif "system" in command_path:
             examples = [
-                f"{command_path} up",
-                f"{command_path} down",
-                f"{command_path} status",
+                f"{command_path} init",
+                f"{command_path} validate",
+                f"{command_path} diagnose",
             ]
         elif "preset" in command_path:
             examples = [
@@ -355,7 +355,7 @@ class HelpfulTyper(typer.Typer):
             "vpn": f"{base_url}#vpn-management",
             "profile": f"{base_url}#profile-management",
             "servers": f"{base_url}#server-lists",
-            "bulk": f"{base_url}#bulk-operations",
+            "system": f"{base_url}#system-operations",
             "preset": f"{base_url}#presets",
         }
 
