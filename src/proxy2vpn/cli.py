@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import typer
 from .typer_ext import HelpfulTyper
@@ -147,29 +148,49 @@ def vpn_create(
 
 
 @vpn_app.command("list")
-def vpn_list(ctx: typer.Context):
+def vpn_list(
+    ctx: typer.Context,
+    diagnose: bool = typer.Option(
+        False, "--diagnose", help="Include diagnostic health scores"
+    ),
+):
     """List VPN services with their status and IP addresses."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
-    from .docker_ops import get_vpn_containers, get_container_ip
+    from .docker_ops import (
+        get_vpn_containers,
+        get_container_ip,
+        analyze_container_logs,
+    )
+    from .diagnostics import DiagnosticAnalyzer
 
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
+    analyzer = DiagnosticAnalyzer() if diagnose else None
 
-    typer.echo(f"{'NAME':<15} {'PORT':<8} {'PROFILE':<12} {'STATUS':<10} {'IP':<15}")
-    typer.echo("-" * 65)
+    header = f"{'NAME':<15} {'PORT':<8} {'PROFILE':<12} {'STATUS':<10} {'IP':<15}"
+    if diagnose:
+        header += f" {'HEALTH':<7}"
+    typer.echo(header)
+    typer.echo("-" * len(header))
     for svc in services:
         container = containers.get(svc.name)
         if container:
             status = container.status
             ip = get_container_ip(container) if status == "running" else "N/A"
+            health = "N/A"
+            if diagnose:
+                results = analyze_container_logs(container.name, analyzer=analyzer)
+                health = str(analyzer.health_score(results))
         else:
             status = "not created"
             ip = "N/A"
-        typer.echo(
-            f"{svc.name:<15} {svc.port:<8} {svc.profile:<12} {status:<10} {ip:<15}"
-        )
+            health = "N/A"
+        line = f"{svc.name:<15} {svc.port:<8} {svc.profile:<12} {status:<10} {ip:<15}"
+        if diagnose:
+            line += f" {health:<7}"
+        typer.echo(line)
 
 
 @vpn_app.command("start")
@@ -194,6 +215,15 @@ def vpn_start(ctx: typer.Context, name: str):
         raise typer.Exit(1)
     except APIError as exc:
         typer.echo(f"Failed to start '{name}': {exc.explanation}", err=True)
+        from .docker_ops import analyze_container_logs
+        from .diagnostics import DiagnosticAnalyzer
+
+        analyzer = DiagnosticAnalyzer()
+        results = analyze_container_logs(name, analyzer=analyzer)
+        if results:
+            typer.echo("Diagnostic hints:", err=True)
+            for res in results:
+                typer.echo(f" - {res.message}: {res.recommendation}", err=True)
         raise typer.Exit(1)
 
 
@@ -219,6 +249,15 @@ def vpn_stop(ctx: typer.Context, name: str):
         raise typer.Exit(1)
     except APIError as exc:
         typer.echo(f"Failed to stop '{name}': {exc.explanation}", err=True)
+        from .docker_ops import analyze_container_logs
+        from .diagnostics import DiagnosticAnalyzer
+
+        analyzer = DiagnosticAnalyzer()
+        results = analyze_container_logs(name, analyzer=analyzer)
+        if results:
+            typer.echo("Diagnostic hints:", err=True)
+            for res in results:
+                typer.echo(f" - {res.message}: {res.recommendation}", err=True)
         raise typer.Exit(1)
 
 
@@ -244,6 +283,15 @@ def vpn_restart(ctx: typer.Context, name: str):
         raise typer.Exit(1)
     except APIError as exc:
         typer.echo(f"Failed to restart '{name}': {exc.explanation}", err=True)
+        from .docker_ops import analyze_container_logs
+        from .diagnostics import DiagnosticAnalyzer
+
+        analyzer = DiagnosticAnalyzer()
+        results = analyze_container_logs(name, analyzer=analyzer)
+        if results:
+            typer.echo("Diagnostic hints:", err=True)
+            for res in results:
+                typer.echo(f" - {res.message}: {res.recommendation}", err=True)
         raise typer.Exit(1)
 
 
@@ -477,6 +525,62 @@ def test(service: str):
     else:
         typer.echo("VPN connection failed.", err=True)
         raise typer.Exit(1)
+
+
+@app.command("diagnose")
+def diagnose_command(
+    lines: int = typer.Option(
+        100, "--lines", "-n", help="Number of log lines to analyze"
+    ),
+    all_containers: bool = typer.Option(
+        False, "--all", help="Check all containers, not only problematic ones"
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Diagnose VPN containers and report health."""
+
+    from .docker_ops import (
+        get_problematic_containers,
+        get_vpn_containers,
+        get_container_diagnostics,
+        analyze_container_logs,
+    )
+    from .diagnostics import DiagnosticAnalyzer
+
+    analyzer = DiagnosticAnalyzer()
+    containers = (
+        get_vpn_containers(all=True)
+        if all_containers
+        else get_problematic_containers(all=True)
+    )
+
+    summary: list[dict[str, object]] = []
+    for container in containers:
+        diag = get_container_diagnostics(container)
+        results = analyze_container_logs(container.name, lines=lines, analyzer=analyzer)
+        score = analyzer.health_score(results)
+        entry = {
+            "container": container.name,
+            "status": diag["status"],
+            "health": score,
+            "issues": [r.message for r in results],
+            "recommendations": [r.recommendation for r in results],
+        }
+        summary.append(entry)
+
+    if json_output:
+        typer.echo(json.dumps(summary, indent=2))
+    else:
+        if not summary:
+            typer.echo("No containers to diagnose.")
+        for entry in summary:
+            typer.echo(
+                f"{entry['container']}: status={entry['status']} health={entry['health']}"
+            )
+            if verbose or entry["issues"]:
+                for issue, rec in zip(entry["issues"], entry["recommendations"]):
+                    typer.echo(f"  - {issue}: {rec}")
 
 
 if __name__ == "__main__":

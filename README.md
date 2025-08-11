@@ -82,7 +82,7 @@ proxy2vpn --help
 
 ### VPN services
 - `proxy2vpn vpn create NAME PROFILE [--port PORT] [--provider PROVIDER] [--location LOCATION]`
-- `proxy2vpn vpn list`
+- `proxy2vpn vpn list [--diagnose]`
 - `proxy2vpn vpn start NAME`
 - `proxy2vpn vpn stop NAME`
 - `proxy2vpn vpn restart NAME`
@@ -106,8 +106,9 @@ proxy2vpn --help
 - `proxy2vpn preset list`
 - `proxy2vpn preset apply PRESET SERVICE [--port PORT]`
 
-### Testing
+### Testing & Diagnostics
 - `proxy2vpn test SERVICE` – verify that a proxy container is reachable
+- `proxy2vpn diagnose [--all] [--lines N] [--verbose] [--json]` – analyze container health and logs
 
 ## Development
 

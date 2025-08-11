@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Iterable, Iterator
 
+from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
+
 import docker
 import requests
 from docker.models.containers import Container
@@ -87,6 +89,49 @@ def get_vpn_containers(all: bool = False) -> list[Container]:
     """Return containers labeled as VPN services."""
     client = _client()
     return client.containers.list(all=all, filters={"label": "vpn.type=vpn"})
+
+
+def get_problematic_containers(all: bool = False) -> list[Container]:
+    """Return containers that are not running properly."""
+
+    containers = get_vpn_containers(all=all)
+    problematic: list[Container] = []
+    for container in containers:
+        container.reload()
+        state = container.attrs.get("State", {})
+        if (
+            container.status != "running"
+            or state.get("ExitCode", 0) != 0
+            or state.get("RestartCount", 0) > 0
+        ):
+            problematic.append(container)
+    return problematic
+
+
+def get_container_diagnostics(container: Container) -> dict:
+    """Return diagnostic information for a container."""
+
+    container.reload()
+    state = container.attrs.get("State", {})
+    return {
+        "name": container.name,
+        "status": container.status,
+        "exit_code": state.get("ExitCode"),
+        "restart_count": state.get("RestartCount", 0),
+        "started_at": state.get("StartedAt"),
+        "finished_at": state.get("FinishedAt"),
+    }
+
+
+def analyze_container_logs(
+    name: str, lines: int = 100, analyzer: DiagnosticAnalyzer | None = None
+) -> list[DiagnosticResult]:
+    """Analyze container logs and return diagnostic results."""
+
+    if analyzer is None:
+        analyzer = DiagnosticAnalyzer()
+    logs = list(container_logs(name, lines=lines, follow=False))
+    return analyzer.analyze(logs)
 
 
 def start_all_vpn_containers() -> list[tuple[str, bool]]:
