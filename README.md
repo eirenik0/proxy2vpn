@@ -11,19 +11,30 @@ Python command-line interface for managing multiple VPN containers with Docker.
 
 ## Installation
 
-### Using uv (recommended)
+Install `proxy2vpn` from [PyPI](https://pypi.org/project/proxy2vpn/) using your
+preferred Python tool:
+
+### pip
 ```bash
-git clone https://github.com/eirenik0/proxy2vpn.git
-cd proxy2vpn
-uv sync
-uv run proxy2vpn --help
+pip install proxy2vpn
+proxy2vpn --help
 ```
 
-### Using pip
+### uv
 ```bash
-git clone https://github.com/eirenik0/proxy2vpn.git
-cd proxy2vpn
-pip install -e .
+uv tool install proxy2vpn
+proxy2vpn --help
+```
+
+### uvx
+Run the CLI without installing it:
+```bash
+uvx proxy2vpn --help
+```
+
+### pipx
+```bash
+pipx install proxy2vpn
 proxy2vpn --help
 ```
 
