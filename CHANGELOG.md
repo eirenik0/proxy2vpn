@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.3.1]
+
+### Bug fixes
+
+- Fixed creating and starting VPN services by automatically creating Docker containers from compose definitions. (#2)
+- Show help when running the CLI without arguments and display a message for missing required arguments. (#123)
+
+
 ## [0.3.0]
 
 ### Features
