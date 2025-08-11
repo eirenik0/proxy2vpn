@@ -1,4 +1,5 @@
 """Interactions with Docker using the docker SDK."""
+
 from __future__ import annotations
 
 from typing import Iterable, Iterator
@@ -7,11 +8,15 @@ import docker
 import requests
 from docker.models.containers import Container
 
+
 def _client() -> docker.DockerClient:
     """Return a Docker client configured from environment."""
     return docker.from_env()
 
-def create_container(name: str, image: str, command: Iterable[str] | None = None) -> Container:
+
+def create_container(
+    name: str, image: str, command: Iterable[str] | None = None
+) -> Container:
     """Create a container with the given name and image.
 
     The image is pulled if it is not available locally.
@@ -20,12 +25,14 @@ def create_container(name: str, image: str, command: Iterable[str] | None = None
     client.images.pull(image)
     return client.containers.create(image, name=name, command=command, detach=True)
 
+
 def start_container(name: str) -> Container:
     """Start an existing container by name."""
     client = _client()
     container = client.containers.get(name)
     container.start()
     return container
+
 
 def stop_container(name: str) -> Container:
     """Stop a running container by name."""
@@ -42,6 +49,7 @@ def restart_container(name: str) -> Container:
     container.restart()
     container.reload()
     return container
+
 
 def remove_container(name: str) -> None:
     """Remove a container by name."""
@@ -67,6 +75,7 @@ def container_logs(name: str, lines: int = 100, follow: bool = False) -> Iterato
         output = container.logs(tail=lines).decode().splitlines()
         for line in output:
             yield line
+
 
 def list_containers(all: bool = False) -> list[Container]:
     """List containers."""
@@ -150,7 +159,10 @@ def test_vpn_connection(name: str) -> bool:
         direct = requests.get("https://ifconfig.me", timeout=5).text.strip()
         proxied = requests.get(
             "https://ifconfig.me",
-            proxies={"http": f"http://localhost:{port}", "https": f"http://localhost:{port}"},
+            proxies={
+                "http": f"http://localhost:{port}",
+                "https": f"http://localhost:{port}",
+            },
             timeout=5,
         ).text.strip()
         return proxied != "" and proxied != direct

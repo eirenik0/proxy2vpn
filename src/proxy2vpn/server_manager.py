@@ -1,4 +1,5 @@
 """Utilities for fetching and caching VPN server lists."""
+
 from __future__ import annotations
 
 import json
@@ -102,6 +103,9 @@ class ServerManager:
         servers = prov.get("servers", [])
         loc = location.lower()
         for srv in servers:
-            if srv.get("city", "").lower() == loc or srv.get("country", "").lower() == loc:
+            if (
+                srv.get("city", "").lower() == loc
+                or srv.get("country", "").lower() == loc
+            ):
                 return True
         return False

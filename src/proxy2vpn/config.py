@@ -4,6 +4,7 @@ This module centralizes paths and default values used across the
 application.  All state is stored in the docker compose file referenced
 by :data:`COMPOSE_FILE`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,6 +31,4 @@ DEFAULT_PORT_START = 20000
 # URL of the gluetun server list JSON file.  This file is fetched and
 # cached by :class:`ServerManager` to provide location validation and
 # listing of available servers.
-SERVER_LIST_URL = (
-    "https://raw.githubusercontent.com/qdm12/gluetun/master/internal/storage/servers.json"
-)
+SERVER_LIST_URL = "https://raw.githubusercontent.com/qdm12/gluetun/master/internal/storage/servers.json"

@@ -1,4 +1,5 @@
 """Preset utilities built on top of YAML anchors."""
+
 from __future__ import annotations
 
 from pathlib import Path

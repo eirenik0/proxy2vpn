@@ -28,7 +28,9 @@ class ComposeManager:
 
     def list_services(self) -> List[VPNService]:
         services = self.data.get("services", {})
-        return [VPNService.from_compose_service(name, svc) for name, svc in services.items()]
+        return [
+            VPNService.from_compose_service(name, svc) for name, svc in services.items()
+        ]
 
     def get_service(self, name: str) -> VPNService:
         services = self.data.get("services", {})
