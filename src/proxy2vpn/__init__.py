@@ -1,5 +1,7 @@
 """proxy2vpn Python package."""
 
+from ._version import __version__
+
 __all__ = [
     "cli",
     "compose_utils",
@@ -8,4 +10,5 @@ __all__ = [
     "models",
     "config",
     "server_manager",
+    "__version__",
 ]

@@ -7,17 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Initial Python CLI (`proxy2vpn.cli`) for managing VPN containers.
-- Configuration loader and models.
-- Docker operations module with typed helpers.
-
-### Changed
-- N/A
-
-### Fixed
-- N/A
-
 <!-- towncrier release notes start -->
 
 ## [0.1.2] - 2025-05-20

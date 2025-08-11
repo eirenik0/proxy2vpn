@@ -28,5 +28,8 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Validate changelog fragments
+        run: uv run --with towncrier towncrier check
+
       - name: Run tests
         run: uv run --with pytest pytest
