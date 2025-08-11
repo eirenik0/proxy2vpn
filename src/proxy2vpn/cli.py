@@ -29,6 +29,18 @@ app.add_typer(bulk_app, name="bulk")
 app.add_typer(preset_app, name="preset")
 
 
+@app.callback()
+def main(
+    ctx: typer.Context,
+    compose_file: Path = typer.Option(
+        config.COMPOSE_FILE, "--compose-file", "-f", help="Path to compose file"
+    ),
+):
+    """Store global options in context."""
+    ctx.obj = ctx.obj or {}
+    ctx.obj["compose_file"] = compose_file
+
+
 # ---------------------------------------------------------------------------
 # Initialization command
 # ---------------------------------------------------------------------------
@@ -36,21 +48,23 @@ app.add_typer(preset_app, name="preset")
 
 @app.command("init")
 def init_command(
+    ctx: typer.Context,
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing compose file if it exists"
     ),
 ):
     """Generate an initial compose.yml file."""
 
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     try:
-        ComposeManager.create_initial_compose(config.COMPOSE_FILE, force=force)
+        ComposeManager.create_initial_compose(compose_file, force=force)
     except FileExistsError:
         typer.echo(
-            f"Compose file '{config.COMPOSE_FILE}' already exists. Use --force to overwrite.",
+            f"Compose file '{compose_file}' already exists. Use --force to overwrite.",
             err=True,
         )
         raise typer.Exit(1)
-    typer.echo(f"Created '{config.COMPOSE_FILE}'.")
+    typer.echo(f"Created '{compose_file}'.")
 
 
 # ---------------------------------------------------------------------------
@@ -59,29 +73,32 @@ def init_command(
 
 
 @profile_app.command("create")
-def profile_create(name: str, env_file: Path):
+def profile_create(ctx: typer.Context, name: str, env_file: Path):
     """Create a new VPN profile."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     profile = Profile(name=name, env_file=str(env_file))
     manager.add_profile(profile)
     typer.echo(f"Profile '{name}' created.")
 
 
 @profile_app.command("list")
-def profile_list():
+def profile_list(ctx: typer.Context):
     """List available profiles."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     for profile in manager.list_profiles():
         typer.echo(profile.name)
 
 
 @profile_app.command("delete")
-def profile_delete(name: str):
+def profile_delete(ctx: typer.Context, name: str):
     """Delete a profile by NAME."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     manager.remove_profile(name)
     typer.echo(f"Profile '{name}' deleted.")
 
@@ -93,6 +110,7 @@ def profile_delete(name: str):
 
 @vpn_app.command("create")
 def vpn_create(
+    ctx: typer.Context,
     name: str,
     profile: str,
     port: int = typer.Option(0, help="Host port to expose; 0 for auto"),
@@ -101,7 +119,8 @@ def vpn_create(
 ):
     """Create a VPN service entry in the compose file."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
     env = {"VPN_SERVICE_PROVIDER": provider}
@@ -128,10 +147,11 @@ def vpn_create(
 
 
 @vpn_app.command("list")
-def vpn_list():
+def vpn_list(ctx: typer.Context):
     """List VPN services with their status and IP addresses."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     from .docker_ops import get_vpn_containers, get_container_ip
 
     services = manager.list_services()
@@ -153,10 +173,11 @@ def vpn_list():
 
 
 @vpn_app.command("start")
-def vpn_start(name: str):
+def vpn_start(ctx: typer.Context, name: str):
     """Start the container for a VPN service."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     try:
         manager.get_service(name)
     except KeyError:
@@ -177,10 +198,11 @@ def vpn_start(name: str):
 
 
 @vpn_app.command("stop")
-def vpn_stop(name: str):
+def vpn_stop(ctx: typer.Context, name: str):
     """Stop the container for a VPN service."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     try:
         manager.get_service(name)
     except KeyError:
@@ -201,10 +223,11 @@ def vpn_stop(name: str):
 
 
 @vpn_app.command("restart")
-def vpn_restart(name: str):
+def vpn_restart(ctx: typer.Context, name: str):
     """Restart a VPN container."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     try:
         manager.get_service(name)
     except KeyError:
@@ -226,13 +249,15 @@ def vpn_restart(name: str):
 
 @vpn_app.command("logs")
 def vpn_logs(
+    ctx: typer.Context,
     name: str,
     lines: int = typer.Option(100, "--lines", help="Number of lines to show"),
     follow: bool = typer.Option(False, "--follow", help="Follow log output"),
 ):
     """Show logs for a VPN container."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     try:
         manager.get_service(name)
     except KeyError:
@@ -251,11 +276,14 @@ def vpn_logs(
 
 @vpn_app.command("delete")
 def vpn_delete(
-    name: str, force: bool = typer.Option(False, "--force", "-f", help="Do not prompt")
+    ctx: typer.Context,
+    name: str,
+    force: bool = typer.Option(False, "--force", "-f", help="Do not prompt"),
 ):
     """Delete a VPN service and remove its container."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     try:
         manager.get_service(name)
     except KeyError:
@@ -409,13 +437,15 @@ def preset_list():
 
 @preset_app.command("apply")
 def preset_apply(
+    ctx: typer.Context,
     preset: str,
     service: str,
     port: int = typer.Option(0, help="Host port to expose; 0 for auto"),
 ):
     """Create a VPN service from a preset."""
 
-    manager = ComposeManager(config.COMPOSE_FILE)
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
     from .preset_manager import apply_preset
