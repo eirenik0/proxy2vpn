@@ -20,7 +20,7 @@ def _run_proxy2vpn(args, cwd):
 
 
 def test_init_creates_compose(tmp_path):
-    result = _run_proxy2vpn(["init"], tmp_path)
+    result = _run_proxy2vpn(["system", "init"], tmp_path)
     assert result.returncode == 0
     compose = tmp_path / "compose.yml"
     assert compose.exists()
@@ -34,8 +34,8 @@ def test_init_requires_force(tmp_path):
     compose = tmp_path / "compose.yml"
     compose.write_text("services: {}\n")
 
-    result = _run_proxy2vpn(["init"], tmp_path)
+    result = _run_proxy2vpn(["system", "init"], tmp_path)
     assert result.returncode != 0
 
-    result = _run_proxy2vpn(["init", "--force"], tmp_path)
+    result = _run_proxy2vpn(["system", "init", "--force"], tmp_path)
     assert result.returncode == 0
