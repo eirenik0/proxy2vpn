@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.1.4]
+
+### Bug fixes
+
+- Fix module execution by providing a __main__ entry point. (#0)
+
+
 ## [0.1.3]
 
 ### Bug fixes
