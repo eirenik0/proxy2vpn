@@ -44,22 +44,20 @@ def validate_compose(path: Path) -> List[str]:
     # Extract profiles from node to inspect anchors
     profiles: Dict[str, MappingNode] = {}
     for key_node, value_node in node.value:
-        if isinstance(key_node, ScalarNode) and key_node.value.startswith("x-vpn-base-"):
+        if isinstance(key_node, ScalarNode) and key_node.value.startswith(
+            "x-vpn-base-"
+        ):
             name = key_node.value[len("x-vpn-base-") :]
             profiles[name] = value_node
             expected_anchor = f"vpn-base-{name}"
             anchor = value_node.anchor if value_node.anchor else None
             if anchor != expected_anchor:
-                errors.append(
-                    f"Profile '{name}' missing anchor '&{expected_anchor}'"
-                )
+                errors.append(f"Profile '{name}' missing anchor '&{expected_anchor}'")
             # Required fields
             profile_data = data.get(key_node.value, {})
             for field in PROFILE_REQUIRED_FIELDS:
                 if field not in profile_data:
-                    errors.append(
-                        f"Profile '{name}' missing field '{field}'"
-                    )
+                    errors.append(f"Profile '{name}' missing field '{field}'")
                 elif field == "env_file":
                     env_path = Path(profile_data[field])
                     if not env_path.exists():
@@ -101,16 +99,12 @@ def validate_compose(path: Path) -> List[str]:
             # required service fields
             for field in SERVICE_REQUIRED_FIELDS:
                 if field not in svc_data:
-                    errors.append(
-                        f"Service '{svc_name}' missing field '{field}'"
-                    )
+                    errors.append(f"Service '{svc_name}' missing field '{field}'")
             # labels
             labels = svc_data.get("labels", {})
             for label in LABEL_REQUIRED_FIELDS:
                 if label not in labels:
-                    errors.append(
-                        f"Service '{svc_name}' missing label '{label}'"
-                    )
+                    errors.append(f"Service '{svc_name}' missing label '{label}'")
             # port mappings and duplicates
             for p in svc_data.get("ports", []) or []:
                 try:
@@ -118,9 +112,7 @@ def validate_compose(path: Path) -> List[str]:
                     host_port = int(host)
                     int(container.split("/")[0])
                 except Exception:
-                    errors.append(
-                        f"Service '{svc_name}' invalid port mapping '{p}'"
-                    )
+                    errors.append(f"Service '{svc_name}' invalid port mapping '{p}'")
                     continue
                 other = ports_seen.get(host_port)
                 if other and other != svc_name:
