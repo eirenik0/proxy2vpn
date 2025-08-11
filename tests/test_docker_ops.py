@@ -46,3 +46,30 @@ def test_restart_and_logs():
     assert container.status == "running"
     docker_ops.stop_container(name)
     docker_ops.remove_container(name)
+
+
+@pytest.mark.skipif(not docker_available(), reason="Docker is not available")
+def test_create_vpn_container_merges_env(tmp_path):
+    env_file = tmp_path / "test.env"
+    env_file.write_text("FOO=bar\nVAR=base\n")
+    profile = docker_ops.Profile(
+        name="test",
+        env_file=str(env_file),
+        image="alpine",
+        cap_add=[],
+        devices=[],
+    )
+    service = docker_ops.VPNService(
+        name="vpn-test",
+        port=12345,
+        provider="",
+        profile="test",
+        location="",
+        environment={"VAR": "override"},
+        labels={"vpn.type": "vpn", "vpn.port": "12345"},
+    )
+    container = docker_ops.create_vpn_container(service, profile)
+    env_vars = container.attrs["Config"]["Env"]
+    assert "FOO=bar" in env_vars
+    assert "VAR=override" in env_vars
+    docker_ops.remove_container("vpn-test")
