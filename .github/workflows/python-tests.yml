@@ -16,8 +16,27 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint-and-format:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.commits[0].message, '[skip ci]') }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.11'
+
+      - name: Check formatting
+        run: uv run --with ruff ruff format --check src/ tests/
+
+      - name: Run linter
+        run: uv run --with ruff ruff check src/ tests/
+
   pytest:
     runs-on: ubuntu-latest
+    needs: lint-and-format
     if: ${{ !contains(github.event.commits[0].message, '[skip tests]') }}
     steps:
       - name: Checkout repository
