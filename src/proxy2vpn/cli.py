@@ -1,4 +1,5 @@
 """Command line interface for proxy2vpn."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -117,11 +118,13 @@ def vpn_list():
         container = containers.get(svc.name)
         if container:
             status = container.status
-            ip = get_container_ip(container) if status == 'running' else 'N/A'
+            ip = get_container_ip(container) if status == "running" else "N/A"
         else:
-            status = 'not created'
-            ip = 'N/A'
-        typer.echo(f"{svc.name:<15} {svc.port:<8} {svc.profile:<12} {status:<10} {ip:<15}")
+            status = "not created"
+            ip = "N/A"
+        typer.echo(
+            f"{svc.name:<15} {svc.port:<8} {svc.profile:<12} {status:<10} {ip:<15}"
+        )
 
 
 @vpn_app.command("start")
@@ -222,7 +225,9 @@ def vpn_logs(
 
 
 @vpn_app.command("delete")
-def vpn_delete(name: str, force: bool = typer.Option(False, "--force", "-f", help="Do not prompt")):
+def vpn_delete(
+    name: str, force: bool = typer.Option(False, "--force", "-f", help="Do not prompt")
+):
     """Delete a VPN service and remove its container."""
 
     manager = ComposeManager(config.COMPOSE_FILE)
@@ -290,8 +295,8 @@ def bulk_status():
     typer.echo(f"{'NAME':<15} {'STATUS':<10} {'PORT':<8} {'IP':<15}")
     typer.echo("-" * 50)
     for container in containers:
-        port = container.labels.get('vpn.port', 'N/A')
-        ip = get_container_ip(container) if container.status == 'running' else 'N/A'
+        port = container.labels.get("vpn.port", "N/A")
+        ip = get_container_ip(container) if container.status == "running" else "N/A"
         typer.echo(f"{container.name:<15} {container.status:<10} {port:<8} {ip:<15}")
 
 
@@ -391,9 +396,7 @@ def preset_apply(
     from .preset_manager import apply_preset
 
     apply_preset(preset, service, port)
-    typer.echo(
-        f"Service '{service}' created from preset '{preset}' on port {port}."
-    )
+    typer.echo(f"Service '{service}' created from preset '{preset}' on port {port}.")
 
 
 @app.command("test")

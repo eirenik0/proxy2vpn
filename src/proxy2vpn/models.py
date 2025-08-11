@@ -71,9 +71,7 @@ class Profile:
     env_file: str
     image: str = "qmcgaw/gluetun"
     cap_add: List[str] = field(default_factory=lambda: ["NET_ADMIN"])
-    devices: List[str] = field(
-        default_factory=lambda: ["/dev/net/tun:/dev/net/tun"]
-    )
+    devices: List[str] = field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
 
     @classmethod
     def from_anchor(cls, name: str, data: Dict) -> "Profile":

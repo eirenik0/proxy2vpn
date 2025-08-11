@@ -1,4 +1,3 @@
-
 import pathlib
 import sys
 
@@ -37,7 +36,9 @@ def test_container_lifecycle():
 def test_restart_and_logs():
     name = "proxy2vpn-test-logs"
     image = "alpine"
-    docker_ops.create_container(name=name, image=image, command=["sh", "-c", "echo ready && sleep 5"])
+    docker_ops.create_container(
+        name=name, image=image, command=["sh", "-c", "echo ready && sleep 5"]
+    )
     docker_ops.start_container(name)
     logs = list(docker_ops.container_logs(name, lines=10))
     assert any("ready" in line for line in logs)

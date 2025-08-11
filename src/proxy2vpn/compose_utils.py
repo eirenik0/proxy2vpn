@@ -1,4 +1,5 @@
 """Utilities for manipulating docker-compose YAML files."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,15 +9,18 @@ from ruamel.yaml import YAML
 
 yaml = YAML()
 
+
 def load_compose(path: Path) -> dict[str, Any]:
     """Load a docker-compose YAML file."""
     with path.open("r", encoding="utf-8") as f:
         return yaml.load(f)
 
+
 def save_compose(data: dict[str, Any], path: Path) -> None:
     """Save a docker-compose YAML file."""
     with path.open("w", encoding="utf-8") as f:
         yaml.dump(data, f)
+
 
 def set_service_image(compose_path: Path, service: str, image: str) -> None:
     """Update the image of a service in the compose file.
