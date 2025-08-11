@@ -50,7 +50,7 @@ class HelpfulTyper(typer.Typer):
             self._show_no_such_command_help(exc)
         else:
             # For other errors, format them nicely
-            error_msg = exc.message.strip()
+            error_msg = (getattr(exc, "message", "") or str(exc)).strip()
 
             # Handle missing argument errors
             if "Missing argument" in error_msg:
