@@ -9,7 +9,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
-VERSION_FILE = ROOT / "src" / "proxy2vpn" / "_version.py"
 
 
 def update_file(path: Path, pattern: str, replacement: str) -> None:
@@ -20,7 +19,6 @@ def update_file(path: Path, pattern: str, replacement: str) -> None:
 
 def main(version: str) -> None:
     update_file(PYPROJECT, r'version = "[^"]+"', f'version = "{version}"')
-    update_file(VERSION_FILE, r'__version__ = "[^"]+"', f'__version__ = "{version}"')
     print(f"Bumped version to {version}")
 
 

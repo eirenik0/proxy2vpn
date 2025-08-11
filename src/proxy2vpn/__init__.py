@@ -1,6 +1,12 @@
 """proxy2vpn Python package."""
 
-from ._version import __version__
+try:
+    from importlib.metadata import version
+
+    __version__ = version("proxy2vpn")
+except Exception:
+    # Fallback when package is not installed (development mode)
+    __version__ = "dev"
 
 __all__ = [
     "cli",
