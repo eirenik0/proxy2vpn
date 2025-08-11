@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.1.3]
+
+### Bug fixes
+
+- Fix various bugs including batch operations, prefix extraction, and gluetun configuration writes (1-6)
+- Improve error handling for network requests with insecure SSL bypass option (#15)
+
+### Documentation
+
+- Update documentation including test suite README, CLAUDE.md, and README.md for Python implementation (docs-update)
+
+### Features
+
+- Create Python package structure for proxy2vpn CLI with proper setuptools configuration (#7)
+- Refactor to use Docker Compose YAML files for configuration with ComposeManager and VPNService dataclasses (#8)
+- Implement core Python functionality with config management and server list handling (#9)
+- Add Python package installer for cross-platform installation (#14)
+- Add bulk VPN container management operations and external IP address lookup (#16)
+- Complete Python CLI implementation with individual container operations (start, stop, restart, logs, delete) (#17)
+- Add VPN connection testing, location discovery commands, and preset utilities (#18)
+- Improve CLI error messaging and help flags for better user experience (#19)
+
+### Miscellaneous
+
+- Add GitHub Actions workflow for automated Python testing with uv (#10)
+- Add automated publish workflow for package distribution (#20)
+- Integrate towncrier for automated changelog management (#21)
+
+### Removals
+
+- Remove legacy bash scripts and migrate to Python-only implementation (#22)
+
 
 ## [0.1.2] - 2025-05-20
 
