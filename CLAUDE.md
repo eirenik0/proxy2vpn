@@ -32,17 +32,18 @@ uv run proxy2vpn <command> [args]
 uv run proxy2vpn profile create myprofile profiles/myprofile.env
 uv run proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn
 uv run proxy2vpn vpn start vpn1
-uv run proxy2vpn vpn list
+uv run proxy2vpn vpn list --diagnose
 uv run proxy2vpn bulk up
 uv run proxy2vpn servers list-providers
 uv run proxy2vpn test vpn1
+uv run proxy2vpn diagnose --verbose
 ```
 
 ## High-Level Architecture
 
 ### Application Organization
 The Python application (`src/proxy2vpn/`) is modular with these components:
-1. **cli.py**: Main CLI interface using Typer with command groups (profile, vpn, servers, bulk, preset)
+1. **cli.py**: Main CLI interface using Typer with command groups (profile, vpn, servers, bulk, preset, diagnose)
 2. **config.py**: Configuration constants and defaults (compose file paths, cache dir, default provider)
 3. **models.py**: Data models for VPNService and Profile with compose file serialization
 4. **compose_manager.py**: Docker Compose file management using ruamel.yaml for profiles and services
@@ -51,6 +52,7 @@ The Python application (`src/proxy2vpn/`) is modular with these components:
 7. **preset_manager.py**: Preset management built on YAML anchors
 8. **compose_utils.py**: Docker Compose utilities
 9. **typer_ext.py**: Typer extensions for enhanced CLI functionality
+10. **diagnostics.py**: Container log analysis and health scoring system
 
 ### Docker Integration
 All VPN containers use the `qmcgaw/gluetun` image with:
@@ -65,12 +67,14 @@ All VPN containers use the `qmcgaw/gluetun` image with:
 - **~/.cache/proxy2vpn/**: Server list cache with TTL management
 - **pyproject.toml**: Project configuration, dependencies, and towncrier settings
 
-### Testing Architecture
+### Testing & Diagnostics Architecture
 The application includes:
 - Direct pytest integration support
 - Docker container lifecycle operations
 - VPN connection testing via proxy validation
 - Server list validation against gluetun's official data
+- Container health monitoring with diagnostic log analysis
+- Automated troubleshooting recommendations for common VPN issues
 
 ## Version Management
 
