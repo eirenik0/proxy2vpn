@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.2.0]
+
+### Bug fixes
+
+- Fix module execution by providing a __main__ entry point. (#0)
+- Replace deprecated license metadata and remove outdated classifier. (#9999)
+
+### Features
+
+- Add compose file validator command to validate Docker Compose configuration files (#1)
+- Adds a global CLI option to specify a custom compose file path (via --compose-file/-f) and stores it in the Typer context for reuse across commands (#2)
+- Add `init` command to generate an initial `compose.yml` and handle missing compose files more gracefully. (#123)
+
+
 ## [0.1.3]
 
 ### Bug fixes
