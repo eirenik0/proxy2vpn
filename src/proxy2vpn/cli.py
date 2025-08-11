@@ -56,6 +56,10 @@ def main(
     ctx.obj = ctx.obj or {}
     ctx.obj["compose_file"] = compose_file
 
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
+
 
 # ---------------------------------------------------------------------------
 # System commands
