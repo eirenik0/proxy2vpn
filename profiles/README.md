@@ -1,10 +1,11 @@
 # User Profiles for proxy2vpn
 
-This directory contains user profile files for use with the proxy2vpn script.
+This directory contains `.env` files with VPN credentials. Each profile is
+registered with the CLI so it can be referenced when creating VPN services.
 
 ## Format
 
-Each profile should be in `.env` format with VPN credentials:
+Each profile file uses simple `KEY=value` pairs, for example:
 
 ```
 OPENVPN_USER=username
@@ -13,14 +14,12 @@ OPENVPN_PASSWORD=password
 
 ## Usage
 
-1. Create profiles using the `create-profile` command:
-   ```
-   ./proxy2vpn.sh create-profile myprofile username password
-   ```
-
-2. Create containers using profiles:
-   ```
-   ./proxy2vpn.sh create-from-profile vpn1 8888 myprofile "New York"
+1. Create a profile file and register it:
+   ```bash
+   proxy2vpn profile create myprofile profiles/myprofile.env
    ```
 
-3. Use profiles in batches or presets for easier management.
+2. Use the profile when creating services:
+   ```bash
+   proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn
+   ```
