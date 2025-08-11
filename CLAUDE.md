@@ -129,3 +129,5 @@ This project uses [Towncrier](https://towncrier.readthedocs.io/) to manage the c
 - Run `make changelog-draft` to preview upcoming release notes.
 - Run `make changelog VERSION=x.y.z` to finalize the changelog for a release.
 - Fragments are removed automatically when the changelog is built.
+
+- run `make fmt` and `make lint` after code change
