@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from .typer_ext import HelpfulTyper
 from docker.errors import APIError, NotFound
 
 from . import config
@@ -11,13 +12,13 @@ from .compose_manager import ComposeManager
 from .models import Profile, VPNService
 from .server_manager import ServerManager
 
-app = typer.Typer(help="proxy2vpn command line interface")
+app = HelpfulTyper(help="proxy2vpn command line interface")
 
-profile_app = typer.Typer(help="Manage VPN profiles")
-vpn_app = typer.Typer(help="Manage VPN services")
-server_app = typer.Typer(help="Manage cached server lists")
-bulk_app = typer.Typer(help="Bulk container operations")
-preset_app = typer.Typer(help="Manage presets")
+profile_app = HelpfulTyper(help="Manage VPN profiles")
+vpn_app = HelpfulTyper(help="Manage VPN services")
+server_app = HelpfulTyper(help="Manage cached server lists")
+bulk_app = HelpfulTyper(help="Bulk container operations")
+preset_app = HelpfulTyper(help="Manage presets")
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(vpn_app, name="vpn")
