@@ -5,7 +5,7 @@ from .cli import app
 
 def main() -> None:
     """Run the proxy2vpn CLI."""
-    app()
+    raise SystemExit(app())
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point

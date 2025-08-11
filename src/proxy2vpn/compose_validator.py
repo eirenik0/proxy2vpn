@@ -59,11 +59,16 @@ def validate_compose(path: Path) -> List[str]:
                 if field not in profile_data:
                     errors.append(f"Profile '{name}' missing field '{field}'")
                 elif field == "env_file":
-                    env_path = Path(profile_data[field])
-                    if not env_path.exists():
-                        errors.append(
-                            f"Profile '{name}' env_file '{env_path}' not found"
-                        )
+                    env_files = profile_data[field]
+                    # env_file can be a string or a list
+                    if isinstance(env_files, str):
+                        env_files = [env_files]
+                    for env_file in env_files:
+                        env_path = Path(env_file)
+                        if not env_path.exists():
+                            errors.append(
+                                f"Profile '{name}' env_file '{env_path}' not found"
+                            )
 
     services_node: MappingNode | None = None
     for key_node, value_node in node.value:
@@ -108,9 +113,21 @@ def validate_compose(path: Path) -> List[str]:
             # port mappings and duplicates
             for p in svc_data.get("ports", []) or []:
                 try:
-                    host, container = p.split(":", 1)
-                    host_port = int(host)
-                    int(container.split("/")[0])
+                    # Format can be:
+                    # - "8888:8888"
+                    # - "0.0.0.0:8888:8888"
+                    # - "0.0.0.0:8888:8888/tcp"
+                    parts = p.split(":")
+                    if len(parts) == 2:
+                        # Simple format: "8888:8888"
+                        host_port = int(parts[0])
+                        int(parts[1].split("/")[0])
+                    elif len(parts) == 3:
+                        # Full format: "0.0.0.0:8888:8888" or "0.0.0.0:8888:8888/tcp"
+                        host_port = int(parts[1])
+                        int(parts[2].split("/")[0])
+                    else:
+                        raise ValueError(f"Invalid port format: {p}")
                 except Exception:
                     errors.append(f"Service '{svc_name}' invalid port mapping '{p}'")
                     continue
