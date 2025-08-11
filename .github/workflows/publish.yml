@@ -23,6 +23,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install build
 
+      - name: Build changelog
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          uv run --with towncrier towncrier build --yes --version "$VERSION"
+
       - name: Build package
         run: python -m build
 

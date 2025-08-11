@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proxy2vpn"
-version = "0.1.0"
+version = "0.1.2"
 description = "Proxy2VPN Python utilities"
 authors = [{ name = "Serhii Khalymon", email = "serhii.khalymon@pm.me" }]
 readme = "README.md"
@@ -28,8 +28,33 @@ dev = ["towncrier"]
 
 [tool.towncrier]
 package = "proxy2vpn"
+package_dir = "src"
 filename = "CHANGELOG.md"
 directory = "news"
+start_string = "<!-- towncrier release notes start -->"
+template = "towncrier:default.md"
+title_format = "## [{version}]"
+underlines = ["-", "~"]
+
+[tool.towncrier.fragment.feature]
+name = "Features"
+showcontent = true
+
+[tool.towncrier.fragment.bugfix]
+name = "Bug fixes"
+showcontent = true
+
+[tool.towncrier.fragment.doc]
+name = "Documentation"
+showcontent = true
+
+[tool.towncrier.fragment.removal]
+name = "Removals"
+showcontent = true
+
+[tool.towncrier.fragment.misc]
+name = "Miscellaneous"
+showcontent = true
 
 [project.scripts]
 proxy2vpn = "proxy2vpn.cli:app"
