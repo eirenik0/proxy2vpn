@@ -30,14 +30,27 @@ app.add_typer(bulk_app, name="bulk")
 app.add_typer(preset_app, name="preset")
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     compose_file: Path = typer.Option(
         config.COMPOSE_FILE, "--compose-file", "-f", help="Path to compose file"
     ),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="Show version and exit",
+        is_eager=True,
+    ),
 ):
     """Store global options in context."""
+    if version:
+        from . import __version__
+
+        typer.echo(__version__)
+        raise typer.Exit()
+
     ctx.obj = ctx.obj or {}
     ctx.obj["compose_file"] = compose_file
 
