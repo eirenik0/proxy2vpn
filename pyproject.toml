@@ -16,6 +16,14 @@ dependencies = [
     "requests",
 ]
 
+[project.optional-dependencies]
+dev = ["towncrier"]
+
+[tool.towncrier]
+package = "proxy2vpn"
+filename = "CHANGELOG.md"
+directory = "news"
+
 [project.scripts]
 proxy2vpn = "proxy2vpn.cli:app"
 
