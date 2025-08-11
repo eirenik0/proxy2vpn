@@ -8,6 +8,19 @@ from ruamel.yaml.comments import CommentedMap
 
 from .models import Profile, VPNService
 
+# Minimal compose template used when initializing a new project
+INITIAL_COMPOSE_TEMPLATE = """\
+# proxy2vpn compose file
+# Define VPN profiles with x-vpn-base-<name> entries
+# and add services under the 'services' section.
+version: "3.9"
+services: {}
+networks:
+  proxy2vpn_network:
+    driver: bridge
+    name: proxy2vpn_network
+"""
+
 
 class ComposeManager:
     """Manage docker-compose files for VPN services."""
@@ -18,8 +31,29 @@ class ComposeManager:
         self.data: Dict[str, Any] = self._load()
 
     def _load(self) -> Dict[str, Any]:
+        if not self.compose_path.exists():
+            raise FileNotFoundError(
+                f"compose file '{self.compose_path}' not found. Run 'proxy2vpn init' to create it."
+            )
         with self.compose_path.open("r", encoding="utf-8") as f:
             return self.yaml.load(f)
+
+    @staticmethod
+    def create_initial_compose(path: Path, force: bool = False) -> None:
+        """Create a minimal compose file at PATH.
+
+        If the file already exists and ``force`` is False a FileExistsError is
+        raised.  The generated file contains an empty services section and the
+        network configuration required by proxy2vpn.
+        """
+
+        if path.exists() and not force:
+            raise FileExistsError(f"compose file '{path}' already exists")
+
+        yaml = YAML()
+        data = yaml.load(INITIAL_COMPOSE_TEMPLATE)
+        with path.open("w", encoding="utf-8") as f:
+            yaml.dump(data, f)
 
     @property
     def config(self) -> Dict[str, Any]:

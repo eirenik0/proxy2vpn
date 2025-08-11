@@ -28,7 +28,12 @@ proxy2vpn --help
 ```
 
 ## Quick Start
-1. Create a profile file with your VPN credentials:
+1. Initialize the compose file:
+   ```bash
+   proxy2vpn init
+   ```
+
+2. Create a profile file with your VPN credentials:
    ```bash
    mkdir -p profiles
    cat <<'EOF' > profiles/myprofile.env
@@ -37,24 +42,27 @@ proxy2vpn --help
    EOF
    ```
 
-2. Register the profile:
+3. Register the profile:
    ```bash
    proxy2vpn profile create myprofile profiles/myprofile.env
    ```
 
-3. Create and start a VPN service:
+4. Create and start a VPN service:
    ```bash
    proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn --location "New York"
    proxy2vpn vpn start vpn1
    ```
 
-4. View status and test connectivity:
+5. View status and test connectivity:
    ```bash
    proxy2vpn vpn list
    proxy2vpn test vpn1
    ```
 
 ## Command overview
+
+### Initialization
+- `proxy2vpn init [--force]`
 
 ### Profiles
 - `proxy2vpn profile create NAME ENV_FILE`

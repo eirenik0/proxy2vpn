@@ -27,6 +27,9 @@ class HelpfulTyper(typer.Typer):
         except UsageError as exc:
             self._handle_usage_error(exc)
             raise SystemExit(2)
+        except FileNotFoundError as exc:
+            self.console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1)
         except Exception as exc:
             # Handle other exceptions more gracefully
             if "Missing argument" in str(exc) or "required" in str(exc).lower():

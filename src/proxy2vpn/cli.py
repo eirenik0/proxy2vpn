@@ -30,6 +30,30 @@ app.add_typer(preset_app, name="preset")
 
 
 # ---------------------------------------------------------------------------
+# Initialization command
+# ---------------------------------------------------------------------------
+
+
+@app.command("init")
+def init_command(
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite existing compose file if it exists"
+    ),
+):
+    """Generate an initial compose.yml file."""
+
+    try:
+        ComposeManager.create_initial_compose(config.COMPOSE_FILE, force=force)
+    except FileExistsError:
+        typer.echo(
+            f"Compose file '{config.COMPOSE_FILE}' already exists. Use --force to overwrite.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo(f"Created '{config.COMPOSE_FILE}'.")
+
+
+# ---------------------------------------------------------------------------
 # Profile commands
 # ---------------------------------------------------------------------------
 
