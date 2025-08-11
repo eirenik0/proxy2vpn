@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.3.0]
+
+### Features
+
+- Add container diagnostics and health monitoring system with automated troubleshooting recommendations (#0)
+- Add `--version`/`-V` option to display the application version. (#1)
+- CLI restructure adds `system` command group, `--all` VPN flags, and deprecates `bulk` commands. (#2)
+
+
 ## [0.2.0]
 
 ### Bug fixes
