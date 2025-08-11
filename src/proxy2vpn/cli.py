@@ -238,7 +238,7 @@ def vpn_start(
     if all:
         from .docker_ops import start_all_vpn_containers
 
-        results = start_all_vpn_containers()
+        results = start_all_vpn_containers(manager)
         for svc_name, started in results:
             if started:
                 typer.echo(f"\u2713 Started {svc_name}")
@@ -255,15 +255,32 @@ def vpn_start(
         typer.echo(f"Service '{name}' not found.", err=True)
         raise typer.Exit(1)
 
-    from .docker_ops import start_container, analyze_container_logs
+    from .docker_ops import (
+        start_container,
+        analyze_container_logs,
+        create_vpn_container,
+    )
     from .diagnostics import DiagnosticAnalyzer
 
+    svc = manager.get_service(name)
+    profile = manager.get_profile(svc.profile)
     try:
         start_container(name)
         typer.echo(f"Started '{name}'.")
     except NotFound:
-        typer.echo(f"Container '{name}' does not exist.", err=True)
-        raise typer.Exit(1)
+        try:
+            create_vpn_container(svc, profile)
+            start_container(name)
+            typer.echo(f"Created and started '{name}'.")
+        except APIError as exc:
+            typer.echo(f"Failed to start '{name}': {exc.explanation}", err=True)
+            analyzer = DiagnosticAnalyzer()
+            results = analyze_container_logs(name, analyzer=analyzer)
+            if results:
+                typer.echo("Diagnostic hints:", err=True)
+                for res in results:
+                    typer.echo(f" - {res.message}: {res.recommendation}", err=True)
+            raise typer.Exit(1)
     except APIError as exc:
         typer.echo(f"Failed to start '{name}': {exc.explanation}", err=True)
         analyzer = DiagnosticAnalyzer()
@@ -501,7 +518,8 @@ def bulk_up():
     typer.echo("Deprecated: use 'vpn start --all' instead.", err=True)
     from .docker_ops import start_all_vpn_containers
 
-    results = start_all_vpn_containers()
+    manager = ComposeManager(config.COMPOSE_FILE)
+    results = start_all_vpn_containers(manager)
     for name, started in results:
         if started:
             typer.echo(f"\u2713 Started {name}")

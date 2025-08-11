@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable, Iterator
 
+from .compose_manager import ComposeManager
 from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
+from .models import Profile, VPNService
 
 import docker
 import requests
@@ -26,6 +29,47 @@ def create_container(
     client = _client()
     client.images.pull(image)
     return client.containers.create(image, name=name, command=command, detach=True)
+
+
+def _load_env_file(path: str) -> dict[str, str]:
+    """Return environment variables loaded from PATH."""
+
+    env: dict[str, str] = {}
+    if not path:
+        return env
+    file_path = Path(path)
+    if not file_path.exists():
+        return env
+    for line in file_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key] = value
+    return env
+
+
+def create_vpn_container(service: VPNService, profile: Profile) -> Container:
+    """Create a container for a VPN service using its profile."""
+
+    client = _client()
+    client.images.pull(profile.image)
+    env = _load_env_file(profile.env_file)
+    env.update(service.environment)
+    network_name = "proxy2vpn_network"
+    if not client.networks.list(names=[network_name]):
+        client.networks.create(name=network_name, driver="bridge")
+    return client.containers.create(
+        profile.image,
+        name=service.name,
+        detach=True,
+        ports={"8888/tcp": service.port},
+        environment=env,
+        labels=service.labels,
+        cap_add=profile.cap_add,
+        devices=profile.devices,
+        network=network_name,
+    )
 
 
 def start_container(name: str) -> Container:
@@ -134,22 +178,22 @@ def analyze_container_logs(
     return analyzer.analyze(logs)
 
 
-def start_all_vpn_containers() -> list[tuple[str, bool]]:
-    """Start all VPN containers.
+def start_all_vpn_containers(manager: ComposeManager) -> list[tuple[str, bool]]:
+    """Start all VPN containers, creating any missing ones."""
 
-    Returns a list of tuples ``(name, started)`` where ``started`` is ``True``
-    if the container was started by this function and ``False`` if it was
-    already running.
-    """
-
-    containers = get_vpn_containers(all=True)
+    client = _client()
+    existing = {c.name: c for c in client.containers.list(all=True)}
     results: list[tuple[str, bool]] = []
-    for container in containers:
+    for svc in manager.list_services():
+        container = existing.get(svc.name)
+        if container is None:
+            profile = manager.get_profile(svc.profile)
+            container = create_vpn_container(svc, profile)
         if container.status != "running":
             container.start()
-            results.append((container.name, True))
+            results.append((svc.name, True))
         else:
-            results.append((container.name, False))
+            results.append((svc.name, False))
     return results
 
 
