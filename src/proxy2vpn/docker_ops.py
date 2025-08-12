@@ -70,13 +70,17 @@ def create_container(
 
 
 def _load_env_file(path: str) -> dict[str, str]:
-    """Return environment variables loaded from PATH."""
+    """Return environment variables loaded from PATH.
+
+    If PATH is empty, does not exist, or is not a regular file, return an empty dict.
+    """
 
     env: dict[str, str] = {}
     if not path:
         return env
     file_path = Path(path)
-    if not file_path.exists():
+    # Only proceed if it's a regular file; ignore directories or non-existing paths
+    if not file_path.is_file():
         return env
     for line in file_path.read_text().splitlines():
         line = line.strip()
@@ -122,6 +126,16 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         raise RuntimeError(
             f"Failed to create VPN container {service.name}: {exc}"
         ) from exc
+
+
+def recreate_vpn_container(service: VPNService, profile: Profile) -> Container:
+    """Recreate a container for a VPN service."""
+
+    try:
+        remove_container(service.name)
+    except RuntimeError:
+        pass
+    return create_vpn_container(service, profile)
 
 
 def start_container(name: str) -> Container:
@@ -278,16 +292,24 @@ def analyze_container_logs(
         raise RuntimeError(f"Failed to analyze logs for {name}: {exc}") from exc
 
 
-def start_all_vpn_containers(manager: ComposeManager) -> list[tuple[str, bool]]:
+def start_all_vpn_containers(
+    manager: ComposeManager, force: bool = False
+) -> list[tuple[str, bool]]:
     """Start all VPN containers, creating any missing ones."""
+
     client = _client()
     results: list[tuple[str, bool]] = []
     try:
         existing = {c.name: c for c in client.containers.list(all=True)}
         for svc in manager.list_services():
             container = existing.get(svc.name)
+            profile = manager.get_profile(svc.profile)
+            if force:
+                container = recreate_vpn_container(svc, profile)
+                _retry(container.start, exceptions=(DockerException,))
+                results.append((svc.name, True))
+                continue
             if container is None:
-                profile = manager.get_profile(svc.profile)
                 container = create_vpn_container(svc, profile)
             if container.status != "running":
                 _retry(container.start, exceptions=(DockerException,))

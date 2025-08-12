@@ -111,3 +111,74 @@ def test_create_vpn_container_merges_env(tmp_path):
     assert "FOO=bar" in env_vars
     assert "VAR=override" in env_vars
     docker_ops.remove_container("vpn-test")
+
+
+@pytest.mark.skipif(not docker_available(), reason="Docker is not available")
+def test_recreate_vpn_container():
+    profile = docker_ops.Profile(
+        name="test", env_file="", image="alpine", cap_add=[], devices=[]
+    )
+    service = docker_ops.VPNService(
+        name="vpn-recreate",
+        port=12346,
+        provider="",
+        profile="test",
+        location="",
+        environment={},
+        labels={"vpn.type": "vpn", "vpn.port": "12346"},
+    )
+    first = docker_ops.create_vpn_container(service, profile)
+    first_id = first.id
+    second = docker_ops.recreate_vpn_container(service, profile)
+    second_id = second.id
+    assert first_id != second_id
+    docker_ops.remove_container(service.name)
+
+
+def test_start_all_vpn_containers_force(monkeypatch):
+    svc = docker_ops.VPNService(
+        name="svc",
+        port=1,
+        provider="",
+        profile="p",
+        location="",
+        environment={},
+        labels={},
+    )
+    profile = docker_ops.Profile(
+        name="p", env_file="", image="alpine", cap_add=[], devices=[]
+    )
+
+    class Manager:
+        def list_services(self):
+            return [svc]
+
+        def get_profile(self, name):
+            return profile
+
+    class DummyContainer:
+        status = "created"
+
+        def start(self):
+            return None
+
+    called = {"recreate": 0}
+
+    def fake_recreate(service, profile):
+        called["recreate"] += 1
+        return DummyContainer()
+
+    class FakeClient:
+        class Containers:
+            def list(self, all=True):
+                return []
+
+        containers = Containers()
+
+    monkeypatch.setattr(docker_ops, "recreate_vpn_container", fake_recreate)
+    monkeypatch.setattr(docker_ops, "_client", lambda: FakeClient())
+    monkeypatch.setattr(docker_ops, "_retry", lambda func, **kw: func())
+
+    results = docker_ops.start_all_vpn_containers(Manager(), force=True)
+    assert results == [("svc", True)]
+    assert called["recreate"] == 1
