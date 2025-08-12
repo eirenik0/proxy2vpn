@@ -18,28 +18,18 @@ Python command-line interface for managing multiple VPN containers with Docker.
 
 ## Installation
 
-Install `proxy2vpn` from [PyPI](https://pypi.org/project/proxy2vpn/) using your
-preferred Python tool:
-
-### pip
-```bash
-pip install proxy2vpn
-```
-
-### uv
-```bash
-uv tool install proxy2vpn
-```
+Install `proxy2vpn` from [PyPI](https://pypi.org/project/proxy2vpn/) using `uvx`:
 
 ### uvx (run without installing)
 ```bash
 uvx proxy2vpn --help
 ```
 
-### pipx
-```bash
-pipx install proxy2vpn
-```
+> [!NOTE]
+> `uvx` is part of the `uv` toolchain. If `uv` isn't installed, get it with:
+> ```bash
+> curl -LsSf https://astral.sh/uv/install.sh | sh
+> ```
 
 ## Quick Start
 1. Initialize the compose file:

@@ -3,8 +3,14 @@
 Thank you for considering a contribution to Proxy2VPN!
 
 ## Getting Started
-- Install dev deps: `uv sync` or `pip install -e ".[dev]"`.
+- Install dev deps: `uv sync` (recommended) or `pip install -e ".[dev]"`.
 - Run the suite: `make fmt-check && make lint && make test`.
+
+> [!NOTE]
+> `uv` is part of the `uv` toolchain. If `uv` isn't installed, get it with:
+> ```bash
+> curl -LsSf https://astral.sh/uv/install.sh | sh
+> ```
 
 ## Code Style
 - Python 3.10+ with type hints encouraged.
