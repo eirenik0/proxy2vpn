@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.8.0]
+
+### Bug fixes
+
+- - handle non-IP responses from external services when retrieving public IPs (fetch-ip-html)
+
+### Features
+
+- Add location column to `proxy2vpn vpn list` output. (location-column)
+
+### Removals
+
+- Remove deprecated `bulk` command group. (remove-bulk)
+
+
 ## [0.7.0]
 
 ### Features
