@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.6.0]
+
+### Features
+
+- feat: allow `vpn restart --all --force` to recreate containers (#1)
+- feat: default VPN start, stop, and restart commands now recreate containers, removing the `--force` flag (#2)
+- Add HTTP proxy authentication support for VPN containers using HTTPPROXY_USER and HTTPPROXY_PASSWORD environment variables (#3)
+
+
 ## [0.5.1]
 
 ### Bug fixes
