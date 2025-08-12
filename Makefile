@@ -14,7 +14,7 @@ help: ## Show available targets
 		@echo "  all               Run all checks (format, lint, test, integration)"
 
 test:
-	uv run --with pytest pytest
+	uv run --with pytest,pytest-xdist pytest -n auto
 
 changelog:
 	@[ -n "$(VERSION)" ] || (echo "VERSION is required" && exit 1)

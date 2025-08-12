@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["towncrier"]
+dev = ["towncrier", "pytest-xdist"]
 
 [tool.towncrier]
 package = "proxy2vpn"

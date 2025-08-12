@@ -55,4 +55,4 @@ jobs:
         run: uv run --with towncrier towncrier check
 
       - name: Run tests
-        run: uv run --with pytest pytest
+        run: uv run --with pytest,pytest-xdist pytest -n auto
