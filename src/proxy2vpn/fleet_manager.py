@@ -189,22 +189,67 @@ class FleetManager:
 
         return plan
 
+    def _validate_service_locations(
+        self, services: List[ServicePlan]
+    ) -> tuple[List[ServicePlan], List[str]]:
+        """Validate that each service's target location exists for the provider.
+
+        Returns tuple of (valid_services, errors).
+        """
+        valid_services: List[ServicePlan] = []
+        errors: List[str] = []
+
+        for svc in services:
+            try:
+                if self.server_manager.validate_location(svc.provider, svc.location):
+                    console.print(
+                        f"[green]\u2713[/green] {svc.location} available for {svc.provider}"
+                    )
+                    valid_services.append(svc)
+                else:
+                    msg = f"Invalid location {svc.location} for {svc.provider}"
+                    console.print(f"[red]\u274c[/red] {msg}")
+                    errors.append(msg)
+            except Exception as e:
+                msg = f"Error validating {svc.location} for {svc.provider}: {e}"
+                console.print(f"[red]\u274c[/red] {msg}")
+                errors.append(msg)
+
+        return valid_services, errors
+
     async def deploy_fleet(
         self, plan: DeploymentPlan, validate_servers: bool = True, parallel: bool = True
     ) -> DeploymentResult:
         """Execute bulk deployment with server validation"""
 
+        skipped = 0
+        errors: List[str] = []
+
         if validate_servers:
             console.print("[yellow]🔍 Validating server availability...[/yellow]")
-            # TODO: Add server validation when ServerMonitor is implemented
-            pass
+            valid_services, validation_errors = self._validate_service_locations(
+                plan.services
+            )
+            skipped = len(plan.services) - len(valid_services)
+            errors.extend(validation_errors)
+            if skipped:
+                console.print(
+                    f"[yellow]⚠ Skipping {skipped} invalid service(s)[/yellow]"
+                )
+            plan.services = valid_services
+            if not plan.services:
+                return DeploymentResult(
+                    deployed=0,
+                    failed=skipped,
+                    services=[],
+                    errors=errors,
+                )
 
         console.print(
             f"[green]🚀 Deploying {len(plan.services)} VPN services...[/green]"
         )
 
         deployed = 0
-        errors: List[str] = []
         added_services: List[str] = []
 
         try:
@@ -273,12 +318,12 @@ class FleetManager:
 
             return DeploymentResult(
                 deployed=0,
-                failed=len(plan.services),
+                failed=len(plan.services) + skipped,
                 services=[],
                 errors=errors,
             )
 
-        failed = len(plan.services) - deployed
+        failed = len(plan.services) - deployed + skipped
         return DeploymentResult(
             deployed=deployed, failed=failed, services=plan.service_names, errors=errors
         )
