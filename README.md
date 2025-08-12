@@ -81,7 +81,7 @@ For enterprise-scale deployment across multiple cities and VPN accounts:
 2. Plan a fleet deployment across countries:
    ```bash
    # Deploy across Germany and France with 2 slots on account1, 8 on account2
-   proxy2vpn fleet plan --countries "Germany,France,Netherlands" --profiles "account1:2,account2:8"
+   proxy2vpn fleet plan --countries "Germany,France,Netherlands" --profiles "account1:2,account2:8" --unique-ips
    ```
 
 3. Deploy the planned fleet:
@@ -129,7 +129,7 @@ For enterprise-scale deployment across multiple cities and VPN accounts:
 - `proxy2vpn servers validate-location PROVIDER LOCATION`
 
 ### Fleet management
-- `proxy2vpn fleet plan --countries "Germany,France" --profiles "acc1:2,acc2:8" [--output PLAN_FILE]`
+- `proxy2vpn fleet plan --countries "Germany,France" --profiles "acc1:2,acc2:8" [--output PLAN_FILE] [--unique-ips]`
 - `proxy2vpn fleet deploy [--plan-file PLAN_FILE] [--parallel] [--validate-first] [--dry-run]`
 - `proxy2vpn fleet status [--format table|json|yaml] [--show-allocation] [--show-health]`
 - `proxy2vpn fleet rotate [--country COUNTRY] [--criteria random|performance|load] [--dry-run]`

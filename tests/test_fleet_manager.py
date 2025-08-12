@@ -71,6 +71,53 @@ def test_plan_deployment_sanitizes_and_limits(fleet_manager, monkeypatch):
     assert service.port == 21000
 
 
+def test_plan_deployment_unique_ips(fleet_manager):
+    fleet_manager.server_manager.data = {
+        "version": 1,
+        "protonvpn": {
+            "servers": [
+                {
+                    "country": "A",
+                    "city": "City1",
+                    "hostname": "host1",
+                    "ips": ["1.1.1.1"],
+                },
+                {
+                    "country": "A",
+                    "city": "City1",
+                    "hostname": "host2",
+                    "ips": ["1.1.1.1"],
+                },
+                {
+                    "country": "A",
+                    "city": "City2",
+                    "hostname": "host3",
+                    "ips": ["2.2.2.2"],
+                },
+                {
+                    "country": "B",
+                    "city": "City3",
+                    "hostname": "host4",
+                    "ips": ["3.3.3.3"],
+                },
+            ]
+        },
+    }
+    config = FleetConfig(
+        provider="protonvpn",
+        countries=["A", "B"],
+        profiles={"acc1": 3},
+        port_start=40000,
+        unique_ips=True,
+    )
+    plan = fleet_manager.plan_deployment(config)
+    assert len(plan.services) == 3
+    hostnames = [s.hostname for s in plan.services]
+    assert len(set(hostnames)) == 3
+    ips = [s.ip for s in plan.services]
+    assert len(set(ips)) == 3
+
+
 def test_deploy_fleet_rolls_back_on_error(monkeypatch, fleet_manager, capsys):
     plan = DeploymentPlan(provider="prov")
     plan.services = [

@@ -867,6 +867,9 @@ def fleet_plan_cmd(
     ),
     output: str = typer.Option("deployment-plan.yaml", help="Save plan to file"),
     validate_servers: bool = typer.Option(True, help="Validate server availability"),
+    unique_ips: bool = typer.Option(
+        False, help="Ensure each service uses a unique city and server IP"
+    ),
 ):
     """Plan bulk VPN deployment across cities"""
     from .fleet_commands import fleet_plan
@@ -880,6 +883,7 @@ def fleet_plan_cmd(
         naming_template,
         output,
         validate_servers,
+        unique_ips,
     )
 
 
