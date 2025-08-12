@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import asyncio
 
 import typer
-from .typer_ext import HelpfulTyper
+from .typer_ext import HelpfulTyper, run_async
 from docker.errors import APIError, NotFound
 
 from . import config
@@ -256,7 +257,8 @@ def vpn_create(
 
 
 @vpn_app.command("list")
-def vpn_list(
+@run_async
+async def vpn_list(
     ctx: typer.Context,
     diagnose: bool = typer.Option(
         False, "--diagnose", help="Include diagnostic health scores"
@@ -271,21 +273,29 @@ def vpn_list(
     manager = ComposeManager(compose_file)
     from .docker_ops import (
         get_vpn_containers,
-        get_container_ip,
+        get_container_ip_async,
         analyze_container_logs,
     )
     from .diagnostics import DiagnosticAnalyzer
 
     if ips_only:
         containers = get_vpn_containers(all=False)
-        for container in containers:
-            ip = get_container_ip(container)
+        ips = await asyncio.gather(
+            *(get_container_ip_async(container) for container in containers)
+        )
+        for container, ip in zip(containers, ips):
             typer.echo(f"{container.name}: {ip}")
         return
 
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
     analyzer = DiagnosticAnalyzer() if diagnose else None
+
+    running = {name: c for name, c in containers.items() if c.status == "running"}
+    ips = await asyncio.gather(
+        *(get_container_ip_async(container) for container in running.values())
+    )
+    ip_map = dict(zip(running.keys(), ips))
 
     header = f"{'NAME':<15} {'PORT':<8} {'PROFILE':<12} {'STATUS':<10} {'IP':<15}"
     if diagnose:
@@ -297,7 +307,7 @@ def vpn_list(
         container = containers.get(svc.name)
         if container:
             status = container.status
-            ip = get_container_ip(container) if status == "running" else "N/A"
+            ip = ip_map.get(svc.name, "N/A")
             health = "N/A"
             if diagnose:
                 results = analyze_container_logs(container.name, analyzer=analyzer)
