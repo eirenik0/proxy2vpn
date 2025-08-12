@@ -257,3 +257,25 @@ def test_start_all_vpn_containers_recreates(monkeypatch):
     results = docker_ops.start_all_vpn_containers(Manager())
     assert results == ["svc"]
     assert called["recreate"] == 1
+
+
+def test_ensure_network_recreates(monkeypatch):
+    removed_created = {"removed": False, "created": False}
+
+    class Network:
+        def remove(self):
+            removed_created["removed"] = True
+
+    class Networks:
+        def list(self, names):
+            return [Network()]
+
+        def create(self, name, driver):
+            removed_created["created"] = True
+
+    class Client:
+        networks = Networks()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda timeout=10: Client())
+    docker_ops.ensure_network(recreate=True)
+    assert removed_created["removed"] and removed_created["created"]

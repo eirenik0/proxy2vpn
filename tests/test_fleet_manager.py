@@ -120,6 +120,7 @@ def test_deploy_fleet_rolls_back_on_error(monkeypatch, fleet_manager, capsys):
     )
     monkeypatch.setattr("proxy2vpn.fleet_manager.stop_container", fake_stop)
     monkeypatch.setattr("proxy2vpn.fleet_manager.remove_container", fake_remove)
+    monkeypatch.setattr("proxy2vpn.fleet_manager.ensure_network", lambda recreate: None)
 
     result = asyncio.run(
         fleet_manager.deploy_fleet(plan, validate_servers=False, parallel=False)
@@ -175,6 +176,7 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
 
     monkeypatch.setattr(fleet_manager.compose_manager, "add_service", fake_add_service)
     monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
+    monkeypatch.setattr("proxy2vpn.fleet_manager.ensure_network", lambda recreate: None)
 
     result = asyncio.run(
         fleet_manager.deploy_fleet(plan, validate_servers=True, parallel=False)

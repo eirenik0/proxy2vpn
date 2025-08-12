@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from rich.console import Console
 
 from .compose_manager import ComposeManager
-from .docker_ops import remove_container, stop_container
+from .docker_ops import ensure_network, remove_container, stop_container
 from .logging_utils import get_logger
 from .models import VPNService
 from .server_manager import ServerManager
@@ -218,7 +218,11 @@ class FleetManager:
         return valid_services, errors
 
     async def deploy_fleet(
-        self, plan: DeploymentPlan, validate_servers: bool = True, parallel: bool = True
+        self,
+        plan: DeploymentPlan,
+        validate_servers: bool = True,
+        parallel: bool = True,
+        recreate_network: bool = False,
     ) -> DeploymentResult:
         """Execute bulk deployment with server validation"""
 
@@ -253,6 +257,7 @@ class FleetManager:
         added_services: List[str] = []
 
         try:
+            await asyncio.to_thread(ensure_network, recreate_network)
             # Create services in compose file
             for service_plan in plan.services:
                 # Create Docker labels for service identification and metadata
