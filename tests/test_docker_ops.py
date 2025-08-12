@@ -169,7 +169,7 @@ def test_recreate_vpn_container():
     docker_ops.remove_container(service.name)
 
 
-def test_start_all_vpn_containers_force(monkeypatch):
+def test_start_all_vpn_containers_recreates(monkeypatch):
     svc = docker_ops.VPNService(
         name="svc",
         port=1,
@@ -202,17 +202,9 @@ def test_start_all_vpn_containers_force(monkeypatch):
         called["recreate"] += 1
         return DummyContainer()
 
-    class FakeClient:
-        class Containers:
-            def list(self, all=True):
-                return []
-
-        containers = Containers()
-
     monkeypatch.setattr(docker_ops, "recreate_vpn_container", fake_recreate)
-    monkeypatch.setattr(docker_ops, "_client", lambda: FakeClient())
     monkeypatch.setattr(docker_ops, "_retry", lambda func, **kw: func())
 
-    results = docker_ops.start_all_vpn_containers(Manager(), force=True)
-    assert results == [("svc", True)]
+    results = docker_ops.start_all_vpn_containers(Manager())
+    assert results == ["svc"]
     assert called["recreate"] == 1
