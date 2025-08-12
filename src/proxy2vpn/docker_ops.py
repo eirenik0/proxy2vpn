@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Iterable, Iterator, Callable, Any
 import time
 
+from rich.console import Console
+
 from .compose_manager import ComposeManager
 from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from .models import Profile, VPNService
@@ -15,6 +17,8 @@ from . import ip_utils
 import docker
 from docker.models.containers import Container
 from docker.errors import DockerException
+
+console = Console()
 
 DEFAULT_TIMEOUT = 10
 MAX_RETRIES = 3
@@ -61,6 +65,7 @@ def create_container(
             image, name=name, command=command, detach=True
         )
         logger.info("container_created", extra={"container_name": name, "image": image})
+        console.print(f"[green]✅ Created container:[/green] {name}")
         return container
     except DockerException as exc:
         logger.error(
@@ -118,6 +123,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
             "vpn_container_created",
             extra={"container_name": service.name, "image": profile.image},
         )
+        console.print(f"[green]✅ Created VPN container:[/green] {service.name}")
         return container
     except DockerException as exc:
         logger.error(
@@ -146,6 +152,7 @@ def start_container(name: str) -> Container:
         container = client.containers.get(name)
         container.start()
         logger.info("container_started", extra={"container_name": name})
+        console.print(f"[green]🚀 Started container:[/green] {name}")
         return container
     except DockerException as exc:
         logger.error(
@@ -161,6 +168,7 @@ def stop_container(name: str) -> Container:
         container = client.containers.get(name)
         container.stop()
         logger.info("container_stopped", extra={"container_name": name})
+        console.print(f"[yellow]🛑 Stopped container:[/yellow] {name}")
         return container
     except DockerException as exc:
         logger.error(
@@ -177,6 +185,7 @@ def restart_container(name: str) -> Container:
         container.restart()
         container.reload()
         logger.info("container_restarted", extra={"container_name": name})
+        console.print(f"[blue]🔄 Restarted container:[/blue] {name}")
         return container
     except DockerException as exc:
         logger.error(
@@ -193,6 +202,7 @@ def remove_container(name: str) -> None:
         container = client.containers.get(name)
         container.remove(force=True)
         logger.info("container_removed", extra={"container_name": name})
+        console.print(f"[red]🗑️ Removed container:[/red] {name}")
     except DockerException as exc:
         logger.error(
             "container_remove_failed", extra={"container_name": name, "error": str(exc)}

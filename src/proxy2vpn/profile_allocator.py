@@ -1,10 +1,15 @@
 """Profile allocation system for managing account slots across VPN services."""
 
-import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from rich.console import Console
+
+from .logging_utils import get_logger
+
+console = Console()
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -49,6 +54,9 @@ class ProfileAllocator:
         logger.info(
             f"Setup {len(self.slots)} profiles with total {sum(profile_config.values())} slots"
         )
+        console.print(
+            f"[green]📋 Setup {len(self.slots)} profiles with {sum(profile_config.values())} total slots[/green]"
+        )
 
     def get_next_available(
         self, profile_config: Optional[Dict[str, int]] = None
@@ -64,6 +72,7 @@ class ProfileAllocator:
 
         if not available_profiles:
             logger.warning("No profile slots available")
+            console.print("[yellow]⚠️ No profile slots available[/yellow]")
             return None
 
         # Round-robin with load balancing: choose profile with lowest utilization
@@ -93,6 +102,9 @@ class ProfileAllocator:
             logger.warning(
                 f"Service {service_name} already allocated to {profile_name}"
             )
+            console.print(
+                f"[yellow]⚠️ Service already allocated:[/yellow] {service_name} → {profile_name}"
+            )
             return False
 
         slot.used_slots += 1
@@ -101,6 +113,9 @@ class ProfileAllocator:
         logger.info(
             f"Allocated slot to {service_name} in profile {profile_name} "
             f"({slot.used_slots}/{slot.total_slots})"
+        )
+        console.print(
+            f"[green]✅ Allocated slot:[/green] {service_name} → {profile_name} ({slot.used_slots}/{slot.total_slots})"
         )
         return True
 
@@ -114,6 +129,9 @@ class ProfileAllocator:
                 logger.info(
                     f"Released slot for {service_name} from profile {profile_name} "
                     f"({slot.used_slots}/{slot.total_slots})"
+                )
+                console.print(
+                    f"[blue]♾️ Released slot:[/blue] {service_name} from {profile_name} ({slot.used_slots}/{slot.total_slots})"
                 )
                 return True
 

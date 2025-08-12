@@ -1,7 +1,6 @@
 """Fleet management for bulk VPN deployments across cities and profiles."""
 
 import asyncio
-import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -9,11 +8,12 @@ from rich.console import Console
 
 from .compose_manager import ComposeManager
 from .docker_ops import remove_container, stop_container
+from .logging_utils import get_logger
 from .models import VPNService
 from .server_manager import ServerManager
 
 console = Console()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

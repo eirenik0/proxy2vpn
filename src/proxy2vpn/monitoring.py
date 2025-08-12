@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List
 
 import psutil
 
 from .docker_ops import get_container_diagnostics, get_vpn_containers
+from .logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def monitor_vpn_health() -> List[Dict[str, Any]]:

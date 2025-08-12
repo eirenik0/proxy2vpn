@@ -1,7 +1,6 @@
 """Server availability monitoring and rotation system."""
 
 import asyncio
-import logging
 import random
 import time
 from dataclasses import dataclass, field
@@ -11,10 +10,11 @@ from typing import Dict, List, Optional
 import requests
 from rich.console import Console
 
+from .logging_utils import get_logger
 from .models import VPNService
 
 console = Console()
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -100,6 +100,7 @@ class ServerMonitor:
             container = get_container_by_service_name(service.name)
             if not container:
                 logger.warning(f"Container not found for service {service.name}")
+                console.print(f"[yellow]⚠️ Container not found:[/yellow] {service.name}")
                 return False
 
             # Check container status
@@ -107,6 +108,9 @@ class ServerMonitor:
             if container.status != "running":
                 logger.warning(
                     f"Container {service.name} is not running: {container.status}"
+                )
+                console.print(
+                    f"[yellow]⚠️ Container not running:[/yellow] {service.name} ({container.status})"
                 )
                 return False
 
@@ -136,10 +140,14 @@ class ServerMonitor:
                 logger.warning(
                     f"Proxy test failed for {service.name}: HTTP {response.status_code}"
                 )
+                console.print(
+                    f"[yellow]⚠️ Proxy test failed:[/yellow] {service.name} (HTTP {response.status_code})"
+                )
                 return False
 
         except requests.exceptions.Timeout:
             logger.warning(f"Timeout testing service {service.name}")
+            console.print(f"[yellow]⏱️ Timeout testing service:[/yellow] {service.name}")
             self._record_failure(service.location)
             return False
         except requests.exceptions.RequestException as e:
