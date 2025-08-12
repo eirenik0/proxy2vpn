@@ -37,6 +37,16 @@ uv run proxy2vpn vpn start --all
 uv run proxy2vpn servers list-providers
 uv run proxy2vpn vpn test vpn1
 uv run proxy2vpn system diagnose --verbose
+
+# Profile Environment File Example
+Profile environment files (e.g., profiles/myprofile.env) should include VPN and HTTP proxy credentials:
+```
+OPENVPN_USER=your_vpn_username
+OPENVPN_PASSWORD=your_vpn_password
+HTTPPROXY=on
+HTTPPROXY_USER=your_proxy_username
+HTTPPROXY_PASSWORD=your_proxy_password
+```
 ```
 
 ## High-Level Architecture

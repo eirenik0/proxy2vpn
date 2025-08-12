@@ -8,6 +8,7 @@ Python command-line interface for managing multiple VPN containers with Docker.
 - Multi-service control with `--all` flags
 - Query and validate provider server locations
 - Apply predefined presets for common setups
+- HTTP proxy authentication support
 
 ## Installation
 
@@ -50,6 +51,9 @@ proxy2vpn --help
    cat <<'EOF' > profiles/myprofile.env
    OPENVPN_USER=your_username
    OPENVPN_PASSWORD=your_password
+   HTTPPROXY=on
+   HTTPPROXY_USER=your_proxy_username
+   HTTPPROXY_PASSWORD=your_proxy_password
    EOF
    ```
 

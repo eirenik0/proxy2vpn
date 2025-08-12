@@ -355,6 +355,40 @@ def cleanup_orphaned_containers(manager: ComposeManager) -> list[str]:
     return removed
 
 
+def _get_authenticated_proxy_url(container: Container, port: str) -> dict[str, str]:
+    """Return authenticated proxy URLs for HTTP and HTTPS protocols.
+
+    Extracts HTTPPROXY_USER and HTTPPROXY_PASSWORD from container environment
+    variables and constructs authenticated proxy URLs. Falls back to
+    unauthenticated URLs if credentials are not available.
+    """
+    try:
+        # Extract environment variables from container
+        env_list = container.attrs.get("Config", {}).get("Env", [])
+        env_vars = {}
+        for env_var in env_list:
+            if "=" in env_var:
+                key, value = env_var.split("=", 1)
+                env_vars[key] = value
+
+        # Check for proxy credentials
+        proxy_user = env_vars.get("HTTPPROXY_USER")
+        proxy_password = env_vars.get("HTTPPROXY_PASSWORD")
+
+        if proxy_user and proxy_password:
+            # Use authenticated proxy URLs
+            auth_url = f"http://{proxy_user}:{proxy_password}@localhost:{port}"
+            return {"http": auth_url, "https": auth_url}
+        else:
+            # Fall back to unauthenticated proxy URLs
+            base_url = f"http://localhost:{port}"
+            return {"http": base_url, "https": base_url}
+    except Exception:
+        # Fall back to unauthenticated proxy URLs on any error
+        base_url = f"http://localhost:{port}"
+        return {"http": base_url, "https": base_url}
+
+
 def get_container_ip(container: Container) -> str:
     """Return the external IP address for a running container.
 
@@ -367,7 +401,7 @@ def get_container_ip(container: Container) -> str:
     port = container.labels.get("vpn.port")
     if not port or container.status != "running":
         return "N/A"
-    proxies = {"http": f"http://localhost:{port}", "https": f"http://localhost:{port}"}
+    proxies = _get_authenticated_proxy_url(container, port)
     ip = ip_utils.fetch_ip(proxies=proxies)
     return ip or "N/A"
 
@@ -385,12 +419,8 @@ def test_vpn_connection(name: str) -> bool:
         return False
     try:
         direct = ip_utils.fetch_ip()
-        proxied = ip_utils.fetch_ip(
-            proxies={
-                "http": f"http://localhost:{port}",
-                "https": f"http://localhost:{port}",
-            }
-        )
+        proxies = _get_authenticated_proxy_url(container, port)
+        proxied = ip_utils.fetch_ip(proxies=proxies)
         return proxied not in {"", direct}
     except Exception:
         return False
