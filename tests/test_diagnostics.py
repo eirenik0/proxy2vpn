@@ -15,16 +15,12 @@ def test_temporal_analysis():
 
 
 def test_connectivity(monkeypatch):
-    def fake_get(url, proxies=None, timeout=5):
-        class Resp:
-            def __init__(self, text: str) -> None:
-                self.text = text
-
+    def fake_fetch_ip(proxies=None, timeout=5):
         if proxies:
-            return Resp("1.1.1.1")
-        return Resp("2.2.2.2")
+            return "1.1.1.1"
+        return "2.2.2.2"
 
-    monkeypatch.setattr(diagnostics.requests, "get", fake_get)
+    monkeypatch.setattr(diagnostics.ip_utils, "fetch_ip", fake_fetch_ip)
     analyzer = diagnostics.DiagnosticAnalyzer()
     results = analyzer.check_connectivity(8080)
     assert any(r.check == "dns_leak" and r.passed for r in results)

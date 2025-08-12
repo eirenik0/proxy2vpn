@@ -10,9 +10,9 @@ from .compose_manager import ComposeManager
 from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from .models import Profile, VPNService
 from .logging_utils import get_logger
+from . import ip_utils
 
 import docker
-import requests
 from docker.models.containers import Container
 from docker.errors import DockerException
 
@@ -371,25 +371,18 @@ def cleanup_orphaned_containers(manager: ComposeManager) -> list[str]:
 def get_container_ip(container: Container) -> str:
     """Return the external IP address for a running container.
 
-    The IP address is retrieved via ``ifconfig.me`` through the proxy exposed on
-    the port specified by the ``vpn.port`` label. If the container is not
-    running, has no port label or the request fails, ``"N/A"`` is returned.
+    The IP address is retrieved from external services through the proxy
+    exposed on the port specified by the ``vpn.port`` label. If the container
+    is not running, has no port label or the request fails, ``"N/A"`` is
+    returned.
     """
 
     port = container.labels.get("vpn.port")
     if not port or container.status != "running":
         return "N/A"
-    try:
-        response = _retry(
-            requests.get,
-            "https://ifconfig.me",
-            proxies={"http": f"localhost:{port}", "https": f"localhost:{port}"},
-            timeout=5,
-            exceptions=(requests.RequestException,),
-        )
-        return response.text.strip()
-    except Exception:
-        return "N/A"
+    proxies = {"http": f"http://localhost:{port}", "https": f"http://localhost:{port}"}
+    ip = ip_utils.fetch_ip(proxies=proxies)
+    return ip or "N/A"
 
 
 def test_vpn_connection(name: str) -> bool:
@@ -404,16 +397,13 @@ def test_vpn_connection(name: str) -> bool:
     if not port or container.status != "running":
         return False
     try:
-        direct = _retry(requests.get, "https://ifconfig.me", timeout=5)
-        proxied = _retry(
-            requests.get,
-            "https://ifconfig.me",
+        direct = ip_utils.fetch_ip()
+        proxied = ip_utils.fetch_ip(
             proxies={
                 "http": f"http://localhost:{port}",
                 "https": f"http://localhost:{port}",
-            },
-            timeout=5,
+            }
         )
-        return proxied.text.strip() not in {"", direct.text.strip()}
+        return proxied not in {"", direct}
     except Exception:
         return False
