@@ -626,6 +626,44 @@ async def vpn_test(
         abort("VPN connection failed", "Check container logs")
 
 
+@vpn_app.command("export-proxies")
+@run_async
+async def vpn_export_proxies(
+    ctx: typer.Context,
+    output: Path = typer.Option(
+        ..., "--output", "-o", callback=sanitize_path, help="Path to CSV output"
+    ),
+    no_auth: bool = typer.Option(
+        False, "--no-auth", help="Exclude proxy authentication credentials"
+    ),
+):
+    """Export running VPN proxies to a CSV file."""
+
+    from .docker_ops import collect_proxy_info
+
+    proxies = await collect_proxy_info(include_credentials=not no_auth)
+    import csv
+
+    with output.open("w", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=[
+                "host",
+                "port",
+                "username",
+                "password",
+                "location",
+                "status",
+            ],
+        )
+        writer.writeheader()
+        for row in proxies:
+            writer.writerow(row)
+    console.print(
+        f"[green]\u2713[/green] Exported {len(proxies)} proxies to '{output}'."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Server commands
 # ---------------------------------------------------------------------------

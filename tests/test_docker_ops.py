@@ -117,6 +117,41 @@ def test_cleanup_orphans(monkeypatch):
     assert containers[1].removed
 
 
+def test_collect_proxy_info(monkeypatch):
+    class C:
+        status = "running"
+        labels = {"vpn.port": "20001", "vpn.location": "New York"}
+        attrs = {
+            "Config": {"Env": ["HTTPPROXY_USER=user", "HTTPPROXY_PASSWORD=pass"]},
+            "State": {"ExitCode": 0},
+        }
+
+    monkeypatch.setattr(docker_ops, "get_vpn_containers", lambda all=True: [C()])
+
+    async def fake_ip(container):
+        return "1.2.3.4"
+
+    monkeypatch.setattr(docker_ops, "get_container_ip_async", fake_ip)
+
+    result = asyncio.run(docker_ops.collect_proxy_info())
+    assert result == [
+        {
+            "host": "1.2.3.4",
+            "port": "20001",
+            "username": "user",
+            "password": "pass",
+            "location": "New York",
+            "status": "active",
+        }
+    ]
+
+    result_no_auth = asyncio.run(
+        docker_ops.collect_proxy_info(include_credentials=False)
+    )
+    assert result_no_auth[0]["username"] == ""
+    assert result_no_auth[0]["password"] == ""
+
+
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
 def test_restart_and_logs():
     name = "proxy2vpn-test-logs"
