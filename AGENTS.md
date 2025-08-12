@@ -20,7 +20,7 @@
 - Formatting and imports via ruff; do not hand-tune—run `make fmt`.
 - Indentation: 2 spaces, LF line endings (see `.editorconfig`).
 - Naming: modules/functions `snake_case`, classes `PascalCase`, constants `UPPER_SNAKE_CASE`.
-- Keep CLI commands coherent with existing verbs (`system`, `profile`, `vpn`, `servers`, `preset`).
+- Keep CLI commands coherent with existing verbs (`system`, `profile`, `vpn`, `servers`).
 
 ## Testing Guidelines
 - Framework: `pytest`. Place tests under `tests/` named `test_*.py`.

@@ -8,7 +8,6 @@ Python command-line interface for managing multiple VPN containers with Docker.
 - **Fleet management**: Bulk deployment across multiple cities and profiles
 - Multi-service control with `--all` flags
 - Query and validate provider server locations
-- Apply predefined presets for common setups
 - HTTP proxy authentication support
 - Server health monitoring and automatic rotation
 - Intelligent profile allocation with load balancing
@@ -118,6 +117,7 @@ For bulk deployment across multiple cities and VPN accounts:
 - `proxy2vpn profile create NAME ENV_FILE`
 - `proxy2vpn profile list`
 - `proxy2vpn profile delete NAME`
+- `proxy2vpn profile apply PROFILE SERVICE [--port PORT]`
 
 ### VPN services
 - `proxy2vpn vpn create NAME PROFILE [--port PORT] [--provider PROVIDER] [--location LOCATION]`
@@ -142,10 +142,6 @@ For bulk deployment across multiple cities and VPN accounts:
 - `proxy2vpn fleet status [--format table|json|yaml] [--show-allocation] [--show-health]`
 - `proxy2vpn fleet rotate [--country COUNTRY] [--criteria random|performance|load] [--dry-run]`
 - `proxy2vpn fleet scale up|down [--countries COUNTRIES] [--factor N]`
-
-### Presets
-- `proxy2vpn preset list`
-- `proxy2vpn preset apply PRESET SERVICE [--port PORT]`
 
 ## Development
 
