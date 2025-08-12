@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.10.0]
+
+### Bug fixes
+
+- Fix fleet deployments failing due to passing Docker container objects instead of service names to `start_container`. (#8)
+
+### Documentation
+
+- Add note on installing uv and streamline installation instructions to use uvx. (#5)
+
+### Features
+
+- Add numbered index column (N) to all list commands for easy reference (#1)
+- Add `--verbose` logging option to system diagnose command for detailed troubleshooting (#2)
+- Add optional file logging; logs are disabled when no file is specified. (#6)
+- Add option to recreate Docker network before fleet deployments to avoid network name conflicts. (#7)
+
+### Miscellaneous
+
+- Add proper console output. (#3)
+- Add test run parallelization (#4)
+
+
 ## [0.9.0]
 
 ### Bug fixes
