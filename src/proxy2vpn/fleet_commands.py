@@ -26,6 +26,9 @@ def fleet_plan(
     ),
     output: str = typer.Option("deployment-plan.yaml", help="Save plan to file"),
     validate_servers: bool = typer.Option(True, help="Validate server availability"),
+    unique_ips: bool = typer.Option(
+        False, help="Ensure each service uses a unique city and server IP"
+    ),
 ):
     """Plan bulk VPN deployment across cities"""
 
@@ -52,6 +55,7 @@ def fleet_plan(
         profiles=profile_config,
         port_start=port_start,
         naming_template=naming_template,
+        unique_ips=unique_ips,
     )
 
     console.print(
@@ -246,15 +250,26 @@ def _display_deployment_plan(
     table.add_column("Location", style="green")
     table.add_column("Country", style="blue")
     table.add_column("Port", style="yellow")
+    has_hostname = any(s.hostname for s in plan.services)
+    has_ip = any(s.ip for s in plan.services)
+    if has_hostname:
+        table.add_column("Hostname", style="white")
+    if has_ip:
+        table.add_column("IP", style="white")
 
     for service in plan.services:
-        table.add_row(
+        row = [
             service.name,
             service.profile,
             service.location,
             service.country,
             str(service.port),
-        )
+        ]
+        if has_hostname:
+            row.append(service.hostname or "-")
+        if has_ip:
+            row.append(service.ip or "-")
+        table.add_row(*row)
 
     console.print(table)
 

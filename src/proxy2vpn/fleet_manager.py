@@ -26,6 +26,7 @@ class FleetConfig:
     port_start: int = 20000
     naming_template: str = "{provider}-{country}-{city}"
     max_per_profile: Optional[int] = None  # Limit services per profile
+    unique_ips: bool = False  # Ensure unique city/IP combinations
 
 
 @dataclass
@@ -38,6 +39,8 @@ class ServicePlan:
     country: str
     port: int
     provider: str
+    hostname: str | None = None
+    ip: str | None = None
 
 
 @dataclass
@@ -59,6 +62,8 @@ class DeploymentPlan:
         country: str,
         port: int,
         provider: str = None,
+        hostname: str | None = None,
+        ip: str | None = None,
     ):
         """Add service to deployment plan"""
         self.services.append(
@@ -69,6 +74,8 @@ class DeploymentPlan:
                 country=country,
                 port=port,
                 provider=provider or self.provider,
+                hostname=hostname,
+                ip=ip,
             )
         )
 
@@ -84,6 +91,8 @@ class DeploymentPlan:
                     "country": s.country,
                     "port": s.port,
                     "provider": s.provider,
+                    "hostname": s.hostname,
+                    "ip": s.ip,
                 }
                 for s in self.services
             ],
@@ -124,8 +133,74 @@ class FleetManager:
     def plan_deployment(self, config: FleetConfig) -> DeploymentPlan:
         """Create deployment plan for cities across countries"""
         plan = DeploymentPlan(provider=config.provider)
+        if config.unique_ips:
+            data = self.server_manager.data or self.server_manager.update_servers()
+            prov = data.get(config.provider, {})
+            servers = prov.get("servers", [])
+            all_entries: list[tuple[str, str, str, str]] = []
+            used_ips: set[str] = set()
+            used_cities: set[str] = set()
+            for srv in servers:
+                country = srv.get("country")
+                city = srv.get("city")
+                if country not in config.countries or not city:
+                    continue
+                ips = srv.get("ips") or []
+                ip = next((ip for ip in ips if "." in ip), None)
+                if not ip or ip in used_ips or city in used_cities:
+                    continue
+                hostname = srv.get("hostname", "")
+                used_ips.add(ip)
+                used_cities.add(city)
+                all_entries.append((country, city, hostname, ip))
 
-        # Get all available cities across countries
+            console.print(
+                f"[blue]📍 Total: {len(all_entries)} unique city/IP pairs across {len(config.countries)} countries[/blue]"
+            )
+
+            total_slots = sum(config.profiles.values())
+            if len(all_entries) > total_slots:
+                console.print(
+                    f"[yellow]⚠ Warning: {len(all_entries)} city/IP pairs but only {total_slots} profile slots[/yellow]"
+                )
+                console.print(f"[yellow]  Using first {total_slots} entries[/yellow]")
+                all_entries = all_entries[:total_slots]
+
+            self.profile_allocator.setup_profiles(config.profiles)
+            current_port = config.port_start
+
+            for country, city, hostname, ip in all_entries:
+                profile_slot = self.profile_allocator.get_next_available(
+                    config.profiles
+                )
+                if not profile_slot:
+                    console.print("[red]❌ No more profile slots available[/red]")
+                    break
+
+                service_name = config.naming_template.format(
+                    provider=config.provider,
+                    country=country.lower().replace(" ", "-"),
+                    city=city.lower().replace(" ", "-"),
+                )
+                service_name = self._sanitize_service_name(service_name)
+
+                plan.add_service(
+                    name=service_name,
+                    profile=profile_slot.name,
+                    location=city,
+                    country=country,
+                    port=current_port,
+                    provider=config.provider,
+                    hostname=hostname,
+                    ip=ip,
+                )
+
+                self.profile_allocator.allocate_slot(profile_slot.name, service_name)
+                current_port += 1
+
+            return plan
+
+        # Existing behaviour without unique IPs
         all_cities = []
         for country in config.countries:
             try:
@@ -142,7 +217,6 @@ class FleetManager:
             f"[blue]📍 Total: {len(all_cities)} cities across {len(config.countries)} countries[/blue]"
         )
 
-        # Calculate total slots available
         total_slots = sum(config.profiles.values())
         if len(all_cities) > total_slots:
             console.print(
@@ -151,10 +225,8 @@ class FleetManager:
             console.print(f"[yellow]  Using first {total_slots} cities[/yellow]")
             all_cities = all_cities[:total_slots]
 
-        # Setup profile allocator
         self.profile_allocator.setup_profiles(config.profiles)
 
-        # Allocate profiles and ports
         current_port = config.port_start
 
         for country, city in all_cities:
@@ -163,14 +235,11 @@ class FleetManager:
                 console.print("[red]❌ No more profile slots available[/red]")
                 break
 
-            # Generate service name using template
             service_name = config.naming_template.format(
                 provider=config.provider,
                 country=country.lower().replace(" ", "-"),
                 city=city.lower().replace(" ", "-"),
             )
-
-            # Sanitize service name
             service_name = self._sanitize_service_name(service_name)
 
             plan.add_service(
@@ -182,9 +251,7 @@ class FleetManager:
                 provider=config.provider,
             )
 
-            # Allocate the slot
             self.profile_allocator.allocate_slot(profile_slot.name, service_name)
-
             current_port += 1
 
         return plan
@@ -268,6 +335,14 @@ class FleetManager:
                     "vpn.profile": service_plan.profile,
                     "vpn.location": service_plan.location,
                 }
+                if service_plan.hostname:
+                    labels["vpn.hostname"] = service_plan.hostname
+
+                env = {"VPN_SERVICE_PROVIDER": service_plan.provider}
+                if service_plan.hostname:
+                    env["SERVER_HOSTNAMES"] = service_plan.hostname
+                else:
+                    env["SERVER_CITIES"] = service_plan.location
 
                 vpn_service = VPNService(
                     name=service_plan.name,
@@ -275,10 +350,7 @@ class FleetManager:
                     provider=service_plan.provider,
                     profile=service_plan.profile,
                     location=service_plan.location,
-                    environment={
-                        "VPN_SERVICE_PROVIDER": service_plan.provider,
-                        "SERVER_CITIES": service_plan.location,
-                    },
+                    environment=env,
                     labels=labels,
                 )
 
