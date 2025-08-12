@@ -375,8 +375,8 @@ class ServerMonitor:
         from .docker_ops import recreate_vpn_container, start_container
 
         profile = compose_manager.get_profile(service.profile)
-        container = await asyncio.to_thread(recreate_vpn_container, service, profile)
-        await asyncio.to_thread(start_container, container)
+        await asyncio.to_thread(recreate_vpn_container, service, profile)
+        await asyncio.to_thread(start_container, service.name)
 
         # Wait for container to stabilize
         await asyncio.sleep(15)

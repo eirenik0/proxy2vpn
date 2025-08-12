@@ -192,6 +192,50 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
     assert "Skipping 1 invalid service" in out
 
 
+def test_start_services_sequential_passes_service_name(monkeypatch, tmp_path):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    fm = FleetManager(compose_file_path=compose_path)
+
+    profile = Profile(name="acc", env_file="")
+    fm.compose_manager.add_profile(profile)
+
+    svc = VPNService(
+        name="prov-a-city1",
+        port=21000,
+        provider="prov",
+        profile="acc",
+        location="city1",
+        environment={"VPN_SERVICE_PROVIDER": "prov", "SERVER_CITIES": "city1"},
+        labels={
+            "vpn.type": "vpn",
+            "vpn.port": "21000",
+            "vpn.provider": "prov",
+            "vpn.profile": "acc",
+            "vpn.location": "city1",
+        },
+    )
+    fm.compose_manager.add_service(svc)
+
+    start_calls: list[str] = []
+
+    def fake_start(name):
+        start_calls.append(name)
+
+    def fake_recreate(service, profile):
+        class Dummy:
+            pass
+
+        return Dummy()
+
+    monkeypatch.setattr("proxy2vpn.docker_ops.start_container", fake_start)
+    monkeypatch.setattr("proxy2vpn.docker_ops.recreate_vpn_container", fake_recreate)
+
+    asyncio.run(fm._start_services_sequential([svc.name]))
+
+    assert start_calls == [svc.name]
+
+
 def test_get_fleet_status_reconstructs_allocator(tmp_path):
     compose_path = tmp_path / "compose.yml"
     ComposeManager.create_initial_compose(compose_path, force=True)
