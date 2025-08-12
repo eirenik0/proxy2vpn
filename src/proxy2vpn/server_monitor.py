@@ -115,13 +115,15 @@ class ServerMonitor:
                 return False
 
             # Test proxy connectivity
-            proxy_url = f"http://localhost:{service.port}"
+            from .docker_ops import _get_authenticated_proxy_url
+
+            proxies = _get_authenticated_proxy_url(container, str(service.port))
             test_url = "http://httpbin.org/ip"
 
             start_time = time.time()
             response = requests.get(
                 test_url,
-                proxies={"http": proxy_url, "https": proxy_url},
+                proxies=proxies,
                 timeout=timeout,
             )
             response_time = time.time() - start_time
