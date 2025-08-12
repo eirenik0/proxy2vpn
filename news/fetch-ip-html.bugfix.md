@@ -1,0 +1,1 @@
+- handle non-IP responses from external services when retrieving public IPs

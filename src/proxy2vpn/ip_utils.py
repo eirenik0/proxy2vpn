@@ -6,8 +6,29 @@ import asyncio
 from typing import Mapping
 
 import aiohttp
+import ipaddress
+import re
 
-IP_SERVICES = ("https://ipinfo.io/ip", "https://ifconfig.me")
+IP_SERVICES = ("https://ipinfo.io/ip", "https://ifconfig.me/ip")
+
+IP_REGEX = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}")
+
+
+def _parse_ip(text: str) -> str:
+    """Extract a valid IP address from arbitrary text."""
+    candidate = text.strip()
+    try:
+        ipaddress.ip_address(candidate)
+        return candidate
+    except ValueError:
+        match = IP_REGEX.search(text)
+        if match:
+            try:
+                ipaddress.ip_address(match.group())
+                return match.group()
+            except ValueError:
+                return ""
+    return ""
 
 
 async def _fetch_ip(session: aiohttp.ClientSession, url: str, proxy: str | None) -> str:
@@ -15,7 +36,7 @@ async def _fetch_ip(session: aiohttp.ClientSession, url: str, proxy: str | None)
     try:
         async with session.get(url, proxy=proxy) as resp:
             text = await resp.text()
-            ip = text.strip()
+            ip = _parse_ip(text)
             if ip:
                 return ip
     except aiohttp.ClientError:
