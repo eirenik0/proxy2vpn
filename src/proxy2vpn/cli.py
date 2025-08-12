@@ -106,7 +106,7 @@ def system_init(
         )
     mgr = ServerManager()
     mgr.update_servers()
-    typer.echo(f"Created '{compose_file}' and updated server list.")
+    console.print(f"[green]✓[/green] Created '{compose_file}' and updated server list.")
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ def profile_create(
     profile = Profile(name=name, env_file=str(env_file))
     manager.add_profile(profile)
     logger.info("profile_created", extra={"profile_name": name})
-    typer.echo(f"Profile '{name}' created.")
+    console.print(f"[green]✓[/green] Profile '{name}' created.")
 
 
 @profile_app.command("list")
@@ -143,7 +143,7 @@ def profile_list(ctx: typer.Context):
     manager = ComposeManager(compose_file)
     profiles = manager.list_profiles()
     if not profiles:
-        console.print("[yellow]No profiles found.[/yellow]")
+        console.print("[yellow]⚠[/yellow] No profiles found.")
         return
 
     table = Table(show_header=True, header_style="bold cyan")
@@ -173,7 +173,7 @@ def profile_delete(
     if not force:
         typer.confirm(f"Delete profile '{name}'?", abort=True)
     manager.remove_profile(name)
-    typer.echo(f"Profile '{name}' deleted.")
+    console.print(f"[green]✓[/green] Profile '{name}' deleted.")
 
 
 @profile_app.command("apply")
@@ -214,7 +214,9 @@ def profile_apply(
         labels=labels,
     )
     manager.add_service(svc)
-    typer.echo(f"Service '{service}' created from profile '{profile}' on port {port}.")
+    console.print(
+        f"[green]✓[/green] Service '{service}' created from profile '{profile}' on port {port}."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +271,7 @@ def vpn_create(
         labels=labels,
     )
     manager.add_service(svc)
-    typer.echo(f"Service '{name}' created on port {port}.")
+    console.print(f"[green]✓[/green] Service '{name}' created on port {port}.")
 
 
 @vpn_app.command("list")
@@ -379,7 +381,7 @@ def vpn_start(
 
         results = start_all_vpn_containers(manager)
         for svc_name in results:
-            typer.echo(f"\u2713 Recreated and started {svc_name}")
+            console.print(f"[green]✓[/green] Recreated and started {svc_name}")
         return
 
     if name is None:
@@ -400,7 +402,7 @@ def vpn_start(
     try:
         recreate_vpn_container(svc, profile)
         start_container(name)
-        typer.echo(f"Recreated and started '{name}'.")
+        console.print(f"[green]✓[/green] Recreated and started '{name}'.")
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
         results = analyze_container_logs(name, analyzer=analyzer)
@@ -430,7 +432,7 @@ def vpn_stop(
 
         results = stop_all_vpn_containers()
         for svc_name in results:
-            typer.echo(f"\u2713 Stopped and removed {svc_name}")
+            console.print(f"[green]✓[/green] Stopped and removed {svc_name}")
         return
 
     if name is None:
@@ -446,7 +448,7 @@ def vpn_stop(
     try:
         stop_container(name)
         remove_container(name)
-        typer.echo(f"Stopped and removed '{name}'.")
+        console.print(f"[green]✓[/green] Stopped and removed '{name}'.")
     except NotFound:
         abort(f"Container '{name}' does not exist")
     except APIError as exc:
@@ -482,7 +484,7 @@ def vpn_restart(
             try:
                 recreate_vpn_container(svc, profile)
                 start_container(svc.name)
-                typer.echo(f"\u2713 Recreated and restarted {svc.name}")
+                console.print(f"[green]✓[/green] Recreated and restarted {svc.name}")
             except APIError as exc:
                 typer.echo(
                     f"Failed to restart '{svc.name}': {exc.explanation}", err=True
@@ -507,7 +509,7 @@ def vpn_restart(
     try:
         recreate_vpn_container(svc, profile)
         start_container(name)
-        typer.echo(f"Recreated and restarted '{name}'.")
+        console.print(f"[green]✓[/green] Recreated and restarted '{name}'.")
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
         results = analyze_container_logs(name, analyzer=analyzer)
@@ -575,7 +577,7 @@ def vpn_delete(
             except NotFound:
                 pass
             manager.remove_service(svc.name)
-            typer.echo(f"Service '{svc.name}' deleted.")
+            console.print(f"[green]✓[/green] Service '{svc.name}' deleted.")
         return
 
     if name is None:
@@ -598,7 +600,7 @@ def vpn_delete(
         pass
 
     manager.remove_service(name)
-    typer.echo(f"Service '{name}' deleted.")
+    console.print(f"[green]✓[/green] Service '{name}' deleted.")
 
 
 @vpn_app.command("test")
@@ -617,7 +619,7 @@ def vpn_test(
     from .docker_ops import test_vpn_connection
 
     if test_vpn_connection(name):
-        typer.echo("VPN connection is active.")
+        console.print("[green]✓[/green] VPN connection is active.")
     else:
         abort("VPN connection failed", "Check container logs")
 
@@ -637,7 +639,7 @@ def bulk_up():
     manager = ComposeManager(config.COMPOSE_FILE)
     results = start_all_vpn_containers(manager)
     for name in results:
-        typer.echo(f"\u2713 Recreated and started {name}")
+        console.print(f"[green]✓[/green] Recreated and started {name}")
 
 
 @bulk_app.command("down")
@@ -649,7 +651,7 @@ def bulk_down():
 
     results = stop_all_vpn_containers()
     for name in results:
-        typer.echo(f"\u2713 Stopped and removed {name}")
+        console.print(f"[green]✓[/green] Stopped and removed {name}")
 
 
 @bulk_app.command("status")
@@ -686,7 +688,7 @@ def servers_update(
     mgr = ServerManager()
     verify = not insecure
     mgr.update_servers(verify=verify)
-    typer.echo("Server list updated.")
+    console.print("[green]✓[/green] Server list updated.")
 
 
 @server_app.command("list-providers")
@@ -722,9 +724,9 @@ def servers_validate_location(provider: str, location: str):
 
     mgr = ServerManager()
     if mgr.validate_location(provider, location):
-        typer.echo("valid")
+        console.print("[green]✓[/green] valid")
     else:
-        typer.echo("invalid", err=True)
+        console.print("[red]❌[/red] invalid")
         raise typer.Exit(1)
 
 
@@ -737,7 +739,7 @@ def system_validate(compose_file: Path = typer.Option(config.COMPOSE_FILE)):
         for err in errors:
             typer.echo(f"- {err}", err=True)
         raise typer.Exit(1)
-    typer.echo("compose file is valid.")
+    console.print("[green]✓[/green] compose file is valid.")
 
 
 @system_app.command("diagnose")
@@ -798,7 +800,7 @@ def system_diagnose(
         typer.echo(json.dumps(summary, indent=2))
     else:
         if not summary:
-            typer.echo("No containers to diagnose.")
+            console.print("[yellow]⚠[/yellow] No containers to diagnose.")
         for entry in summary:
             typer.echo(
                 f"{entry['container']}: status={entry['status']} health={entry['health']}"
