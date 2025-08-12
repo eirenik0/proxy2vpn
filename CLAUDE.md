@@ -16,8 +16,12 @@ uv sync
 # Run Python application
 uv run proxy2vpn <command> [args]
 
-# Run tests (if available)
+# Run tests
 pytest
+
+# Linting and formatting
+make fmt
+make lint
 
 # Development installation
 pip install -e .
@@ -44,15 +48,16 @@ uv run proxy2vpn fleet plan --countries "Germany,France" --profiles "acc1:2,acc2
 uv run proxy2vpn fleet deploy --parallel
 uv run proxy2vpn fleet status --show-allocation
 uv run proxy2vpn fleet rotate --dry-run
-# Profile Environment File Example
-Profile environment files (e.g., profiles/myprofile.env) should include VPN and HTTP proxy credentials:
 ```
+
+### Profile Environment File Example
+Profile environment files (e.g., profiles/myprofile.env) should include VPN and HTTP proxy credentials:
+```bash
 OPENVPN_USER=your_vpn_username
 OPENVPN_PASSWORD=your_vpn_password
 HTTPPROXY=on
 HTTPPROXY_USER=your_proxy_username
 HTTPPROXY_PASSWORD=your_proxy_password
-```
 ```
 
 ## High-Level Architecture
@@ -72,6 +77,7 @@ The Python application (`src/proxy2vpn/`) is modular with these components:
 11. **fleet_commands.py**: Fleet management CLI commands with Rich UI components
 12. **profile_allocator.py**: Intelligent profile slot allocation with load balancing
 13. **server_monitor.py**: Server health monitoring and automatic rotation system
+
 ### Docker Integration
 All VPN containers use the `qmcgaw/gluetun` image with:
 - Automatic network creation (proxy2vpn_network)
@@ -132,6 +138,7 @@ The fleet system enables enterprise-scale VPN deployments:
 - **ServerMonitor**: Provides health monitoring and automatic server rotation for failed services
 - **DeploymentPlan**: YAML-serializable configuration for reproducible fleet deployments
 - **Rich UI Integration**: Interactive tables, progress indicators, and real-time status updates
+
 ### Container Management
 Containers are managed through:
 - Docker Compose YAML files with YAML anchors for profiles
@@ -160,8 +167,10 @@ This project uses [Towncrier](https://towncrier.readthedocs.io/) to manage the c
 - Run `make changelog VERSION=x.y.z` to finalize the changelog for a release.
 - Fragments are removed automatically when the changelog is built.
 
-- Run `make fmt` and `make lint` after code change
-- After implementing feature we have to update `/news` folder respectively
+### Code Quality
+- Run `make fmt` and `make lint` after code changes
+- After implementing features, update the `/news` folder with appropriate fragments
+- Ensure Docker containers are properly tested before committing changes
 
 ## INSTRUCTIONS: Using Codanna-Navigator Agent Effectively
 

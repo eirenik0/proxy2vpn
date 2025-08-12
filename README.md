@@ -4,13 +4,17 @@ Python command-line interface for managing multiple VPN containers with Docker.
 
 ## Features
 - Manage VPN credentials as reusable profiles
-- Create and control VPN services
+- Create and control VPN services using gluetun containers
 - **Fleet management**: Bulk deployment across multiple cities and profiles
 - Multi-service control with `--all` flags
 - Query and validate provider server locations
 - HTTP proxy authentication support
 - Server health monitoring and automatic rotation
 - Intelligent profile allocation with load balancing
+
+## Requirements
+- Docker and Docker Compose
+- Python 3.8+
 
 ## Installation
 
@@ -20,17 +24,14 @@ preferred Python tool:
 ### pip
 ```bash
 pip install proxy2vpn
-proxy2vpn --help
 ```
 
 ### uv
 ```bash
 uv tool install proxy2vpn
-proxy2vpn --help
 ```
 
-### uvx
-Run the CLI without installing it:
+### uvx (run without installing)
 ```bash
 uvx proxy2vpn --help
 ```
@@ -38,7 +39,6 @@ uvx proxy2vpn --help
 ### pipx
 ```bash
 pipx install proxy2vpn
-proxy2vpn --help
 ```
 
 ## Quick Start
@@ -68,17 +68,18 @@ proxy2vpn --help
    ```bash
    proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn --location "New York"
    proxy2vpn profile apply myprofile vpn1 --port 8888
-   proxy2vpn vpn start vpn1  # container is recreated from compose.yml
+   proxy2vpn vpn start vpn1
    ```
 
 5. View status and test connectivity:
    ```bash
    proxy2vpn vpn list
    proxy2vpn vpn test vpn1
+   ```
 
 ## Fleet Management
 
-For bulk deployment across multiple cities and VPN accounts:
+For enterprise-scale deployment across multiple cities and VPN accounts:
 
 1. Create multiple profiles with different account credentials:
    ```bash
