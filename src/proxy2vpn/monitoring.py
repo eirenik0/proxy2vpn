@@ -28,7 +28,7 @@ def monitor_vpn_health() -> List[Dict[str, Any]]:
         except RuntimeError as exc:  # pragma: no cover - rare error path
             logger.error(
                 "container_diagnostic_failed",
-                extra={"name": container.name, "error": str(exc)},
+                extra={"container_name": container.name, "error": str(exc)},
             )
     return diagnostics
 

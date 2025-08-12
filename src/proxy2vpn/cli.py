@@ -123,7 +123,7 @@ def profile_create(
     manager = ComposeManager(compose_file)
     profile = Profile(name=name, env_file=str(env_file))
     manager.add_profile(profile)
-    logger.info("profile_created", extra={"name": name})
+    logger.info("profile_created", extra={"profile_name": name})
     typer.echo(f"Profile '{name}' created.")
 
 

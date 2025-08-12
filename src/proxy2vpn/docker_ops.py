@@ -60,11 +60,12 @@ def create_container(
         container = client.containers.create(
             image, name=name, command=command, detach=True
         )
-        logger.info("container_created", extra={"name": name, "image": image})
+        logger.info("container_created", extra={"container_name": name, "image": image})
         return container
     except DockerException as exc:
         logger.error(
-            "container_creation_failed", extra={"name": name, "error": str(exc)}
+            "container_creation_failed",
+            extra={"container_name": name, "error": str(exc)},
         )
         raise RuntimeError(f"Failed to create container {name}: {exc}") from exc
 
@@ -115,13 +116,13 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         )
         logger.info(
             "vpn_container_created",
-            extra={"name": service.name, "image": profile.image},
+            extra={"container_name": service.name, "image": profile.image},
         )
         return container
     except DockerException as exc:
         logger.error(
             "vpn_container_creation_failed",
-            extra={"name": service.name, "error": str(exc)},
+            extra={"container_name": service.name, "error": str(exc)},
         )
         raise RuntimeError(
             f"Failed to create VPN container {service.name}: {exc}"
@@ -144,11 +145,13 @@ def start_container(name: str) -> Container:
     try:
         container = client.containers.get(name)
         container.start()
-        logger.info("container_started", extra={"name": name})
+        logger.info("container_started", extra={"container_name": name})
         return container
     except DockerException as exc:
-        logger.error("container_start_failed", extra={"name": name, "error": str(exc)})
-        raise RuntimeError(f"Failed to start container {name}: {exc}") from exc
+        logger.error(
+            "container_start_failed", extra={"container_name": name, "error": str(exc)}
+        )
+        raise  # Let the original exception propagate to preserve NotFound type
 
 
 def stop_container(name: str) -> Container:
@@ -157,10 +160,12 @@ def stop_container(name: str) -> Container:
     try:
         container = client.containers.get(name)
         container.stop()
-        logger.info("container_stopped", extra={"name": name})
+        logger.info("container_stopped", extra={"container_name": name})
         return container
     except DockerException as exc:
-        logger.error("container_stop_failed", extra={"name": name, "error": str(exc)})
+        logger.error(
+            "container_stop_failed", extra={"container_name": name, "error": str(exc)}
+        )
         raise RuntimeError(f"Failed to stop container {name}: {exc}") from exc
 
 
@@ -171,11 +176,12 @@ def restart_container(name: str) -> Container:
         container = client.containers.get(name)
         container.restart()
         container.reload()
-        logger.info("container_restarted", extra={"name": name})
+        logger.info("container_restarted", extra={"container_name": name})
         return container
     except DockerException as exc:
         logger.error(
-            "container_restart_failed", extra={"name": name, "error": str(exc)}
+            "container_restart_failed",
+            extra={"container_name": name, "error": str(exc)},
         )
         raise RuntimeError(f"Failed to restart container {name}: {exc}") from exc
 
@@ -186,9 +192,11 @@ def remove_container(name: str) -> None:
     try:
         container = client.containers.get(name)
         container.remove(force=True)
-        logger.info("container_removed", extra={"name": name})
+        logger.info("container_removed", extra={"container_name": name})
     except DockerException as exc:
-        logger.error("container_remove_failed", extra={"name": name, "error": str(exc)})
+        logger.error(
+            "container_remove_failed", extra={"container_name": name, "error": str(exc)}
+        )
         raise RuntimeError(f"Failed to remove container {name}: {exc}") from exc
 
 
