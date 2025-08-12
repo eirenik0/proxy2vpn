@@ -22,6 +22,7 @@ dependencies = [
     "docker",
     "requests",
     "filelock",
+    "psutil",
 ]
 
 [project.optional-dependencies]
