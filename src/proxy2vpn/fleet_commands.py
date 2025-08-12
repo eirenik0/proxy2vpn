@@ -272,6 +272,9 @@ def _display_deployment_plan(
 
 def _display_allocation_table(allocation_status: Dict[str, Dict]):
     """Display profile allocation status"""
+    if not allocation_status:
+        console.print("[yellow]No profiles found in fleet[/yellow]")
+        return
 
     table = Table(title="📊 Profile Allocation Status")
     table.add_column("N", style="dim blue")
