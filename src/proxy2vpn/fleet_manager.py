@@ -318,22 +318,69 @@ class FleetManager:
         sanitized = sanitized.strip("-")
         return sanitized.lower()
 
+    def _rebuild_profile_allocator(self) -> None:
+        """Reconstruct allocator state from compose services."""
+        services = self.compose_manager.list_services()
+        profile_counts: Dict[str, int] = {}
+
+        for svc in services:
+            if svc.profile:
+                profile_counts[svc.profile] = profile_counts.get(svc.profile, 0) + 1
+
+        self.profile_allocator.setup_profiles(profile_counts)
+
+        for svc in services:
+            if svc.profile:
+                # allocate_slot updates used_slots and tracked services
+                self.profile_allocator.allocate_slot(svc.profile, svc.name)
+
+    def _extract_country(self, service: VPNService) -> str:
+        """Best-effort extraction of country from service metadata."""
+        # Prefer explicit label if available
+        country = (
+            service.labels.get("vpn.country") if hasattr(service, "labels") else None
+        )
+        if country:
+            return country
+
+        provider = (
+            service.provider.replace(" ", "-").lower() if service.provider else ""
+        )
+        city = service.location.replace(" ", "-").lower() if service.location else ""
+        name = service.name.lower()
+
+        if provider and name.startswith(provider + "-"):
+            name = name[len(provider) + 1 :]
+
+        if city and name.endswith("-" + city):
+            name = name[: -(len(city) + 1)]
+
+        return name.replace("-", " ") or "unknown"
+
     def get_fleet_status(self) -> Dict:
         """Get current fleet status and allocation"""
+        self._rebuild_profile_allocator()
+
         services = self.compose_manager.list_services()
         allocation_status = self.profile_allocator.get_allocation_status()
 
-        # Group services by country/provider
-        fleet_services = {}
+        fleet_services: Dict[str, List[VPNService]] = {}
+        country_counts: Dict[str, int] = {}
+        profile_counts: Dict[str, int] = {
+            name: data["used_slots"] for name, data in allocation_status.items()
+        }
+
         for service in services:
-            if hasattr(service, "provider"):
-                key = f"{service.provider}"
-                if key not in fleet_services:
-                    fleet_services[key] = []
-                fleet_services[key].append(service)
+            if service.provider:
+                fleet_services.setdefault(service.provider, []).append(service)
+
+            country = self._extract_country(service)
+            country_counts[country] = country_counts.get(country, 0) + 1
 
         return {
             "total_services": len(services),
             "services_by_provider": fleet_services,
             "profile_allocation": allocation_status,
+            "country_counts": country_counts,
+            "profile_counts": profile_counts,
         }
