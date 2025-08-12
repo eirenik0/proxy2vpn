@@ -70,13 +70,17 @@ def create_container(
 
 
 def _load_env_file(path: str) -> dict[str, str]:
-    """Return environment variables loaded from PATH."""
+    """Return environment variables loaded from PATH.
+
+    If PATH is empty, does not exist, or is not a regular file, return an empty dict.
+    """
 
     env: dict[str, str] = {}
     if not path:
         return env
     file_path = Path(path)
-    if not file_path.exists():
+    # Only proceed if it's a regular file; ignore directories or non-existing paths
+    if not file_path.is_file():
         return env
     for line in file_path.read_text().splitlines():
         line = line.strip()
