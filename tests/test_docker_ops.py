@@ -7,7 +7,7 @@ import pytest
 # Ensure src package is importable
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn import docker_ops
+from proxy2vpn import docker_ops, ip_utils
 
 
 def docker_available() -> bool:
@@ -115,6 +115,42 @@ def test_cleanup_orphans(monkeypatch):
     removed = docker_ops.cleanup_orphaned_containers(M())
     assert removed == ["b"]
     assert containers[1].removed
+
+
+def test_collect_proxy_info(monkeypatch):
+    class C:
+        status = "running"
+        labels = {"vpn.port": "20001", "vpn.location": "New York"}
+        attrs = {
+            "Config": {"Env": ["HTTPPROXY_USER=user", "HTTPPROXY_PASSWORD=pass"]},
+            "State": {"ExitCode": 0},
+        }
+
+    monkeypatch.setattr(docker_ops, "get_vpn_containers", lambda all=True: [C()])
+
+    # Mock the host machine's IP fetch instead of container IP
+    async def fake_host_ip():
+        return "1.2.3.4"
+
+    monkeypatch.setattr(ip_utils, "fetch_ip_async", fake_host_ip)
+
+    result = asyncio.run(docker_ops.collect_proxy_info())
+    assert result == [
+        {
+            "host": "1.2.3.4",
+            "port": "20001",
+            "username": "user",
+            "password": "pass",
+            "location": "New York",
+            "status": "active",
+        }
+    ]
+
+    result_no_auth = asyncio.run(
+        docker_ops.collect_proxy_info(include_credentials=False)
+    )
+    assert result_no_auth[0]["username"] == ""
+    assert result_no_auth[0]["password"] == ""
 
 
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")

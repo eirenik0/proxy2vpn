@@ -434,6 +434,73 @@ async def get_container_ip_async(container: Container) -> str:
     return ip or "N/A"
 
 
+async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str, str]]:
+    """Return proxy connection details for VPN containers.
+
+    Parameters
+    ----------
+    include_credentials:
+        Include authentication credentials in the result. When ``False``,
+        ``username`` and ``password`` fields are returned empty.
+
+    Returns
+    -------
+    list of dict
+        Each dict contains ``host``, ``port``, ``username``, ``password``,
+        ``location`` and ``status`` keys describing a VPN proxy.
+    """
+
+    try:
+        containers = get_vpn_containers(all=True)
+    except RuntimeError:
+        return []
+
+    # Fetch the host machine's public IP (without proxy) for all containers
+    # Since all containers run on the same host, we only need to fetch this once
+    host_ip = await ip_utils.fetch_ip_async()
+
+    results: list[dict[str, str]] = []
+    for container in containers:
+        env_list = (
+            container.attrs.get("Config", {}).get("Env", [])
+            if getattr(container, "attrs", None)
+            else []
+        )
+        env_vars = {
+            k: v for k, v in (var.split("=", 1) for var in env_list if "=" in var)
+        }
+        username = env_vars.get("HTTPPROXY_USER", "") if include_credentials else ""
+        password = env_vars.get("HTTPPROXY_PASSWORD", "") if include_credentials else ""
+        port = container.labels.get("vpn.port", "")
+        location = container.labels.get("vpn.location", "")
+        state = (
+            container.attrs.get("State", {})
+            if getattr(container, "attrs", None)
+            else {}
+        )
+        if container.status == "running":
+            status = "active"
+            # Use host machine's IP for running containers
+            host = host_ip if host_ip else ""
+        else:
+            status = "error" if state.get("ExitCode", 0) not in {0, None} else "stopped"
+            # Empty host for non-running containers
+            host = ""
+
+        results.append(
+            {
+                "host": host,
+                "port": port,
+                "username": username,
+                "password": password,
+                "location": location,
+                "status": status,
+            }
+        )
+
+    return results
+
+
 async def test_vpn_connection_async(name: str) -> bool:
     """Return ``True`` if the VPN proxy for NAME appears to work."""
 

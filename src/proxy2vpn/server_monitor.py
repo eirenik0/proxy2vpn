@@ -293,7 +293,7 @@ class ServerMonitor:
     async def _generate_rotation_plan(
         self, failed_services: List[VPNService]
     ) -> RotationPlan:
-        """Generate intelligent rotation plan for failed services"""
+        """Generate an intelligent rotation plan for failed services"""
         plan = RotationPlan()
 
         for service in failed_services:
