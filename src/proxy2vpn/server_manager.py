@@ -11,6 +11,7 @@ import requests
 import typer
 
 from . import config
+from .utils import abort
 
 
 class ServerManager:
@@ -51,16 +52,26 @@ class ServerManager:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             try:
                 response = requests.get(
-                    config.SERVER_LIST_URL, timeout=30, verify=verify
+                    config.SERVER_LIST_URL,
+                    timeout=30,
+                    verify=verify,
+                    stream=True,
                 )
             except requests.exceptions.SSLError:
-                typer.echo(
-                    "Failed to download server list—check network connection or CA certificates",
-                    err=True,
+                abort(
+                    "Failed to download server list (SSL error)",
+                    "Check network connection or CA certificates",
                 )
-                raise typer.Exit(1)
+            except requests.exceptions.RequestException as exc:
+                abort("Failed to download server list", str(exc))
             response.raise_for_status()
-            self.cache_file.write_text(response.text, encoding="utf-8")
+            total = int(response.headers.get("content-length", 0)) or None
+            chunks: list[bytes] = []
+            with typer.progressbar(length=total, label="Downloading server list") as pb:
+                for chunk in response.iter_content(chunk_size=8192):
+                    chunks.append(chunk)
+                    pb.update(len(chunk))
+            self.cache_file.write_bytes(b"".join(chunks))
         with self.cache_file.open("r", encoding="utf-8") as f:
             self.data = json.load(f)
         return self.data

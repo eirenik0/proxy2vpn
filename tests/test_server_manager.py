@@ -23,11 +23,15 @@ def test_update_servers_insecure_flag(tmp_path, monkeypatch):
 
     class Resp:
         text = "{}"
+        headers = {"content-length": "2"}
 
         def raise_for_status(self):
             pass
 
-    def fake_get(url, timeout, verify):
+        def iter_content(self, chunk_size: int):
+            yield b"{}"
+
+    def fake_get(url, timeout, verify, stream=False):
         called["verify"] = verify
         return Resp()
 
