@@ -28,14 +28,12 @@ profile_app = HelpfulTyper(help="Manage VPN profiles and apply them to services"
 vpn_app = HelpfulTyper(help="Manage VPN services")
 server_app = HelpfulTyper(help="Manage cached server lists")
 system_app = HelpfulTyper(help="System level operations")
-bulk_app = HelpfulTyper(help="Bulk container operations")
 fleet_app = HelpfulTyper(help="Manage VPN fleets across multiple cities")
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(vpn_app, name="vpn")
 app.add_typer(server_app, name="servers")
 app.add_typer(system_app, name="system")
-app.add_typer(bulk_app, name="bulk", hidden=True)
 app.add_typer(fleet_app, name="fleet")
 
 logger = get_logger(__name__)
@@ -626,52 +624,6 @@ async def vpn_test(
         console.print("[green]✓[/green] VPN connection is active.")
     else:
         abort("VPN connection failed", "Check container logs")
-
-
-# ---------------------------------------------------------------------------
-# Bulk container commands
-# ---------------------------------------------------------------------------
-
-
-@bulk_app.command("up")
-def bulk_up():
-    """Start all VPN containers."""
-
-    typer.echo("Deprecated: use 'vpn start --all' instead.", err=True)
-    from .docker_ops import start_all_vpn_containers
-
-    manager = ComposeManager(config.COMPOSE_FILE)
-    results = start_all_vpn_containers(manager)
-    for name in results:
-        console.print(f"[green]✓[/green] Recreated and started {name}")
-
-
-@bulk_app.command("down")
-def bulk_down():
-    """Stop all running VPN containers."""
-
-    typer.echo("Deprecated: use 'vpn stop --all' instead.", err=True)
-    from .docker_ops import stop_all_vpn_containers
-
-    results = stop_all_vpn_containers()
-    for name in results:
-        console.print(f"[green]✓[/green] Stopped and removed {name}")
-
-
-@bulk_app.command("status")
-def bulk_status(ctx: typer.Context):
-    """Show status and IP address for VPN containers."""
-
-    typer.echo("Deprecated: use 'vpn list' instead.", err=True)
-    vpn_list(ctx)
-
-
-@bulk_app.command("ips")
-def bulk_ips(ctx: typer.Context):
-    """Show IP addresses of running VPN containers."""
-
-    typer.echo("Deprecated: use 'vpn list --ips-only' instead.", err=True)
-    vpn_list(ctx, ips_only=True)
 
 
 # ---------------------------------------------------------------------------
