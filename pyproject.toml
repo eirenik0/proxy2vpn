@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proxy2vpn"
-version = "0.8.0"
+version = "0.9.0"
 description = "Proxy2VPN Python utilities"
 authors = [{ name = "Serhii Khalymon", email = "serhii.khalymon@pm.me" }]
 readme = "README.md"

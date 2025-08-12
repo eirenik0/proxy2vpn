@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.9.0]
+
+### Bug fixes
+
+- Add missing fleet commands module (#124)
+
+### Features
+
+- Add `vpn export-proxies` command to export running VPN proxies to a CSV file. (#123)
+
+
 ## [0.8.0]
 
 ### Bug fixes
