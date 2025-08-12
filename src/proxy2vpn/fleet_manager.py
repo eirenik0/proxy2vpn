@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from rich.console import Console
 
 from .compose_manager import ComposeManager
+from .docker_ops import remove_container, stop_container
 from .models import VPNService
 from .server_manager import ServerManager
 
@@ -203,12 +204,12 @@ class FleetManager:
         )
 
         deployed = 0
-        failed = 0
-        errors = []
+        errors: List[str] = []
+        added_services: List[str] = []
 
-        # Create services in compose file
-        for service_plan in plan.services:
-            try:
+        try:
+            # Create services in compose file
+            for service_plan in plan.services:
                 # Create Docker labels for service identification and metadata
                 labels = {
                     "vpn.type": "vpn",
@@ -232,25 +233,52 @@ class FleetManager:
                 )
 
                 self.compose_manager.add_service(vpn_service)
+                added_services.append(service_plan.name)
                 console.print(f"[green]✓[/green] Created service: {service_plan.name}")
-                deployed += 1
 
-            except Exception as e:
-                error_msg = f"Failed to create service {service_plan.name}: {e}"
-                console.print(f"[red]❌[/red] {error_msg}")
-                errors.append(error_msg)
-                failed += 1
+            # Start containers
+            if parallel:
+                await self._start_services_parallel(added_services)
+            else:
+                await self._start_services_sequential(added_services)
 
-        # Start containers
-        if parallel:
-            await self._start_services_parallel(
-                [s.name for s in plan.services if s.name]
+            deployed = len(added_services)
+
+        except Exception as e:
+            error_msg = f"Deployment failed: {e}"
+            console.print(f"[red]❌[/red] {error_msg}")
+            errors.append(error_msg)
+
+            # Rollback any services that were added before failure
+            for service_name in added_services:
+                try:
+                    self.compose_manager.remove_service(service_name)
+                    console.print(
+                        f"[yellow]↩ Rolled back service: {service_name}[/yellow]"
+                    )
+                except Exception as rm_err:
+                    console.print(
+                        f"[red]⚠ Failed to remove service {service_name}: {rm_err}"
+                    )
+                try:
+                    await asyncio.to_thread(stop_container, service_name)
+                    await asyncio.to_thread(remove_container, service_name)
+                    console.print(
+                        f"[yellow]🛑 Stopped and removed container: {service_name}[/yellow]"
+                    )
+                except Exception as cleanup_err:
+                    console.print(
+                        f"[red]⚠ Failed to cleanup container {service_name}: {cleanup_err}"
+                    )
+
+            return DeploymentResult(
+                deployed=0,
+                failed=len(plan.services),
+                services=[],
+                errors=errors,
             )
-        else:
-            await self._start_services_sequential(
-                [s.name for s in plan.services if s.name]
-            )
 
+        failed = len(plan.services) - deployed
         return DeploymentResult(
             deployed=deployed, failed=failed, services=plan.service_names, errors=errors
         )
@@ -280,10 +308,11 @@ class FleetManager:
 
                 except Exception as e:
                     console.print(f"[red]❌[/red] Failed to start {service_name}: {e}")
+                    raise
 
         # Start all services concurrently
         tasks = [start_service(name) for name in service_names]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks)
 
     async def _start_services_sequential(self, service_names: List[str]):
         """Start services one by one"""
@@ -307,6 +336,7 @@ class FleetManager:
 
             except Exception as e:
                 console.print(f"[red]❌[/red] Failed to start {service_name}: {e}")
+                raise
 
     def _sanitize_service_name(self, name: str) -> str:
         """Sanitize service name to be Docker-compatible"""
