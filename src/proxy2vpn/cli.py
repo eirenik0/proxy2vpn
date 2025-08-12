@@ -320,6 +320,7 @@ async def vpn_list(
     table.add_column("Name", style="green")
     table.add_column("Port")
     table.add_column("Profile")
+    table.add_column("Location")
     table.add_column("Status")
     table.add_column("IP")
     if diagnose:
@@ -343,6 +344,7 @@ async def vpn_list(
             svc.name,
             str(svc.port),
             svc.profile,
+            svc.location,
             f"[{status_style}]{status}[/{status_style}]",
             ip,
         ]
