@@ -98,7 +98,9 @@ def system_init(
             f"Compose file '{compose_file}' already exists",
             "Use --force to overwrite",
         )
-    typer.echo(f"Created '{compose_file}'.")
+    mgr = ServerManager()
+    mgr.update_servers()
+    typer.echo(f"Created '{compose_file}' and updated server list.")
 
 
 # ---------------------------------------------------------------------------
