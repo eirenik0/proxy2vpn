@@ -100,12 +100,59 @@ class DiagnosticAnalyzer:
             )
         return results
 
+    async def check_connectivity_async(self, port: int) -> List[DiagnosticResult]:
+        import asyncio
+
+        results: List[DiagnosticResult] = []
+        proxies = {
+            "http": f"http://localhost:{port}",
+            "https": f"http://localhost:{port}",
+        }
+
+        # Fetch both IPs concurrently for faster diagnostics
+        direct_task = asyncio.create_task(ip_utils.fetch_ip_async())
+        proxied_task = asyncio.create_task(ip_utils.fetch_ip_async(proxies=proxies))
+
+        direct, proxied = await asyncio.gather(direct_task, proxied_task)
+
+        if not proxied:
+            results.append(
+                DiagnosticResult(
+                    "connectivity",
+                    False,
+                    "Connectivity test failed",
+                    "Ensure VPN container network is reachable.",
+                )
+            )
+        elif proxied != direct:
+            results.append(
+                DiagnosticResult("dns_leak", True, "No DNS leak detected", "")
+            )
+        else:
+            results.append(
+                DiagnosticResult(
+                    "dns_leak",
+                    False,
+                    "Possible DNS leak detected",
+                    "Check firewall and kill switch settings.",
+                )
+            )
+        return results
+
     def analyze(
         self, log_lines: Iterable[str], port: int | None = None
     ) -> List[DiagnosticResult]:
         results = self.analyze_logs(log_lines)
         if port:
             results.extend(self.check_connectivity(port))
+        return results
+
+    async def analyze_async(
+        self, log_lines: Iterable[str], port: int | None = None
+    ) -> List[DiagnosticResult]:
+        results = self.analyze_logs(log_lines)
+        if port:
+            results.extend(await self.check_connectivity_async(port))
         return results
 
     def health_score(self, results: Iterable[DiagnosticResult]) -> int:

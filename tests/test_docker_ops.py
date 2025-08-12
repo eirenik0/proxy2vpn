@@ -85,12 +85,11 @@ def test_test_vpn_connection(monkeypatch):
 
         containers = Containers()
 
+    async def fake_fetch_ip_async(proxies=None, timeout=3):
+        return "2.2.2.2" if not proxies else "1.1.1.1"
+
     monkeypatch.setattr(docker_ops, "_client", lambda: Client())
-    monkeypatch.setattr(
-        docker_ops.ip_utils,
-        "fetch_ip",
-        lambda proxies=None, timeout=5: "2.2.2.2" if not proxies else "1.1.1.1",
-    )
+    monkeypatch.setattr(docker_ops.ip_utils, "fetch_ip_async", fake_fetch_ip_async)
     assert docker_ops.test_vpn_connection("name") is True
 
 

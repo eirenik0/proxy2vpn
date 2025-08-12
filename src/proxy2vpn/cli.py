@@ -83,7 +83,8 @@ def main(
 
 
 @system_app.command("init")
-def system_init(
+@run_async
+async def system_init(
     ctx: typer.Context,
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing compose file if it exists"
@@ -105,7 +106,7 @@ def system_init(
             "Use --force to overwrite",
         )
     mgr = ServerManager()
-    mgr.update_servers()
+    await mgr.fetch_server_list_async()
     console.print(f"[green]✓[/green] Created '{compose_file}' and updated server list.")
 
 
@@ -604,7 +605,8 @@ def vpn_delete(
 
 
 @vpn_app.command("test")
-def vpn_test(
+@run_async
+async def vpn_test(
     ctx: typer.Context, name: str = typer.Argument(..., callback=sanitize_name)
 ):
     """Test that a VPN service proxy is working."""
@@ -616,9 +618,9 @@ def vpn_test(
     except KeyError:
         abort(f"Service '{name}' not found")
 
-    from .docker_ops import test_vpn_connection
+    from .docker_ops import test_vpn_connection_async
 
-    if test_vpn_connection(name):
+    if await test_vpn_connection_async(name):
         console.print("[green]✓[/green] VPN connection is active.")
     else:
         abort("VPN connection failed", "Check container logs")
@@ -676,7 +678,8 @@ def bulk_ips(ctx: typer.Context):
 
 
 @server_app.command("update")
-def servers_update(
+@run_async
+async def servers_update(
     insecure: bool = typer.Option(
         False,
         "--insecure",
@@ -687,7 +690,7 @@ def servers_update(
 
     mgr = ServerManager()
     verify = not insecure
-    mgr.update_servers(verify=verify)
+    await mgr.fetch_server_list_async(verify=verify)
     console.print("[green]✓[/green] Server list updated.")
 
 

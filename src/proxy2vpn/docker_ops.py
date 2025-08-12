@@ -434,7 +434,7 @@ async def get_container_ip_async(container: Container) -> str:
     return ip or "N/A"
 
 
-def test_vpn_connection(name: str) -> bool:
+async def test_vpn_connection_async(name: str) -> bool:
     """Return ``True`` if the VPN proxy for NAME appears to work."""
 
     client = _client()
@@ -446,9 +446,27 @@ def test_vpn_connection(name: str) -> bool:
     if not port or container.status != "running":
         return False
     try:
-        direct = ip_utils.fetch_ip()
         proxies = _get_authenticated_proxy_url(container, port)
-        proxied = ip_utils.fetch_ip(proxies=proxies)
+        # Fetch both IPs concurrently for faster testing
+        import asyncio
+
+        direct_task = asyncio.create_task(ip_utils.fetch_ip_async())
+        proxied_task = asyncio.create_task(ip_utils.fetch_ip_async(proxies=proxies))
+
+        direct, proxied = await asyncio.gather(direct_task, proxied_task)
         return proxied not in {"", direct}
     except Exception:
         return False
+
+
+def test_vpn_connection(name: str) -> bool:
+    """Return ``True`` if the VPN proxy for NAME appears to work."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(test_vpn_connection_async(name))
+    raise RuntimeError(
+        "test_vpn_connection() cannot be called from an async context; use test_vpn_connection_async()."
+    )

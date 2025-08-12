@@ -49,10 +49,10 @@ def test_init_requires_force(tmp_path):
 def test_system_init_updates_servers(tmp_path, monkeypatch):
     called = {}
 
-    def fake_update(self, verify=True):
+    async def fake_update(self, verify=True):
         called["update"] = verify
 
-    monkeypatch.setattr(ServerManager, "update_servers", fake_update)
+    monkeypatch.setattr(ServerManager, "fetch_server_list_async", fake_update)
     ctx = SimpleNamespace(obj={"compose_file": tmp_path / "compose.yml"})
     system_init(ctx, force=True)
     assert called["update"] is True
