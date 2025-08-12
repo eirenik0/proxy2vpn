@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.5.1]
+
+### Bug fixes
+
+- Fix external IP detection by falling back to ipinfo when ifconfig.me is unreachable. (#123)
+- Allow diagnosing specific containers and compute health scores for diagnostic results. (#124)
+
+
 ## [0.5.0]
 
 ### Bug fixes
