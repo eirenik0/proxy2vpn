@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.7.0]
+
+### Features
+
+- Add VPN fleet management system for bulk deployment across multiple cities and profiles. New `fleet` command group supports planning, deploying, monitoring, and rotating VPN services at scale with intelligent profile allocation and server health monitoring. (#100)
+- feat: rollback added services on fleet deployment failure and clean up containers.
+  feat: sync fleet status with compose services and include per-country/profile counts (#102)
+- Add server location validation to fleet deployment. (#103)
+- Apply Rich TUI formatting to profile and VPN listings for a consistent CLI experience. (#107)
+- Apply fleet-style TUI feedback across core CLI commands. (#108)
+- Add comprehensive async optimizations for network operations including concurrent IP fetching via aiohttp, async VPN connection testing, async server list downloads, and async diagnostic connectivity checks. CLI commands now use `@run_async` decorator with safeguards against nested event loops, delivering 5-17x performance improvements for network-bound operations. (#109)
+
+### Miscellaneous
+
+- Add tests covering fleet deployment planning. (#101)
+
+### Removals
+
+- Removed preset commands in favor of `profile apply` for creating services from profiles. (#104)
+
+
 ## [0.6.0]
 
 ### Features
