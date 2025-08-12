@@ -717,6 +717,9 @@ def system_validate(compose_file: Path = typer.Option(config.COMPOSE_FILE)):
 
 @system_app.command("diagnose")
 def system_diagnose(
+    name: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
     lines: int = typer.Option(
         100, "--lines", "-n", help="Number of log lines to analyze"
     ),
@@ -737,11 +740,20 @@ def system_diagnose(
     from .diagnostics import DiagnosticAnalyzer
 
     analyzer = DiagnosticAnalyzer()
-    containers = (
-        get_vpn_containers(all=True)
-        if all_containers
-        else get_problematic_containers(all=True)
-    )
+    if name and all_containers:
+        abort("Cannot specify NAME when using --all")
+    if name:
+        vpn_containers = {c.name: c for c in get_vpn_containers(all=True)}
+        container = vpn_containers.get(name)
+        if not container:
+            abort(f"Container '{name}' not found")
+        containers = [container]
+    else:
+        containers = (
+            get_vpn_containers(all=True)
+            if all_containers
+            else get_problematic_containers(all=True)
+        )
 
     summary: list[dict[str, object]] = []
     for container in containers:
