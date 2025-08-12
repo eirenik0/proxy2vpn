@@ -146,11 +146,12 @@ def profile_list(ctx: typer.Context):
         return
 
     table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("N", style="dim blue")
     table.add_column("Name", style="green")
     table.add_column("Env File", overflow="fold")
 
-    for profile in profiles:
-        table.add_row(profile.name, profile.env_file)
+    for i, profile in enumerate(profiles, 1):
+        table.add_row(str(i), profile.name, profile.env_file)
 
     console.print(table)
 
@@ -315,6 +316,7 @@ async def vpn_list(
     ip_map = dict(zip(running.keys(), ips))
 
     table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("N", style="dim blue")
     table.add_column("Name", style="green")
     table.add_column("Port")
     table.add_column("Profile")
@@ -324,7 +326,7 @@ async def vpn_list(
     if diagnose:
         table.add_column("Health")
 
-    async def add_row(svc: VPNService):
+    async def add_row(i: int, svc: VPNService):
         container = containers.get(svc.name)
         if container:
             status = container.status
@@ -339,6 +341,7 @@ async def vpn_list(
             health = "N/A"
         status_style = "green" if status == "running" else "red"
         row = [
+            str(i),
             svc.name,
             str(svc.port),
             svc.profile,
@@ -353,12 +356,12 @@ async def vpn_list(
     if diagnose:
         with Progress() as progress:
             task = progress.add_task("[cyan]Checking", total=len(services))
-            for svc in services:
-                await add_row(svc)
+            for i, svc in enumerate(services, 1):
+                await add_row(i, svc)
                 progress.advance(task)
     else:
-        for svc in services:
-            await add_row(svc)
+        for i, svc in enumerate(services, 1):
+            await add_row(i, svc)
 
     console.print(table)
 

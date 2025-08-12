@@ -268,18 +268,20 @@ def _display_allocation_table(allocation_status: Dict[str, Dict]):
     """Display profile allocation status"""
 
     table = Table(title="📊 Profile Allocation Status")
+    table.add_column("N", style="dim blue")
     table.add_column("Profile", style="cyan")
     table.add_column("Used/Total", style="magenta")
     table.add_column("Available", style="green")
     table.add_column("Utilization", style="yellow")
     table.add_column("Services", style="blue")
 
-    for profile, data in allocation_status.items():
+    for i, (profile, data) in enumerate(allocation_status.items(), 1):
         services_str = ", ".join(data["services"][:3])  # Show first 3
         if len(data["services"]) > 3:
             services_str += f", +{len(data['services']) - 3} more"
 
         table.add_row(
+            str(i),
             profile,
             f"{data['used_slots']}/{data['total_slots']}",
             str(data["available_slots"]),
@@ -320,15 +322,39 @@ def _display_fleet_services(fleet_status: Dict, format: str):
         console.print(string_stream.getvalue())
     else:
         # Table format
-        console.print("\n[bold]Fleet Overview:[/bold]")
-        console.print(f"Total services: {fleet_status['total_services']}")
+        console.print(
+            f"\n[bold]Fleet Overview:[/bold] Total services: {fleet_status['total_services']}"
+        )
 
+        all_services = []
         for provider, services in fleet_status.get("services_by_provider", {}).items():
-            console.print(f"\n[bold]{provider.upper()} Services:[/bold]")
             for service in services:
-                console.print(
-                    f"  • {service.name} ({service.location}) - Port {service.port}"
+                all_services.append((provider.upper(), service))
+
+        if all_services:
+            from rich.table import Table
+
+            table = Table(show_header=True, header_style="bold cyan")
+            table.add_column("N", style="dim blue")
+            table.add_column("Provider", style="magenta")
+            table.add_column("Name", style="green")
+            table.add_column("Location", style="cyan")
+            table.add_column("Profile", style="yellow")
+            table.add_column("Port", style="blue")
+
+            for i, (provider, service) in enumerate(all_services, 1):
+                table.add_row(
+                    str(i),
+                    provider,
+                    service.name,
+                    service.location,
+                    service.profile,
+                    str(service.port),
                 )
+
+            console.print(table)
+        else:
+            console.print("[yellow]No services found in fleet[/yellow]")
 
 
 def _show_fleet_status_sync(service_names: List[str]):
