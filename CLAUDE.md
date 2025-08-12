@@ -136,3 +136,175 @@ This project uses [Towncrier](https://towncrier.readthedocs.io/) to manage the c
 
 - Run `make fmt` and `make lint` after code change
 - After implementing feature we have to update `/news` folder respectively
+
+## INSTRUCTIONS: Using Codanna-Navigator Agent Effectively
+
+### Multi-Hop Pattern for Deep Analysis
+
+When analyzing complex features or implementation requirements in the proxy2vpn codebase, you (Claude) MUST use the codanna-navigator agent in a multi-hop fashion for comprehensive understanding. Single-shot prompts often miss critical details that only emerge through iterative exploration.
+
+### Key Principles
+
+1. **Start Broad, Then Deep**: First prompt should map the landscape, follow-ups should drill into specifics
+2. **Track Progress**: Always instruct the agent to use TodoWrite for complex analyses
+3. **Score and Iterate**: Mentally score each response (0-10) and identify gaps to fill
+4. **Context Preservation**: Each follow-up should reference findings from previous hops
+5. **Structured Prompts**: Break down complex requests into numbered steps with clear deliverables
+
+### CRITICAL: Context Forward-Passing
+
+Since the codanna-navigator agent starts fresh with each invocation, you MUST pass forward relevant context from previous hops. This dramatically improves the agent's precision and efficiency.
+
+**What to Forward**:
+- Specific file paths and line numbers discovered
+- Class/function names that need investigation
+- Patterns or conventions identified
+- Key findings that narrow the search scope
+- Relationships between components
+
+**Example Context Forwarding**:
+```
+"CONTEXT FROM PREVIOUS ANALYSIS:
+- The VPNService class at src/proxy2vpn/models.py:25 handles container configuration
+- Main CLI logic is in src/proxy2vpn/cli.py with Typer command groups
+- You found Docker operations in src/proxy2vpn/docker_ops.py using docker-py SDK
+- ComposeManager at src/proxy2vpn/compose_manager.py handles YAML file management
+- Profile management uses environment file references in profiles/*.env
+
+Now focus on: [specific targeted request based on above context]"
+```
+
+This context forwarding transforms vague searches into surgical strikes, allowing the agent to navigate directly to relevant code instead of searching blindly.
+
+### When to Use Multi-Hop
+
+- **Feature Implementation Planning**: Understanding impact across CLI commands, Docker operations, and configuration management
+- **Refactoring Analysis**: Identifying all touchpoints between CLI, Docker operations, and compose file management
+- **Architecture Understanding**: Mapping relationships between Typer CLI, Docker SDK, and YAML configuration
+- **Pattern Discovery**: Finding consistent patterns across command groups and container management
+
+### Proxy2VPN-Specific Analysis Patterns
+
+#### Pattern 1: CLI Command → Implementation → Docker Operations
+```
+Hop 1: "Analyze CLI command structure in cli.py and identify command groups"
+Hop 2: "Trace specific command implementation through models.py and compose_manager.py"
+Hop 3: "Follow Docker operations in docker_ops.py and container lifecycle management"
+```
+
+#### Pattern 2: Configuration Flow Analysis
+```
+Hop 1: "Map configuration flow from CLI args to compose files"
+Hop 2: "Analyze profile management and environment file handling"
+Hop 3: "Trace container configuration to Docker API calls"
+```
+
+#### Pattern 3: Error Handling and Diagnostics
+```
+Hop 1: "Find error handling patterns across CLI and Docker operations"
+Hop 2: "Analyze diagnostic system in diagnostics.py"
+Hop 3: "Trace troubleshooting workflow and log analysis"
+```
+
+### Common Multi-Hop Patterns
+
+#### Architecture → Details → Examples
+```
+Hop 1: "Map the architecture of [VPN management/CLI structure/Docker integration]"
+Hop 2: "Drill into specific implementations of [container lifecycle/profile management/server list caching]"
+Hop 3: "Show concrete examples of [Docker API usage/YAML anchor patterns/Typer command structure]"
+```
+
+#### Current State → Impact → Migration
+```
+Hop 1: "Analyze current implementation of [container management/CLI commands/configuration system]"
+Hop 2: "Identify all dependencies and touchpoints across modules"
+Hop 3: "Propose enhancement strategy with examples"
+```
+
+#### Search → Filter → Deep Dive
+```
+Hop 1: "Find all occurrences of [Docker API calls/Typer decorators/YAML operations]"
+Hop 2: "Filter to [specific command groups/container operations/error cases]"
+Hop 3: "Analyze top candidates with line numbers and implementation details"
+```
+
+### Agent Prompt Best Practices for Proxy2VPN
+
+1. **Always include TodoWrite instruction** for complex tasks
+2. **Reference key modules** when known: cli.py, docker_ops.py, compose_manager.py, models.py
+3. **Specify output format**: Ask for line numbers, class/method names, Docker API patterns
+4. **Focus on integration points**: How CLI commands trigger Docker operations via models
+5. **Request examples** of Typer command patterns, Docker SDK usage, YAML anchor usage
+6. **Ask for error handling patterns** specific to Docker API and network operations
+
+### Example Multi-Hop Analysis for Proxy2VPN
+
+**Use Case**: Understanding how VPN container health monitoring works
+
+**First Hop - Architecture Overview**:
+```
+"Analyze the proxy2vpn codebase to understand the health monitoring and diagnostic system.
+
+Step 1: Map Health Monitoring Components
+- Find diagnostic system entry points in cli.py
+- Locate health checking logic in docker_ops.py
+- Identify diagnostic data models in models.py
+
+Step 2: Trace Monitoring Workflow
+- How does 'vpn list --diagnose' command work?
+- What Docker API calls are used for health checks?
+- How are container logs analyzed?
+
+Step 3: Identify Key Integration Points
+- Connection between CLI commands and Docker operations
+- How diagnostic results are formatted and displayed
+- Error handling for container communication failures
+
+Provide line numbers and specific class/method names. Use TodoWrite to track progress."
+```
+
+**Second Hop - Deep Dive with Context**:
+```
+"CONTEXT FROM PREVIOUS ANALYSIS:
+- Diagnostic entry point is at cli.py:vpn_list() command with --diagnose flag
+- Health checking logic found in docker_ops.py using Docker SDK
+- DiagnosticResult class in diagnostics.py handles log analysis
+- Container status checking uses docker.containers.get() API
+
+Now analyze the specific diagnostic algorithms and scoring system:
+
+Step 1: Analyze Log Analysis Patterns
+- How does diagnostics.py parse container logs?
+- What specific error patterns does it look for?
+- How is the health score calculated?
+
+Step 2: Docker API Integration Details
+- Specific Docker SDK methods used for container inspection
+- How container network status is determined
+- Error handling for Docker API failures
+
+Step 3: Provide Enhancement Examples
+- Show current diagnostic output format
+- Identify gaps in current health checking
+- Suggest specific improvements with code examples"
+```
+
+### Red Flags Requiring Follow-Up in Proxy2VPN Context
+
+- Agent mentions "Docker operations" without specific API calls → Ask for exact docker-py SDK usage
+- Agent describes CLI structure without Typer decorator patterns → Request specific command group examples
+- Agent analyzes configuration without YAML anchor details → Ask for compose file structure specifics
+- Agent discusses error handling without Docker exception types → Request specific exception handling patterns
+
+### Remember for Proxy2VPN
+
+The codanna-navigator agent excels at understanding:
+- Python module structure and imports
+- Typer CLI framework patterns  
+- Docker SDK API usage
+- YAML file structure and anchors
+- Class inheritance and method relationships
+- Error handling patterns across async/sync operations
+
+Use these strengths by crafting prompts that leverage the agent's understanding of Python package structure and the specific frameworks used in proxy2vpn.

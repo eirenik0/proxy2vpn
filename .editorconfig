@@ -20,4 +20,4 @@ function_next_line = false
 trim_trailing_whitespace = false
 
 [*.json]
-indent_size = 4
+indent_size = 2
