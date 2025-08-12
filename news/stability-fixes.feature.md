@@ -1,0 +1,3 @@
+- improve configuration reliability with atomic writes and automatic recovery
+- harden docker operations with retries, timeouts and orphan cleanup
+- replace regex diagnostics with targeted VPN health checks

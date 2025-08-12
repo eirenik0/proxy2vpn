@@ -6,95 +6,107 @@ from dataclasses import dataclass
 import re
 from typing import Iterable, List
 
+import requests
+
 
 @dataclass
 class DiagnosticResult:
-    """Result of analyzing a log line."""
+    """Result of running a diagnostic check."""
 
-    pattern: str
-    severity: str
+    check: str
+    passed: bool
     message: str
     recommendation: str
+    persistent: bool = False
 
 
 class DiagnosticAnalyzer:
-    """Analyze container logs for common error patterns."""
+    """Run VPN specific health checks on container logs and connectivity."""
 
     def __init__(self) -> None:
-        self.patterns: list[tuple[re.Pattern[str], str, str, str]] = [
-            (
-                re.compile(r"authentication (failed|failure)", re.I),
-                "critical",
-                "Authentication failure",
-                "Check credentials and provider configuration.",
+        self.patterns: dict[str, re.Pattern[str]] = {
+            "auth_failure": re.compile(
+                r"AUTH_FAILED|authentication (failed|failure)", re.I
             ),
-            (
-                re.compile(r"certificate|ssl", re.I),
-                "critical",
-                "Certificate or SSL issue",
-                "Verify certificates and TLS settings.",
+            "tls_error": re.compile(r"tls|certificate|ssl", re.I),
+            "dns_error": re.compile(
+                r"(dns (resolution|lookup) failed)|no such host", re.I
             ),
-            (
-                re.compile(
-                    r"(connection (refused|timed out|unreachable))|(network is unreachable)",
-                    re.I,
-                ),
-                "critical",
-                "Network connectivity issue",
-                "Ensure network access and proxy settings.",
-            ),
-            (
-                re.compile(r"rate limit", re.I),
-                "warning",
-                "Rate limiting detected",
-                "Reduce request rate or check provider limits.",
-            ),
-            (
-                re.compile(r"(dns (resolution|lookup) failed)|no such host", re.I),
-                "critical",
-                "DNS resolution failure",
-                "Check DNS configuration or server availability.",
-            ),
-            (
-                re.compile(r"openvpn", re.I),
-                "info",
-                "OpenVPN error",
-                "Review OpenVPN configuration for issues.",
-            ),
-            (
-                re.compile(r"wireguard", re.I),
-                "info",
-                "WireGuard error",
-                "Review WireGuard configuration for issues.",
-            ),
-        ]
+        }
 
-    def analyze(self, log_lines: Iterable[str]) -> List[DiagnosticResult]:
-        """Return diagnostic results for matching log lines."""
-
-        results: List[DiagnosticResult] = []
+    def analyze_logs(self, log_lines: Iterable[str]) -> List[DiagnosticResult]:
+        counts: dict[str, int] = {k: 0 for k in self.patterns}
         for line in log_lines:
-            for pattern, severity, message, recommendation in self.patterns:
+            for key, pattern in self.patterns.items():
                 if pattern.search(line):
-                    results.append(
-                        DiagnosticResult(
-                            pattern=pattern.pattern,
-                            severity=severity,
-                            message=message,
-                            recommendation=recommendation,
-                        )
-                    )
+                    counts[key] += 1
+        results: List[DiagnosticResult] = []
+        for key, count in counts.items():
+            if count:
+                msg, rec = self._messages(key)
+                results.append(
+                    DiagnosticResult(key, False, msg, rec, persistent=count > 1)
+                )
+        if not results:
+            results.append(DiagnosticResult("logs", True, "No critical log errors", ""))
         return results
 
-    def health_score(self, results: Iterable[DiagnosticResult]) -> int:
-        """Return a simple health score based on diagnostic results."""
+    def _messages(self, key: str) -> tuple[str, str]:
+        mapping = {
+            "auth_failure": (
+                "Authentication failure detected",
+                "Verify credentials and provider configuration.",
+            ),
+            "tls_error": (
+                "TLS or certificate issue detected",
+                "Check certificates and TLS settings.",
+            ),
+            "dns_error": (
+                "DNS resolution failure detected",
+                "Verify DNS settings or server availability.",
+            ),
+        }
+        return mapping.get(key, (key, ""))
 
-        score = 100
-        for res in results:
-            if res.severity == "critical":
-                score -= 40
-            elif res.severity == "warning":
-                score -= 20
+    def check_connectivity(self, port: int) -> List[DiagnosticResult]:
+        results: List[DiagnosticResult] = []
+        proxies = {
+            "http": f"http://localhost:{port}",
+            "https": f"http://localhost:{port}",
+        }
+        try:
+            direct = requests.get("https://ifconfig.me", timeout=5).text.strip()
+            proxied = requests.get(
+                "https://ifconfig.me", proxies=proxies, timeout=5
+            ).text.strip()
+            if proxied and proxied != direct:
+                results.append(
+                    DiagnosticResult("dns_leak", True, "No DNS leak detected", "")
+                )
             else:
-                score -= 10
-        return max(score, 0)
+                results.append(
+                    DiagnosticResult(
+                        "dns_leak",
+                        False,
+                        "Possible DNS leak detected",
+                        "Check firewall and kill switch settings.",
+                    )
+                )
+        except Exception as exc:  # pragma: no cover - network issues
+            results.append(
+                DiagnosticResult(
+                    "connectivity",
+                    False,
+                    f"Connectivity test failed: {exc}",
+                    "Ensure VPN container network is reachable.",
+                )
+            )
+        return results
+
+    def analyze(
+        self, log_lines: Iterable[str], port: int | None = None
+    ) -> List[DiagnosticResult]:
+        results = self.analyze_logs(log_lines)
+        if port:
+            results.extend(self.check_connectivity(port))
+        return results

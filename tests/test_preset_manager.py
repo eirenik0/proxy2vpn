@@ -10,8 +10,11 @@ from proxy2vpn import cli
 
 def _copy_compose(tmp_path: pathlib.Path) -> pathlib.Path:
     src = pathlib.Path(__file__).parent / "test_compose.yml"
+    env_path = tmp_path / "env.test"
+    env_path.write_text("KEY=value\n")
     dest = tmp_path / "compose.yml"
-    dest.write_text(src.read_text())
+    text = src.read_text().replace("env.test", str(env_path))
+    dest.write_text(text)
     return dest
 
 
