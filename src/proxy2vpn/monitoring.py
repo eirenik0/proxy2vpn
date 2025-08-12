@@ -24,7 +24,11 @@ def monitor_vpn_health() -> List[Dict[str, Any]]:
         try:
             diag = get_container_diagnostics(container)
             diagnostics.append(diag)
-            logger.info("container_health", extra=diag)
+            # Avoid clashing with logging.LogRecord reserved attributes (e.g., 'name')
+            safe_extra = dict(diag)
+            if "name" in safe_extra:
+                safe_extra["container_name"] = safe_extra.pop("name")
+            logger.info("container_health", extra=safe_extra)
         except RuntimeError as exc:  # pragma: no cover - rare error path
             logger.error(
                 "container_diagnostic_failed",
