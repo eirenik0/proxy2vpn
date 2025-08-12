@@ -136,6 +136,60 @@ def test_deploy_fleet_rolls_back_on_error(monkeypatch, fleet_manager, capsys):
     assert "Stopped and removed container: svc1" in out
 
 
+def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys):
+    plan = DeploymentPlan(provider="prov")
+    plan.services = [
+        ServicePlan(
+            name="svc1",
+            profile="test",
+            location="good",
+            country="C",
+            port=10000,
+            provider="prov",
+        ),
+        ServicePlan(
+            name="svc2",
+            profile="test",
+            location="bad",
+            country="C",
+            port=10001,
+            provider="prov",
+        ),
+    ]
+
+    def fake_validate_location(provider, location):
+        return location != "bad"
+
+    monkeypatch.setattr(
+        fleet_manager.server_manager, "validate_location", fake_validate_location
+    )
+
+    added = []
+    start_calls: list[str] = []
+
+    def fake_add_service(service):
+        added.append(service.name)
+
+    async def fake_start(service_names):
+        start_calls.extend(service_names)
+
+    monkeypatch.setattr(fleet_manager.compose_manager, "add_service", fake_add_service)
+    monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
+
+    result = asyncio.run(
+        fleet_manager.deploy_fleet(plan, validate_servers=True, parallel=False)
+    )
+
+    assert added == ["svc1"]
+    assert start_calls == ["svc1"]
+    assert result.deployed == 1
+    assert result.failed == 1
+
+    out = capsys.readouterr().out
+    assert "Invalid location bad for prov" in out
+    assert "Skipping 1 invalid service" in out
+
+
 def test_get_fleet_status_reconstructs_allocator(tmp_path):
     compose_path = tmp_path / "compose.yml"
     ComposeManager.create_initial_compose(compose_path, force=True)
