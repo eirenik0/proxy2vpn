@@ -349,10 +349,8 @@ class FleetManager:
                     profile = self.compose_manager.get_profile(service.profile)
 
                     # Create and start container
-                    container = await asyncio.to_thread(
-                        recreate_vpn_container, service, profile
-                    )
-                    await asyncio.to_thread(start_container, container)
+                    await asyncio.to_thread(recreate_vpn_container, service, profile)
+                    await asyncio.to_thread(start_container, service_name)
 
                     console.print(f"[green]✅[/green] Started {service_name}")
 
@@ -377,10 +375,8 @@ class FleetManager:
                 profile = self.compose_manager.get_profile(service.profile)
 
                 # Create and start container
-                container = await asyncio.to_thread(
-                    recreate_vpn_container, service, profile
-                )
-                await asyncio.to_thread(start_container, container)
+                await asyncio.to_thread(recreate_vpn_container, service, profile)
+                await asyncio.to_thread(start_container, service_name)
 
                 console.print(f"[green]✅[/green] Started {service_name}")
 
