@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, List
+import os
+import shutil
 
+from filelock import FileLock
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
 from .models import Profile, VPNService
+from .compose_validator import validate_compose
 
 # Minimal compose template used when initializing a new project
 INITIAL_COMPOSE_TEMPLATE = """\
@@ -28,6 +32,7 @@ class ComposeManager:
     def __init__(self, compose_path: Path) -> None:
         self.compose_path = compose_path
         self.yaml = YAML()
+        self.lock = FileLock(str(compose_path) + ".lock")
         self.data: Dict[str, Any] = self._load()
 
     def _load(self) -> Dict[str, Any]:
@@ -35,8 +40,23 @@ class ComposeManager:
             raise FileNotFoundError(
                 f"compose file '{self.compose_path}' not found. Run 'proxy2vpn init' to create it."
             )
-        with self.compose_path.open("r", encoding="utf-8") as f:
-            return self.yaml.load(f)
+        backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
+        with self.lock:
+            try:
+                with self.compose_path.open("r", encoding="utf-8") as f:
+                    data = self.yaml.load(f)
+                if not isinstance(data, dict):
+                    raise ValueError("compose file does not contain a mapping")
+                # basic validation: ensure YAML structure can be parsed
+                validate_compose(self.compose_path)
+                return data
+            except Exception:
+                if backup_path.exists():
+                    with backup_path.open("r", encoding="utf-8") as f:
+                        data = self.yaml.load(f)
+                    shutil.copy2(backup_path, self.compose_path)
+                    return data
+                raise
 
     @staticmethod
     def create_initial_compose(path: Path, force: bool = False) -> None:
@@ -145,5 +165,22 @@ class ComposeManager:
         return port
 
     def save(self) -> None:
-        with self.compose_path.open("w", encoding="utf-8") as f:
-            self.yaml.dump(self.data, f)
+        backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
+        tmp_path = self.compose_path.with_suffix(self.compose_path.suffix + ".tmp")
+        with self.lock:
+            try:
+                if self.compose_path.exists():
+                    shutil.copy2(self.compose_path, backup_path)
+                with tmp_path.open("w", encoding="utf-8") as f:
+                    self.yaml.dump(self.data, f)
+                os.replace(tmp_path, self.compose_path)
+            except Exception:
+                if backup_path.exists():
+                    shutil.copy2(backup_path, self.compose_path)
+                raise
+            finally:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except FileNotFoundError:
+                        pass

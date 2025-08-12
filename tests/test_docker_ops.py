@@ -32,6 +32,44 @@ def test_container_lifecycle():
     assert name not in containers
 
 
+def test_retry_logic():
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise ValueError("fail")
+        return "ok"
+
+    result = docker_ops._retry(flaky, retries=3, exceptions=(ValueError,))
+    assert result == "ok"
+    assert calls["n"] == 2
+
+
+def test_cleanup_orphans(monkeypatch):
+    class C:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.removed = False
+
+        def remove(self, force: bool = False) -> None:
+            self.removed = True
+
+    containers = [C("a"), C("b")]
+    monkeypatch.setattr(docker_ops, "get_vpn_containers", lambda all=True: containers)
+
+    class M:
+        def list_services(self):
+            class S:
+                name = "a"
+
+            return [S()]
+
+    removed = docker_ops.cleanup_orphaned_containers(M())
+    assert removed == ["b"]
+    assert containers[1].removed
+
+
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
 def test_restart_and_logs():
     name = "proxy2vpn-test-logs"

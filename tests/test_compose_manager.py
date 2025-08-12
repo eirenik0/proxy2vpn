@@ -9,8 +9,11 @@ from proxy2vpn.models import Profile, VPNService
 
 def _copy_compose(tmp_path):
     compose_src = pathlib.Path(__file__).parent / "test_compose.yml"
+    env_path = tmp_path / "env.test"
+    env_path.write_text("KEY=value\n")
     compose_path = tmp_path / "docker-compose.yml"
-    compose_path.write_text(compose_src.read_text())
+    text = compose_src.read_text().replace("env.test", str(env_path))
+    compose_path.write_text(text)
     return compose_path
 
 
@@ -63,3 +66,12 @@ def test_add_and_remove_service(tmp_path):
     assert "<<: *vpn-base-test" in compose_text
     manager.remove_service("vpn3")
     assert "vpn3" not in {s.name for s in manager.list_services()}
+
+
+def test_recover_from_corruption(tmp_path):
+    compose_path = _copy_compose(tmp_path)
+    manager = ComposeManager(compose_path)
+    manager.save()
+    compose_path.write_text("not: [valid")
+    recovered = ComposeManager(compose_path)
+    assert recovered.config["health_check_interval"] == "5"
