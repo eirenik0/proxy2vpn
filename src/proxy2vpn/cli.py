@@ -413,6 +413,9 @@ def vpn_restart(
         None, callback=lambda v: sanitize_name(v) if v else None
     ),
     all: bool = typer.Option(False, "--all", help="Restart all VPN services"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Recreate containers before restarting"
+    ),
 ):
     """Restart one or all VPN containers."""
 
@@ -421,6 +424,22 @@ def vpn_restart(
     if all and name is not None:
         abort("Cannot specify NAME when using --all")
     if all:
+        if force:
+            from .docker_ops import recreate_vpn_container, start_container
+
+            services = manager.list_services()
+            for svc in services:
+                profile = manager.get_profile(svc.profile)
+                try:
+                    recreate_vpn_container(svc, profile)
+                    start_container(svc.name)
+                    typer.echo(f"\u2713 Recreated and restarted {svc.name}")
+                except APIError as exc:
+                    typer.echo(
+                        f"Failed to restart '{svc.name}': {exc.explanation}", err=True
+                    )
+            return
+
         from .docker_ops import get_vpn_containers, restart_container
 
         containers = get_vpn_containers(all=True)
@@ -442,6 +461,30 @@ def vpn_restart(
         manager.get_service(name)
     except KeyError:
         abort(f"Service '{name}' not found")
+
+    if force:
+        from .docker_ops import (
+            recreate_vpn_container,
+            start_container,
+            analyze_container_logs,
+        )
+        from .diagnostics import DiagnosticAnalyzer
+
+        svc = manager.get_service(name)
+        profile = manager.get_profile(svc.profile)
+        try:
+            recreate_vpn_container(svc, profile)
+            start_container(name)
+            typer.echo(f"Recreated and restarted '{name}'.")
+        except APIError as exc:
+            analyzer = DiagnosticAnalyzer()
+            results = analyze_container_logs(name, analyzer=analyzer)
+            if results:
+                typer.echo("Diagnostic hints:", err=True)
+                for res in results:
+                    typer.echo(f" - {res.message}: {res.recommendation}", err=True)
+            abort(f"Failed to restart '{name}': {exc.explanation}")
+        return
 
     from .docker_ops import restart_container, analyze_container_logs
     from .diagnostics import DiagnosticAnalyzer

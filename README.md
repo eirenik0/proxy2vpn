@@ -89,7 +89,7 @@ proxy2vpn --help
 - `proxy2vpn vpn list [--diagnose] [--ips-only]`
 - `proxy2vpn vpn start [NAME | --all] [--force]`
 - `proxy2vpn vpn stop [NAME | --all]`
-- `proxy2vpn vpn restart [NAME | --all]`
+- `proxy2vpn vpn restart [NAME | --all] [--force]`
 - `proxy2vpn vpn logs NAME [--lines N] [--follow]`
 - `proxy2vpn vpn delete [NAME | --all]`
 - `proxy2vpn vpn test NAME`
