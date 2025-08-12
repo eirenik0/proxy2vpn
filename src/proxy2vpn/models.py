@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List
+
+from .validators import sanitize_name, sanitize_path, validate_port
 
 
 @dataclass
@@ -13,6 +16,10 @@ class VPNService:
     location: str
     environment: Dict[str, str]
     labels: Dict[str, str]
+
+    def __post_init__(self) -> None:
+        self.name = sanitize_name(self.name)
+        self.port = validate_port(self.port)
 
     @classmethod
     def from_compose_service(cls, name: str, service_def: Dict) -> "VPNService":
@@ -72,6 +79,11 @@ class Profile:
     image: str = "qmcgaw/gluetun"
     cap_add: List[str] = field(default_factory=lambda: ["NET_ADMIN"])
     devices: List[str] = field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
+
+    def __post_init__(self) -> None:
+        self.name = sanitize_name(self.name)
+        # Store resolved path but keep as string for YAML serialization
+        self.env_file = str(sanitize_path(Path(self.env_file)))
 
     @classmethod
     def from_anchor(cls, name: str, data: Dict) -> "Profile":
