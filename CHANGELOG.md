@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.5.0]
+
+### Bug fixes
+
+- Fix generated compose files to drop the deprecated `version` key and merge VPN services with their profiles via `<<: *vpn-base-<profile>`. (#145)
+
+### Features
+
+- Add server list update when running `system init`. (#1)
+
+
 ## [0.4.1]
 
 ### Bug fixes
