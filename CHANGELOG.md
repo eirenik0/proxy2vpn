@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.4.1]
+
+### Bug fixes
+
+- Fix logging field collision error and container creation workflow. The application no longer crashes with KeyError when logging container operations, and properly creates containers when they don't exist during `vpn start` command. (#0)
+
+
 ## [0.4.0]
 
 ### Features
