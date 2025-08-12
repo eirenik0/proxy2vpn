@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.4.0]
+
+### Features
+
+- Add --force flag to `vpn start` to recreate containers instead of starting existing ones. (force-start)
+- Enhance CLI safety with standardized error handling, input validation, and destructive operation prompts. (input-validation)
+- Add structured logging and monitoring utilities for VPN containers and host metrics. (monitoring)
+- - improve configuration reliability with atomic writes and automatic recovery
+  - harden docker operations with retries, timeouts and orphan cleanup
+  - replace regex diagnostics with targeted VPN health checks
+
+  (stability-fixes)
+
+
 ## [0.3.1]
 
 ### Bug fixes
