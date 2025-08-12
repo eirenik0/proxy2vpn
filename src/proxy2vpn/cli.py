@@ -16,6 +16,7 @@ from .server_manager import ServerManager
 from .compose_validator import validate_compose
 from .utils import abort
 from .validators import sanitize_name, sanitize_path, validate_port
+from .logging_utils import configure_logging, get_logger
 
 app = HelpfulTyper(help="proxy2vpn command line interface")
 
@@ -32,6 +33,8 @@ app.add_typer(server_app, name="servers")
 app.add_typer(system_app, name="system")
 app.add_typer(preset_app, name="preset")
 app.add_typer(bulk_app, name="bulk", hidden=True)
+
+logger = get_logger(__name__)
 
 
 @app.callback(invoke_without_command=True)
@@ -53,6 +56,7 @@ def main(
     ),
 ):
     """Store global options in context."""
+    configure_logging()
     if version:
         from . import __version__
 
@@ -88,6 +92,7 @@ def system_init(
         overwrite = True
     try:
         ComposeManager.create_initial_compose(compose_file, force=overwrite)
+        logger.info("compose_initialized", extra={"file": str(compose_file)})
     except FileExistsError:
         abort(
             f"Compose file '{compose_file}' already exists",
@@ -118,6 +123,7 @@ def profile_create(
     manager = ComposeManager(compose_file)
     profile = Profile(name=name, env_file=str(env_file))
     manager.add_profile(profile)
+    logger.info("profile_created", extra={"name": name})
     typer.echo(f"Profile '{name}' created.")
 
 

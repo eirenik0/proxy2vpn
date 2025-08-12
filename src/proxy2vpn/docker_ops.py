@@ -9,6 +9,7 @@ import time
 from .compose_manager import ComposeManager
 from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from .models import Profile, VPNService
+from .logging_utils import get_logger
 
 import docker
 import requests
@@ -17,6 +18,8 @@ from docker.errors import DockerException
 
 DEFAULT_TIMEOUT = 10
 MAX_RETRIES = 3
+
+logger = get_logger(__name__)
 
 
 def _retry(
@@ -54,8 +57,15 @@ def create_container(
     client = _client()
     try:
         _retry(client.images.pull, image, exceptions=(DockerException,))
-        return client.containers.create(image, name=name, command=command, detach=True)
+        container = client.containers.create(
+            image, name=name, command=command, detach=True
+        )
+        logger.info("container_created", extra={"name": name, "image": image})
+        return container
     except DockerException as exc:
+        logger.error(
+            "container_creation_failed", extra={"name": name, "error": str(exc)}
+        )
         raise RuntimeError(f"Failed to create container {name}: {exc}") from exc
 
 
@@ -88,7 +98,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         network_name = "proxy2vpn_network"
         if not client.networks.list(names=[network_name]):
             client.networks.create(name=network_name, driver="bridge")
-        return client.containers.create(
+        container = client.containers.create(
             profile.image,
             name=service.name,
             detach=True,
@@ -99,7 +109,16 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
             devices=profile.devices,
             network=network_name,
         )
+        logger.info(
+            "vpn_container_created",
+            extra={"name": service.name, "image": profile.image},
+        )
+        return container
     except DockerException as exc:
+        logger.error(
+            "vpn_container_creation_failed",
+            extra={"name": service.name, "error": str(exc)},
+        )
         raise RuntimeError(
             f"Failed to create VPN container {service.name}: {exc}"
         ) from exc
@@ -111,8 +130,10 @@ def start_container(name: str) -> Container:
     try:
         container = client.containers.get(name)
         container.start()
+        logger.info("container_started", extra={"name": name})
         return container
     except DockerException as exc:
+        logger.error("container_start_failed", extra={"name": name, "error": str(exc)})
         raise RuntimeError(f"Failed to start container {name}: {exc}") from exc
 
 
@@ -122,8 +143,10 @@ def stop_container(name: str) -> Container:
     try:
         container = client.containers.get(name)
         container.stop()
+        logger.info("container_stopped", extra={"name": name})
         return container
     except DockerException as exc:
+        logger.error("container_stop_failed", extra={"name": name, "error": str(exc)})
         raise RuntimeError(f"Failed to stop container {name}: {exc}") from exc
 
 
@@ -134,8 +157,12 @@ def restart_container(name: str) -> Container:
         container = client.containers.get(name)
         container.restart()
         container.reload()
+        logger.info("container_restarted", extra={"name": name})
         return container
     except DockerException as exc:
+        logger.error(
+            "container_restart_failed", extra={"name": name, "error": str(exc)}
+        )
         raise RuntimeError(f"Failed to restart container {name}: {exc}") from exc
 
 
@@ -145,7 +172,9 @@ def remove_container(name: str) -> None:
     try:
         container = client.containers.get(name)
         container.remove(force=True)
+        logger.info("container_removed", extra={"name": name})
     except DockerException as exc:
+        logger.error("container_remove_failed", extra={"name": name, "error": str(exc)})
         raise RuntimeError(f"Failed to remove container {name}: {exc}") from exc
 
 
