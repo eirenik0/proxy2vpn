@@ -7,6 +7,9 @@ import json
 import asyncio
 
 import typer
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress
 from .typer_ext import HelpfulTyper, run_async
 from docker.errors import APIError, NotFound
 
@@ -36,6 +39,8 @@ app.add_typer(bulk_app, name="bulk", hidden=True)
 app.add_typer(fleet_app, name="fleet")
 
 logger = get_logger(__name__)
+
+console = Console()
 
 
 @app.callback(invoke_without_command=True)
@@ -136,8 +141,19 @@ def profile_list(ctx: typer.Context):
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
-    for profile in manager.list_profiles():
-        typer.echo(profile.name)
+    profiles = manager.list_profiles()
+    if not profiles:
+        console.print("[yellow]No profiles found.[/yellow]")
+        return
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Env File", overflow="fold")
+
+    for profile in profiles:
+        table.add_row(profile.name, profile.env_file)
+
+    console.print(table)
 
 
 @profile_app.command("delete")
@@ -284,7 +300,7 @@ async def vpn_list(
             *(get_container_ip_async(container) for container in containers)
         )
         for container, ip in zip(containers, ips):
-            typer.echo(f"{container.name}: {ip}")
+            console.print(f"{container.name}: {ip}")
         return
 
     services = manager.list_services()
@@ -297,13 +313,16 @@ async def vpn_list(
     )
     ip_map = dict(zip(running.keys(), ips))
 
-    header = f"{'NAME':<15} {'PORT':<8} {'PROFILE':<12} {'STATUS':<10} {'IP':<15}"
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Port")
+    table.add_column("Profile")
+    table.add_column("Status")
+    table.add_column("IP")
     if diagnose:
-        header += f" {'HEALTH':<7}"
-    typer.echo(header)
-    typer.echo("-" * len(header))
-    iterator = typer.progressbar(services, label="Checking") if diagnose else services
-    for svc in iterator:
+        table.add_column("Health")
+
+    async def add_row(svc: VPNService):
         container = containers.get(svc.name)
         if container:
             status = container.status
@@ -316,10 +335,29 @@ async def vpn_list(
             status = "not created"
             ip = "N/A"
             health = "N/A"
-        line = f"{svc.name:<15} {svc.port:<8} {svc.profile:<12} {status:<10} {ip:<15}"
+        status_style = "green" if status == "running" else "red"
+        row = [
+            svc.name,
+            str(svc.port),
+            svc.profile,
+            f"[{status_style}]{status}[/{status_style}]",
+            ip,
+        ]
         if diagnose:
-            line += f" {health:<7}"
-        typer.echo(line)
+            row.append(health)
+        table.add_row(*row)
+
+    if diagnose:
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Checking", total=len(services))
+            for svc in services:
+                await add_row(svc)
+                progress.advance(task)
+    else:
+        for svc in services:
+            await add_row(svc)
+
+    console.print(table)
 
 
 @vpn_app.command("start")
