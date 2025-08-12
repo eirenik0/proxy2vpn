@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.11.0]
+
+### Bug fixes
+
+- Fix fleet health checks by using authenticated proxy URLs during validation. (#64)
+- fix empty profile allocation table output in `fleet status` (#123)
+
+### Features
+
+- feat: add --unique-ips option to fleet plan to ensure unique city/IP routes (#124)
+
+
 ## [0.10.0]
 
 ### Bug fixes
