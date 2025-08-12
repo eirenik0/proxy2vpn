@@ -12,7 +12,15 @@ Proxy2VPN is a Python command-line interface for managing multiple VPN container
 ```bash
 # Install dependencies
 uv sync
+```
 
+> [!NOTE]
+> `uv` is part of the `uv` toolchain. If `uv` isn't installed, get it with:
+> ```bash
+> curl -LsSf https://astral.sh/uv/install.sh | sh
+> ```
+
+```bash
 # Run Python application
 uv run proxy2vpn <command> [args]
 
