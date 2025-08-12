@@ -276,6 +276,9 @@ def vpn_start(
         None, callback=lambda v: sanitize_name(v) if v else None
     ),
     all: bool = typer.Option(False, "--all", help="Start all VPN services"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Recreate container if it already exists"
+    ),
 ):
     """Start one or all VPN containers."""
 
@@ -286,10 +289,13 @@ def vpn_start(
     if all:
         from .docker_ops import start_all_vpn_containers
 
-        results = start_all_vpn_containers(manager)
+        results = start_all_vpn_containers(manager, force=force)
         for svc_name, started in results:
             if started:
-                typer.echo(f"\u2713 Started {svc_name}")
+                if force:
+                    typer.echo(f"\u2713 Recreated and started {svc_name}")
+                else:
+                    typer.echo(f"\u2713 Started {svc_name}")
             else:
                 typer.echo(f"\u2192 {svc_name} already running")
         return
@@ -305,11 +311,26 @@ def vpn_start(
         start_container,
         analyze_container_logs,
         create_vpn_container,
+        recreate_vpn_container,
     )
     from .diagnostics import DiagnosticAnalyzer
 
     svc = manager.get_service(name)
     profile = manager.get_profile(svc.profile)
+    if force:
+        try:
+            recreate_vpn_container(svc, profile)
+            start_container(name)
+            typer.echo(f"Recreated and started '{name}'.")
+        except APIError as exc:
+            analyzer = DiagnosticAnalyzer()
+            results = analyze_container_logs(name, analyzer=analyzer)
+            if results:
+                typer.echo("Diagnostic hints:", err=True)
+                for res in results:
+                    typer.echo(f" - {res.message}: {res.recommendation}", err=True)
+            abort(f"Failed to start '{name}': {exc.explanation}")
+        return
     try:
         start_container(name)
         typer.echo(f"Started '{name}'.")

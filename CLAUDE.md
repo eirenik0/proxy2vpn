@@ -32,6 +32,7 @@ uv run proxy2vpn <command> [args]
 uv run proxy2vpn profile create myprofile profiles/myprofile.env
 uv run proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn
 uv run proxy2vpn vpn start vpn1
+uv run proxy2vpn vpn start --force vpn1
 uv run proxy2vpn vpn list --diagnose
 uv run proxy2vpn vpn start --all
 uv run proxy2vpn servers list-providers

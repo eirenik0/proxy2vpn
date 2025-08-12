@@ -124,6 +124,16 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         ) from exc
 
 
+def recreate_vpn_container(service: VPNService, profile: Profile) -> Container:
+    """Recreate a container for a VPN service."""
+
+    try:
+        remove_container(service.name)
+    except RuntimeError:
+        pass
+    return create_vpn_container(service, profile)
+
+
 def start_container(name: str) -> Container:
     """Start an existing container by name."""
     client = _client()
@@ -278,16 +288,24 @@ def analyze_container_logs(
         raise RuntimeError(f"Failed to analyze logs for {name}: {exc}") from exc
 
 
-def start_all_vpn_containers(manager: ComposeManager) -> list[tuple[str, bool]]:
+def start_all_vpn_containers(
+    manager: ComposeManager, force: bool = False
+) -> list[tuple[str, bool]]:
     """Start all VPN containers, creating any missing ones."""
+
     client = _client()
     results: list[tuple[str, bool]] = []
     try:
         existing = {c.name: c for c in client.containers.list(all=True)}
         for svc in manager.list_services():
             container = existing.get(svc.name)
+            profile = manager.get_profile(svc.profile)
+            if force:
+                container = recreate_vpn_container(svc, profile)
+                _retry(container.start, exceptions=(DockerException,))
+                results.append((svc.name, True))
+                continue
             if container is None:
-                profile = manager.get_profile(svc.profile)
                 container = create_vpn_container(svc, profile)
             if container.status != "running":
                 _retry(container.start, exceptions=(DockerException,))
