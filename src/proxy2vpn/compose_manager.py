@@ -111,6 +111,24 @@ class ComposeManager:
         del services[name]
         self.save()
 
+    def update_service(self, service: VPNService) -> None:
+        """Update an existing service with new configuration"""
+        services = self.data.get("services", {})
+        if service.name not in services:
+            raise KeyError(f"Service '{service.name}' not found")
+
+        # Get the profile for merging
+        profile_key = f"x-vpn-base-{service.profile}"
+        profile_map = self.data.get(profile_key)
+        if profile_map is None:
+            raise KeyError(f"Profile '{service.profile}' not found")
+
+        # Update service configuration
+        svc_map = CommentedMap(service.to_compose_service())
+        setattr(svc_map, merge_attrib, [(0, profile_map)])  # YAML merge
+        services[service.name] = svc_map
+        self.save()
+
     # ------------------------------------------------------------------
     # Profile management
     # ------------------------------------------------------------------

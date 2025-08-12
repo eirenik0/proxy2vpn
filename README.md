@@ -5,10 +5,13 @@ Python command-line interface for managing multiple VPN containers with Docker.
 ## Features
 - Manage VPN credentials as reusable profiles
 - Create and control VPN services
+- **Fleet management**: Bulk deployment across multiple cities and profiles
 - Multi-service control with `--all` flags
 - Query and validate provider server locations
 - Apply predefined presets for common setups
 - HTTP proxy authentication support
+- Server health monitoring and automatic rotation
+- Intelligent profile allocation with load balancing
 
 ## Installation
 
@@ -72,6 +75,36 @@ proxy2vpn --help
    ```bash
    proxy2vpn vpn list
    proxy2vpn vpn test vpn1
+
+## Fleet Management
+
+For bulk deployment across multiple cities and VPN accounts:
+
+1. Create multiple profiles with different account credentials:
+   ```bash
+   # Create profiles for different VPN accounts
+   proxy2vpn profile create account1 profiles/account1.env
+   proxy2vpn profile create account2 profiles/account2.env  
+   ```
+
+2. Plan a fleet deployment across countries:
+   ```bash
+   # Deploy across Germany and France with 2 slots on account1, 8 on account2
+   proxy2vpn fleet plan --countries "Germany,France,Netherlands" --profiles "account1:2,account2:8"
+   ```
+
+3. Deploy the planned fleet:
+   ```bash
+   proxy2vpn fleet deploy --parallel
+   ```
+
+4. Monitor and manage the fleet:
+   ```bash
+   # View fleet status with profile allocation
+   proxy2vpn fleet status --show-allocation
+   
+   # Rotate failed servers automatically
+   proxy2vpn fleet rotate --dry-run
    ```
 
 ## Command overview
@@ -102,6 +135,13 @@ proxy2vpn --help
 - `proxy2vpn servers list-countries PROVIDER`
 - `proxy2vpn servers list-cities PROVIDER COUNTRY`
 - `proxy2vpn servers validate-location PROVIDER LOCATION`
+
+### Fleet management
+- `proxy2vpn fleet plan --countries "Germany,France" --profiles "acc1:2,acc2:8" [--output PLAN_FILE]`
+- `proxy2vpn fleet deploy [--plan-file PLAN_FILE] [--parallel] [--validate-first] [--dry-run]`
+- `proxy2vpn fleet status [--format table|json|yaml] [--show-allocation] [--show-health]`
+- `proxy2vpn fleet rotate [--country COUNTRY] [--criteria random|performance|load] [--dry-run]`
+- `proxy2vpn fleet scale up|down [--countries COUNTRIES] [--factor N]`
 
 ### Presets
 - `proxy2vpn preset list`

@@ -240,6 +240,18 @@ def get_vpn_containers(all: bool = False) -> list[Container]:
         raise RuntimeError(f"Failed to list VPN containers: {exc}") from exc
 
 
+def get_container_by_service_name(service_name: str) -> Container | None:
+    """Get container by service name"""
+    try:
+        containers = get_vpn_containers(all=True)
+        for container in containers:
+            if container.name == service_name:
+                return container
+        return None
+    except RuntimeError:
+        return None
+
+
 def get_problematic_containers(all: bool = False) -> list[Container]:
     """Return containers that are not running properly."""
 

@@ -26,6 +26,7 @@ server_app = HelpfulTyper(help="Manage cached server lists")
 system_app = HelpfulTyper(help="System level operations")
 bulk_app = HelpfulTyper(help="Bulk container operations")
 preset_app = HelpfulTyper(help="Manage presets")
+fleet_app = HelpfulTyper(help="Manage VPN fleets across multiple cities")
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(vpn_app, name="vpn")
@@ -33,6 +34,7 @@ app.add_typer(server_app, name="servers")
 app.add_typer(system_app, name="system")
 app.add_typer(preset_app, name="preset")
 app.add_typer(bulk_app, name="bulk", hidden=True)
+app.add_typer(fleet_app, name="fleet")
 
 logger = get_logger(__name__)
 
@@ -746,6 +748,96 @@ def system_diagnose(
             if verbose or entry["issues"]:
                 for issue, rec in zip(entry["issues"], entry["recommendations"]):
                     typer.echo(f"  - {issue}: {rec}")
+
+
+# ---------------------------------------------------------------------------
+# Fleet management commands
+# ---------------------------------------------------------------------------
+
+
+@fleet_app.command("plan")
+def fleet_plan_cmd(
+    ctx: typer.Context,
+    provider: str = typer.Option("protonvpn", help="VPN provider"),
+    countries: str = typer.Option(..., help="Comma-separated country list"),
+    profiles: str = typer.Option(..., help="Profile slots: acc1:2,acc2:8"),
+    port_start: int = typer.Option(20000, help="Starting port number"),
+    naming_template: str = typer.Option(
+        "{provider}-{country}-{city}", help="Service naming template"
+    ),
+    output: str = typer.Option("deployment-plan.yaml", help="Save plan to file"),
+    validate_servers: bool = typer.Option(True, help="Validate server availability"),
+):
+    """Plan bulk VPN deployment across cities"""
+    from .fleet_commands import fleet_plan
+
+    fleet_plan(
+        ctx,
+        provider,
+        countries,
+        profiles,
+        port_start,
+        naming_template,
+        output,
+        validate_servers,
+    )
+
+
+@fleet_app.command("deploy")
+def fleet_deploy_cmd(
+    ctx: typer.Context,
+    plan_file: str = typer.Option("deployment-plan.yaml", help="Deployment plan file"),
+    parallel: bool = typer.Option(True, help="Start containers in parallel"),
+    validate_first: bool = typer.Option(
+        True, help="Validate servers before deployment"
+    ),
+    dry_run: bool = typer.Option(False, help="Show what would be deployed"),
+):
+    """Deploy VPN fleet from plan file"""
+    from .fleet_commands import fleet_deploy
+
+    fleet_deploy(ctx, plan_file, parallel, validate_first, dry_run)
+
+
+@fleet_app.command("status")
+def fleet_status_cmd(
+    ctx: typer.Context,
+    format: str = typer.Option("table", help="table|json|yaml"),
+    show_allocation: bool = typer.Option(True, help="Show profile allocation"),
+    show_health: bool = typer.Option(False, help="Include health checks"),
+):
+    """Show current fleet status and profile allocation"""
+    from .fleet_commands import fleet_status
+
+    fleet_status(ctx, format, show_allocation, show_health)
+
+
+@fleet_app.command("rotate")
+def fleet_rotate_cmd(
+    ctx: typer.Context,
+    country: str = typer.Option(None, help="Rotate servers in specific country"),
+    provider: str = typer.Option("protonvpn", help="VPN provider"),
+    criteria: str = typer.Option("random", help="random|performance|load"),
+    dry_run: bool = typer.Option(False, help="Show rotation plan only"),
+):
+    """Rotate VPN servers for better availability"""
+    from .fleet_commands import fleet_rotate
+
+    fleet_rotate(ctx, country, provider, criteria, dry_run)
+
+
+@fleet_app.command("scale")
+def fleet_scale_cmd(
+    ctx: typer.Context,
+    action: str = typer.Argument(..., help="up|down"),
+    countries: str = typer.Option(None, help="Comma-separated countries to scale"),
+    factor: int = typer.Option(1, help="Scale factor"),
+    profile: str = typer.Option(None, help="Add services to specific profile"),
+):
+    """Scale VPN fleet up or down"""
+    from .fleet_commands import fleet_scale
+
+    fleet_scale(ctx, action, countries, factor, profile)
 
 
 if __name__ == "__main__":
