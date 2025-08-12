@@ -97,6 +97,31 @@ def _load_env_file(path: str) -> dict[str, str]:
     return env
 
 
+def ensure_network(recreate: bool = False) -> None:
+    """Ensure the proxy2vpn Docker network exists.
+
+    Args:
+      recreate: If True and the network exists, remove and recreate it.
+    """
+    client = _client()
+    network_name = "proxy2vpn_network"
+    networks = client.networks.list(names=[network_name])
+    if networks:
+        if not recreate:
+            return
+        try:
+            networks[0].remove()
+        except DockerException as exc:
+            logger.error(
+                "network_remove_failed",
+                extra={"network_name": network_name, "error": str(exc)},
+            )
+            raise RuntimeError(
+                f"Failed to remove network {network_name}: {exc}"
+            ) from exc
+    client.networks.create(name=network_name, driver="bridge")
+
+
 def create_vpn_container(service: VPNService, profile: Profile) -> Container:
     """Create a container for a VPN service using its profile."""
 
@@ -105,9 +130,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         _retry(client.images.pull, profile.image, exceptions=(DockerException,))
         env = _load_env_file(profile.env_file)
         env.update(service.environment)
-        network_name = "proxy2vpn_network"
-        if not client.networks.list(names=[network_name]):
-            client.networks.create(name=network_name, driver="bridge")
+        ensure_network()
         container = client.containers.create(
             profile.image,
             name=service.name,
@@ -117,7 +140,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
             labels=service.labels,
             cap_add=profile.cap_add,
             devices=profile.devices,
-            network=network_name,
+            network="proxy2vpn_network",
         )
         logger.info(
             "vpn_container_created",

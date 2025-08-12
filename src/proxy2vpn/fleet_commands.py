@@ -101,6 +101,9 @@ def fleet_deploy(
         True, help="Validate servers before deployment"
     ),
     dry_run: bool = typer.Option(False, help="Show what would be deployed"),
+    recreate_network: bool = typer.Option(
+        False, help="Recreate Docker network if it already exists"
+    ),
 ):
     """Deploy VPN fleet from plan file"""
 
@@ -130,7 +133,10 @@ def fleet_deploy(
     try:
         result = asyncio.run(
             fleet_manager.deploy_fleet(
-                plan, validate_servers=validate_first, parallel=parallel
+                plan,
+                validate_servers=validate_first,
+                parallel=parallel,
+                recreate_network=recreate_network,
             )
         )
 
