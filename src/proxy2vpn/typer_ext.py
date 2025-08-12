@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import difflib
-from typing import List, Optional
+import asyncio
+import functools
+from typing import Any, Callable, Coroutine, List, Optional, TypeVar
 
 from click.exceptions import UsageError
 from rich.console import Console
@@ -9,6 +11,30 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 import typer
+
+
+T = TypeVar("T")
+
+
+def run_async(fn: Callable[..., Coroutine[Any, Any, T]]) -> Callable[..., T]:
+    """Run an async Typer command using ``asyncio.run``.
+
+    The wrapped function must not be executed while another event loop is
+    running (e.g. from within Jupyter). In such cases the caller should manage
+    the event loop manually instead of using this decorator.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(fn(*args, **kwargs))
+        raise RuntimeError(
+            "run_async() cannot be used when an event loop is already running"
+        )
+
+    return wrapper
 
 
 class HelpfulTyper(typer.Typer):

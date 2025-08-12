@@ -21,6 +21,7 @@ dependencies = [
     "ruamel.yaml",
     "docker",
     "requests",
+    "aiohttp",
     "filelock",
     "psutil",
 ]
