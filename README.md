@@ -66,7 +66,7 @@ proxy2vpn --help
 
 4. Create and start a VPN service:
    ```bash
-   proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn --location "New York"
+   proxy2vpn profile apply myprofile vpn1 --port 8888
    proxy2vpn vpn start vpn1  # container is recreated from compose.yml
    ```
 
