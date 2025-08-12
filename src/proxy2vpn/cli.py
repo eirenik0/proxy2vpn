@@ -900,11 +900,14 @@ def fleet_deploy_cmd(
         True, help="Validate servers before deployment"
     ),
     dry_run: bool = typer.Option(False, help="Show what would be deployed"),
+    recreate_network: bool = typer.Option(
+        False, help="Recreate Docker network if it already exists"
+    ),
 ):
     """Deploy VPN fleet from plan file"""
     from .fleet_commands import fleet_deploy
 
-    fleet_deploy(ctx, plan_file, parallel, validate_first, dry_run)
+    fleet_deploy(ctx, plan_file, parallel, validate_first, dry_run, recreate_network)
 
 
 @fleet_app.command("status")

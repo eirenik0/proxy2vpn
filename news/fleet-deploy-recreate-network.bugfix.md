@@ -1,0 +1,1 @@
+Fixed missing --recreate-network option in fleet deploy command help output
