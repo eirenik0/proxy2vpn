@@ -843,7 +843,8 @@ def system_diagnose(
             )
             if verbose or entry["issues"]:
                 for issue, rec in zip(entry["issues"], entry["recommendations"]):
-                    typer.echo(f"  - {issue}: {rec}")
+                    suffix = f": {rec}" if rec else ""
+                    typer.echo(f"  - {issue}{suffix}")
 
     # Reset log level to avoid affecting other commands
     if verbose:

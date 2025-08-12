@@ -76,25 +76,37 @@ class DiagnosticAnalyzer:
         }
         direct = ip_utils.fetch_ip()
         proxied = ip_utils.fetch_ip(proxies=proxies)
+        details: list[str] = []
+        if direct:
+            details.append(f"direct={direct}")
+        if proxied:
+            details.append(f"proxied={proxied}")
+        detail_msg = f" ({', '.join(details)})" if details else ""
+
         if not proxied:
             results.append(
                 DiagnosticResult(
                     "connectivity",
                     False,
-                    "Connectivity test failed",
+                    f"Connectivity test failed{detail_msg}",
                     "Ensure VPN container network is reachable.",
                 )
             )
         elif proxied != direct:
             results.append(
-                DiagnosticResult("dns_leak", True, "No DNS leak detected", "")
+                DiagnosticResult(
+                    "dns_leak",
+                    True,
+                    f"No DNS leak detected{detail_msg}",
+                    "",
+                )
             )
         else:
             results.append(
                 DiagnosticResult(
                     "dns_leak",
                     False,
-                    "Possible DNS leak detected",
+                    f"Possible DNS leak detected{detail_msg}",
                     "Check firewall and kill switch settings.",
                 )
             )
@@ -114,26 +126,37 @@ class DiagnosticAnalyzer:
         proxied_task = asyncio.create_task(ip_utils.fetch_ip_async(proxies=proxies))
 
         direct, proxied = await asyncio.gather(direct_task, proxied_task)
+        details: list[str] = []
+        if direct:
+            details.append(f"direct={direct}")
+        if proxied:
+            details.append(f"proxied={proxied}")
+        detail_msg = f" ({', '.join(details)})" if details else ""
 
         if not proxied:
             results.append(
                 DiagnosticResult(
                     "connectivity",
                     False,
-                    "Connectivity test failed",
+                    f"Connectivity test failed{detail_msg}",
                     "Ensure VPN container network is reachable.",
                 )
             )
         elif proxied != direct:
             results.append(
-                DiagnosticResult("dns_leak", True, "No DNS leak detected", "")
+                DiagnosticResult(
+                    "dns_leak",
+                    True,
+                    f"No DNS leak detected{detail_msg}",
+                    "",
+                )
             )
         else:
             results.append(
                 DiagnosticResult(
                     "dns_leak",
                     False,
-                    "Possible DNS leak detected",
+                    f"Possible DNS leak detected{detail_msg}",
                     "Check firewall and kill switch settings.",
                 )
             )
