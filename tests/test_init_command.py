@@ -28,6 +28,7 @@ def test_init_creates_compose(tmp_path):
     data = yaml.load(compose.read_text())
     assert data["services"] == {}
     assert "proxy2vpn_network" in data["networks"]
+    assert "version" not in data
 
 
 def test_init_requires_force(tmp_path):

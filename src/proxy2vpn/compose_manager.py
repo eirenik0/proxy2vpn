@@ -7,7 +7,7 @@ import shutil
 
 from filelock import FileLock
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.comments import CommentedMap, merge_attrib
 
 from .models import Profile, VPNService
 from .compose_validator import validate_compose
@@ -17,7 +17,6 @@ INITIAL_COMPOSE_TEMPLATE = """\
 # proxy2vpn compose file
 # Define VPN profiles with x-vpn-base-<name> entries
 # and add services under the 'services' section.
-version: "3.9"
 services: {}
 networks:
   proxy2vpn_network:
@@ -101,7 +100,7 @@ class ComposeManager:
         if profile_map is None:
             raise KeyError(f"Profile '{service.profile}' not found")
         svc_map = CommentedMap(service.to_compose_service())
-        svc_map.merge_attrib = [profile_map]
+        setattr(svc_map, merge_attrib, [(0, profile_map)])
         services[service.name] = svc_map
         self.save()
 
@@ -136,7 +135,11 @@ class ComposeManager:
             raise ValueError(f"Profile '{profile.name}' already exists")
         anchor_map = CommentedMap(profile.to_anchor())
         anchor_map.yaml_set_anchor(f"vpn-base-{profile.name}", always_dump=True)
-        self.data[key] = anchor_map
+        if "services" in self.data:
+            idx = list(self.data.keys()).index("services")
+            self.data.insert(idx, key, anchor_map)
+        else:
+            self.data[key] = anchor_map
         self.save()
 
     def remove_profile(self, name: str) -> None:

@@ -68,6 +68,37 @@ def test_add_and_remove_service(tmp_path):
     assert "vpn3" not in {s.name for s in manager.list_services()}
 
 
+def test_add_service_after_init(tmp_path):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+    env_path = tmp_path / "env.andr"
+    env_path.write_text("KEY=value\n")
+    profile = Profile(name="andr", env_file=str(env_path))
+    manager.add_profile(profile)
+    service = VPNService(
+        name="vpn1",
+        port=12345,
+        provider="protonvpn",
+        profile="andr",
+        location="LA",
+        environment={
+            "VPN_SERVICE_PROVIDER": "protonvpn",
+            "SERVER_CITIES": "LA",
+        },
+        labels={
+            "vpn.type": "vpn",
+            "vpn.port": "12345",
+            "vpn.provider": "protonvpn",
+            "vpn.profile": "andr",
+            "vpn.location": "LA",
+        },
+    )
+    manager.add_service(service)
+    compose_text = compose_path.read_text()
+    assert "<<: *vpn-base-andr" in compose_text
+
+
 def test_recover_from_corruption(tmp_path):
     compose_path = _copy_compose(tmp_path)
     manager = ComposeManager(compose_path)
