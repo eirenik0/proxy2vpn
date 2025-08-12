@@ -46,6 +46,40 @@ def test_retry_logic():
     assert calls["n"] == 2
 
 
+def test_get_container_ip(monkeypatch):
+    class C:
+        status = "running"
+        labels = {"vpn.port": "8080"}
+
+    monkeypatch.setattr(
+        docker_ops.ip_utils,
+        "fetch_ip",
+        lambda proxies=None, timeout=5: "1.1.1.1" if proxies else "2.2.2.2",
+    )
+    assert docker_ops.get_container_ip(C()) == "1.1.1.1"
+
+
+def test_test_vpn_connection(monkeypatch):
+    class Cont:
+        status = "running"
+        labels = {"vpn.port": "8080"}
+
+    class Client:
+        class Containers:
+            def get(self, name):
+                return Cont()
+
+        containers = Containers()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda: Client())
+    monkeypatch.setattr(
+        docker_ops.ip_utils,
+        "fetch_ip",
+        lambda proxies=None, timeout=5: "2.2.2.2" if not proxies else "1.1.1.1",
+    )
+    assert docker_ops.test_vpn_connection("name") is True
+
+
 def test_cleanup_orphans(monkeypatch):
     class C:
         def __init__(self, name: str) -> None:

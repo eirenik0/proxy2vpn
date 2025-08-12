@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 from typing import Iterable, List
 
-import requests
+from . import ip_utils
 
 
 @dataclass
@@ -74,31 +74,28 @@ class DiagnosticAnalyzer:
             "http": f"http://localhost:{port}",
             "https": f"http://localhost:{port}",
         }
-        try:
-            direct = requests.get("https://ifconfig.me", timeout=5).text.strip()
-            proxied = requests.get(
-                "https://ifconfig.me", proxies=proxies, timeout=5
-            ).text.strip()
-            if proxied and proxied != direct:
-                results.append(
-                    DiagnosticResult("dns_leak", True, "No DNS leak detected", "")
-                )
-            else:
-                results.append(
-                    DiagnosticResult(
-                        "dns_leak",
-                        False,
-                        "Possible DNS leak detected",
-                        "Check firewall and kill switch settings.",
-                    )
-                )
-        except Exception as exc:  # pragma: no cover - network issues
+        direct = ip_utils.fetch_ip()
+        proxied = ip_utils.fetch_ip(proxies=proxies)
+        if not proxied:
             results.append(
                 DiagnosticResult(
                     "connectivity",
                     False,
-                    f"Connectivity test failed: {exc}",
+                    "Connectivity test failed",
                     "Ensure VPN container network is reachable.",
+                )
+            )
+        elif proxied != direct:
+            results.append(
+                DiagnosticResult("dns_leak", True, "No DNS leak detected", "")
+            )
+        else:
+            results.append(
+                DiagnosticResult(
+                    "dns_leak",
+                    False,
+                    "Possible DNS leak detected",
+                    "Check firewall and kill switch settings.",
                 )
             )
         return results
