@@ -58,6 +58,13 @@ def configure_logging(level: int = logging.INFO) -> None:
     root.addHandler(handler)
 
 
+def set_log_level(level: int) -> None:
+    """Dynamically change the logging level for the root logger."""
+
+    root = logging.getLogger()
+    root.setLevel(level)
+
+
 def get_logger(name: str) -> logging.Logger:
     """Return a module level logger."""
 

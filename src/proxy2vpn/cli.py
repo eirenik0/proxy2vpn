@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import asyncio
+import logging
 
 import typer
 from rich.console import Console
@@ -20,7 +21,7 @@ from .server_manager import ServerManager
 from .compose_validator import validate_compose
 from .utils import abort
 from .validators import sanitize_name, sanitize_path, validate_port
-from .logging_utils import configure_logging, get_logger
+from .logging_utils import configure_logging, get_logger, set_log_level
 
 app = HelpfulTyper(help="proxy2vpn command line interface")
 
@@ -756,6 +757,11 @@ def system_diagnose(
 ):
     """Diagnose VPN containers and report health."""
 
+    # Configure verbose logging if requested
+    if verbose:
+        set_log_level(logging.DEBUG)
+        logger.debug("diagnostic_started", extra={"verbose": True, "lines": lines})
+
     from .docker_ops import (
         get_problematic_containers,
         get_vpn_containers,
@@ -768,6 +774,7 @@ def system_diagnose(
     if name and all_containers:
         abort("Cannot specify NAME when using --all")
     if name:
+        logger.debug("analyzing_single_container", extra={"container_name": name})
         vpn_containers = {c.name: c for c in get_vpn_containers(all=True)}
         container = vpn_containers.get(name)
         if not container:
@@ -779,12 +786,36 @@ def system_diagnose(
             if all_containers
             else get_problematic_containers(all=True)
         )
+        logger.debug(
+            "found_containers",
+            extra={
+                "count": len(containers),
+                "all_containers": all_containers,
+                "container_names": [c.name for c in containers],
+            },
+        )
 
     summary: list[dict[str, object]] = []
     for container in containers:
+        logger.debug("analyzing_container", extra={"container_name": container.name})
         diag = get_container_diagnostics(container)
+        logger.debug(
+            "container_diagnostics",
+            extra={"container_name": container.name, "status": diag["status"]},
+        )
+
         results = analyze_container_logs(container.name, lines=lines, analyzer=analyzer)
+        logger.debug(
+            "log_analysis_complete",
+            extra={"container_name": container.name, "issues_found": len(results)},
+        )
+
         score = analyzer.health_score(results)
+        logger.debug(
+            "health_score_calculated",
+            extra={"container_name": container.name, "health_score": score},
+        )
+
         entry = {
             "container": container.name,
             "status": diag["status"],
@@ -793,6 +824,8 @@ def system_diagnose(
             "recommendations": [r.recommendation for r in results],
         }
         summary.append(entry)
+
+    logger.debug("diagnosis_complete", extra={"containers_analyzed": len(summary)})
 
     if json_output:
         typer.echo(json.dumps(summary, indent=2))
@@ -806,6 +839,10 @@ def system_diagnose(
             if verbose or entry["issues"]:
                 for issue, rec in zip(entry["issues"], entry["recommendations"]):
                     typer.echo(f"  - {issue}: {rec}")
+
+    # Reset log level to avoid affecting other commands
+    if verbose:
+        set_log_level(logging.INFO)
 
 
 # ---------------------------------------------------------------------------
