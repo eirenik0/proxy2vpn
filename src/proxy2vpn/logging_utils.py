@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
+from pathlib import Path
 from typing import Any, Dict
 
 
@@ -47,14 +47,23 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(log_record, ensure_ascii=False)
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    """Configure root logger with JSON formatter."""
+def configure_logging(
+    level: int = logging.INFO, log_file: str | Path | None = None
+) -> None:
+    """Configure root logger with JSON formatter.
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
+    If ``log_file`` is provided, logs are written to that file. Otherwise, logs
+    are suppressed so they do not interfere with console output.
+    """
+
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(level)
+    if log_file:
+        handler: logging.Handler = logging.FileHandler(log_file)
+        handler.setFormatter(JsonFormatter())
+    else:
+        handler = logging.NullHandler()
     root.addHandler(handler)
 
 

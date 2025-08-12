@@ -14,6 +14,7 @@ def _run_proxy2vpn(args, cwd):
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(repo_root / "src")
+    env["HOME"] = str(cwd)
     return subprocess.run(
         [sys.executable, "-m", "proxy2vpn", *args],
         cwd=cwd,
@@ -24,6 +25,9 @@ def _run_proxy2vpn(args, cwd):
 
 
 def test_init_creates_compose(tmp_path):
+    cache_dir = tmp_path / ".cache" / "proxy2vpn"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "servers.json").write_text("{}")
     result = _run_proxy2vpn(["system", "init"], tmp_path)
     assert result.returncode == 0
     compose = tmp_path / "compose.yml"
@@ -38,6 +42,10 @@ def test_init_creates_compose(tmp_path):
 def test_init_requires_force(tmp_path):
     compose = tmp_path / "compose.yml"
     compose.write_text("services: {}\n")
+
+    cache_dir = tmp_path / ".cache" / "proxy2vpn"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "servers.json").write_text("{}")
 
     result = _run_proxy2vpn(["system", "init"], tmp_path)
     assert result.returncode != 0

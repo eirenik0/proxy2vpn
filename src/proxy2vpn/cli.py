@@ -52,6 +52,9 @@ def main(
         help="Path to compose file",
         callback=sanitize_path,
     ),
+    log_file: Path | None = typer.Option(
+        None, "--log-file", help="Write JSON logs to file"
+    ),
     version: bool = typer.Option(
         False,
         "--version",
@@ -61,7 +64,9 @@ def main(
     ),
 ):
     """Store global options in context."""
-    configure_logging()
+    if log_file:
+        log_file = log_file.expanduser().resolve()
+    configure_logging(log_file=log_file)
     if version:
         from . import __version__
 
