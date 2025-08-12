@@ -30,7 +30,8 @@ uv run proxy2vpn <command> [args]
 
 # Common commands
 uv run proxy2vpn profile create myprofile profiles/myprofile.env
-uv run proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn
+proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn --location "New York"
+uv run proxy2vpn profile apply myprofile vpn1 --port 8888
 uv run proxy2vpn vpn start vpn1
 uv run proxy2vpn vpn list --diagnose
 uv run proxy2vpn vpn start --all
@@ -58,20 +59,19 @@ HTTPPROXY_PASSWORD=your_proxy_password
 
 ### Application Organization
 The Python application (`src/proxy2vpn/`) is modular with these components:
-1. **cli.py**: Main CLI interface using Typer with command groups (profile, vpn, servers, system, preset, fleet)
+1. **cli.py**: Main CLI interface using Typer with command groups (profile, vpn, servers, system, fleet)
 2. **config.py**: Configuration constants and defaults (compose file paths, cache dir, default provider)
 3. **models.py**: Data models for VPNService and Profile with compose file serialization
 4. **compose_manager.py**: Docker Compose file management using ruamel.yaml for profiles and services
 5. **docker_ops.py**: Docker container operations using docker-py SDK
 6. **server_manager.py**: Gluetun server list fetching, caching, and location validation
-7. **preset_manager.py**: Preset management built on YAML anchors
-8. **compose_utils.py**: Docker Compose utilities
-9. **typer_ext.py**: Typer extensions for enhanced CLI functionality
-10. **diagnostics.py**: Container log analysis and health scoring system
-11. **fleet_manager.py**: Bulk VPN deployment orchestration across cities and profiles
-12. **fleet_commands.py**: Fleet management CLI commands with Rich UI components
-13. **profile_allocator.py**: Intelligent profile slot allocation with load balancing
-14. **server_monitor.py**: Server health monitoring and automatic rotation system
+7. **compose_utils.py**: Docker Compose utilities
+8. **typer_ext.py**: Typer extensions for enhanced CLI functionality
+9. **diagnostics.py**: Container log analysis and health scoring system
+10. **fleet_manager.py**: Bulk VPN deployment orchestration across cities and profiles
+11. **fleet_commands.py**: Fleet management CLI commands with Rich UI components
+12. **profile_allocator.py**: Intelligent profile slot allocation with load balancing
+13. **server_monitor.py**: Server health monitoring and automatic rotation system
 ### Docker Integration
 All VPN containers use the `qmcgaw/gluetun` image with:
 - Automatic network creation (proxy2vpn_network)

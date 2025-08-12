@@ -322,6 +322,7 @@ class HelpfulTyper(typer.Typer):
                 f"{command_path} create myprofile --env-file /path/to/.env",
                 f"{command_path} list",
                 f"{command_path} delete myprofile",
+                f"{command_path} apply myprofile myservice",
             ]
         elif "servers" in command_path:
             examples = [
@@ -335,12 +336,6 @@ class HelpfulTyper(typer.Typer):
                 f"{command_path} validate",
                 f"{command_path} diagnose",
             ]
-        elif "preset" in command_path:
-            examples = [
-                f"{command_path} list",
-                f"{command_path} apply mypreset myservice",
-            ]
-
         # Limit to 3 most relevant examples
         return examples[:3]
 
@@ -356,7 +351,6 @@ class HelpfulTyper(typer.Typer):
             "profile": f"{base_url}#profile-management",
             "servers": f"{base_url}#server-lists",
             "system": f"{base_url}#system-operations",
-            "preset": f"{base_url}#presets",
         }
 
         # Find the relevant section based on command path

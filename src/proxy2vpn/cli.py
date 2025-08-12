@@ -20,19 +20,17 @@ from .logging_utils import configure_logging, get_logger
 
 app = HelpfulTyper(help="proxy2vpn command line interface")
 
-profile_app = HelpfulTyper(help="Manage VPN profiles")
+profile_app = HelpfulTyper(help="Manage VPN profiles and apply them to services")
 vpn_app = HelpfulTyper(help="Manage VPN services")
 server_app = HelpfulTyper(help="Manage cached server lists")
 system_app = HelpfulTyper(help="System level operations")
 bulk_app = HelpfulTyper(help="Bulk container operations")
-preset_app = HelpfulTyper(help="Manage presets")
 fleet_app = HelpfulTyper(help="Manage VPN fleets across multiple cities")
 
 app.add_typer(profile_app, name="profile")
 app.add_typer(vpn_app, name="vpn")
 app.add_typer(server_app, name="servers")
 app.add_typer(system_app, name="system")
-app.add_typer(preset_app, name="preset")
 app.add_typer(bulk_app, name="bulk", hidden=True)
 app.add_typer(fleet_app, name="fleet")
 
@@ -159,6 +157,47 @@ def profile_delete(
         typer.confirm(f"Delete profile '{name}'?", abort=True)
     manager.remove_profile(name)
     typer.echo(f"Profile '{name}' deleted.")
+
+
+@profile_app.command("apply")
+def profile_apply(
+    ctx: typer.Context,
+    profile: str,
+    service: str,
+    port: int = typer.Option(0, help="Host port to expose; 0 for auto"),
+):
+    """Create a VPN service from a profile."""
+
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
+    try:
+        manager.get_profile(profile)
+    except KeyError:
+        abort(
+            f"Profile '{profile}' not found",
+            "Create it with 'proxy2vpn profile create'",
+        )
+    if port == 0:
+        port = manager.next_available_port(config.DEFAULT_PORT_START)
+    env = {"VPN_SERVICE_PROVIDER": config.DEFAULT_PROVIDER}
+    labels = {
+        "vpn.type": "vpn",
+        "vpn.port": str(port),
+        "vpn.provider": config.DEFAULT_PROVIDER,
+        "vpn.profile": profile,
+        "vpn.location": "",
+    }
+    svc = VPNService(
+        name=service,
+        port=port,
+        provider=config.DEFAULT_PROVIDER,
+        profile=profile,
+        location="",
+        environment=env,
+        labels=labels,
+    )
+    manager.add_service(svc)
+    typer.echo(f"Service '{service}' created from profile '{profile}' on port {port}.")
 
 
 # ---------------------------------------------------------------------------
@@ -639,35 +678,6 @@ def servers_validate_location(provider: str, location: str):
     else:
         typer.echo("invalid", err=True)
         raise typer.Exit(1)
-
-
-@preset_app.command("list")
-def preset_list():
-    """List available presets."""
-
-    from .preset_manager import list_available_presets
-
-    for preset in list_available_presets():
-        typer.echo(preset)
-
-
-@preset_app.command("apply")
-def preset_apply(
-    ctx: typer.Context,
-    preset: str,
-    service: str,
-    port: int = typer.Option(0, help="Host port to expose; 0 for auto"),
-):
-    """Create a VPN service from a preset."""
-
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
-    if port == 0:
-        port = manager.next_available_port(config.DEFAULT_PORT_START)
-    from .preset_manager import apply_preset
-
-    apply_preset(preset, service, port)
-    typer.echo(f"Service '{service}' created from preset '{preset}' on port {port}.")
 
 
 @system_app.command("validate")
