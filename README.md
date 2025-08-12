@@ -61,9 +61,7 @@ proxy2vpn --help
 4. Create and start a VPN service:
    ```bash
    proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn --location "New York"
-   proxy2vpn vpn start vpn1
-   # Use --force to recreate the container if it already exists
-   # proxy2vpn vpn start --force vpn1
+   proxy2vpn vpn start vpn1  # container is recreated from compose.yml
    ```
 
 5. View status and test connectivity:
@@ -87,9 +85,9 @@ proxy2vpn --help
 ### VPN services
 - `proxy2vpn vpn create NAME PROFILE [--port PORT] [--provider PROVIDER] [--location LOCATION]`
 - `proxy2vpn vpn list [--diagnose] [--ips-only]`
-- `proxy2vpn vpn start [NAME | --all] [--force]`
+- `proxy2vpn vpn start [NAME | --all]`
 - `proxy2vpn vpn stop [NAME | --all]`
-- `proxy2vpn vpn restart [NAME | --all] [--force]`
+- `proxy2vpn vpn restart [NAME | --all]`
 - `proxy2vpn vpn logs NAME [--lines N] [--follow]`
 - `proxy2vpn vpn delete [NAME | --all]`
 - `proxy2vpn vpn test NAME`

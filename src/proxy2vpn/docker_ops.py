@@ -300,39 +300,25 @@ def analyze_container_logs(
         raise RuntimeError(f"Failed to analyze logs for {name}: {exc}") from exc
 
 
-def start_all_vpn_containers(
-    manager: ComposeManager, force: bool = False
-) -> list[tuple[str, bool]]:
-    """Start all VPN containers, creating any missing ones."""
+def start_all_vpn_containers(manager: ComposeManager) -> list[str]:
+    """Recreate and start all VPN containers."""
 
-    client = _client()
-    results: list[tuple[str, bool]] = []
+    results: list[str] = []
     try:
-        existing = {c.name: c for c in client.containers.list(all=True)}
         for svc in manager.list_services():
-            container = existing.get(svc.name)
             profile = manager.get_profile(svc.profile)
-            if force:
-                container = recreate_vpn_container(svc, profile)
-                _retry(container.start, exceptions=(DockerException,))
-                results.append((svc.name, True))
-                continue
-            if container is None:
-                container = create_vpn_container(svc, profile)
-            if container.status != "running":
-                _retry(container.start, exceptions=(DockerException,))
-                results.append((svc.name, True))
-            else:
-                results.append((svc.name, False))
+            container = recreate_vpn_container(svc, profile)
+            _retry(container.start, exceptions=(DockerException,))
+            results.append(svc.name)
     except DockerException as exc:
         raise RuntimeError(f"Failed to start containers: {exc}") from exc
     return results
 
 
 def stop_all_vpn_containers() -> list[str]:
-    """Stop all running VPN containers.
+    """Stop and remove all running VPN containers.
 
-    Returns a list of container names that were stopped.
+    Returns a list of container names that were removed.
     """
 
     try:
@@ -343,6 +329,7 @@ def stop_all_vpn_containers() -> list[str]:
     for container in containers:
         try:
             container.stop()
+            container.remove(force=True)
             results.append(container.name)
         except DockerException:
             continue
