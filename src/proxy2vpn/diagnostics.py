@@ -107,3 +107,17 @@ class DiagnosticAnalyzer:
         if port:
             results.extend(self.check_connectivity(port))
         return results
+
+    def health_score(self, results: Iterable[DiagnosticResult]) -> int:
+        """Return an aggregate health score for diagnostic results.
+
+        Starts at ``100`` and deducts points for each failing check. Persistent
+        issues count more heavily than transient ones. The score is clamped to a
+        0–100 range.
+        """
+
+        score = 100
+        for res in results:
+            if not res.passed:
+                score -= 50 if res.persistent else 25
+        return max(0, min(100, score))

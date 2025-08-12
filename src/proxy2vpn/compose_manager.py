@@ -37,7 +37,7 @@ class ComposeManager:
     def _load(self) -> Dict[str, Any]:
         if not self.compose_path.exists():
             raise FileNotFoundError(
-                f"compose file '{self.compose_path}' not found. Run 'proxy2vpn init' to create it."
+                f"compose file '{self.compose_path}' not found. Run 'proxy2vpn system init' to create it."
             )
         backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
         with self.lock:

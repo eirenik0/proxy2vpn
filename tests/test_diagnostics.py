@@ -24,3 +24,13 @@ def test_connectivity(monkeypatch):
     analyzer = diagnostics.DiagnosticAnalyzer()
     results = analyzer.check_connectivity(8080)
     assert any(r.check == "dns_leak" and r.passed for r in results)
+
+
+def test_health_score():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    results = [
+        diagnostics.DiagnosticResult("ok", True, "", ""),
+        diagnostics.DiagnosticResult("warn", False, "", "", persistent=False),
+        diagnostics.DiagnosticResult("error", False, "", "", persistent=True),
+    ]
+    assert analyzer.health_score(results) == 25
