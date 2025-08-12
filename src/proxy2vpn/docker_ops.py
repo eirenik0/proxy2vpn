@@ -418,6 +418,22 @@ def get_container_ip(container: Container) -> str:
     return ip or "N/A"
 
 
+async def get_container_ip_async(container: Container) -> str:
+    """Asynchronously return the external IP address for a running container.
+
+    This uses :func:`ip_utils.fetch_ip_async` to concurrently query IP services.
+    If the container is not running, lacks a port label or the request fails,
+    ``"N/A"`` is returned.
+    """
+
+    port = container.labels.get("vpn.port")
+    if not port or container.status != "running":
+        return "N/A"
+    proxies = _get_authenticated_proxy_url(container, port)
+    ip = await ip_utils.fetch_ip_async(proxies=proxies)
+    return ip or "N/A"
+
+
 def test_vpn_connection(name: str) -> bool:
     """Return ``True`` if the VPN proxy for NAME appears to work."""
 

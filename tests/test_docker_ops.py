@@ -1,5 +1,6 @@
 import pathlib
 import sys
+import asyncio
 
 import pytest
 
@@ -57,6 +58,19 @@ def test_get_container_ip(monkeypatch):
         lambda proxies=None, timeout=5: "1.1.1.1" if proxies else "2.2.2.2",
     )
     assert docker_ops.get_container_ip(C()) == "1.1.1.1"
+
+
+def test_get_container_ip_async(monkeypatch):
+    class C:
+        status = "running"
+        labels = {"vpn.port": "8080"}
+
+    async def fake_fetch_ip_async(proxies=None, timeout=3):
+        return "1.1.1.1" if proxies else "2.2.2.2"
+
+    monkeypatch.setattr(docker_ops.ip_utils, "fetch_ip_async", fake_fetch_ip_async)
+    result = asyncio.run(docker_ops.get_container_ip_async(C()))
+    assert result == "1.1.1.1"
 
 
 def test_test_vpn_connection(monkeypatch):
