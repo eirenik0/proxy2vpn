@@ -170,7 +170,7 @@ For enterprise-scale deployment across multiple cities and VPN accounts:
 
 ### Fleet management
 - `proxy2vpn fleet plan --countries "Germany,France" --profiles "acc1:2,acc2:8" [--output PLAN_FILE] [--unique-ips]`
-- `proxy2vpn fleet deploy [--plan-file PLAN_FILE] [--parallel] [--validate-first] [--dry-run]`
+- `proxy2vpn fleet deploy [--plan-file PLAN_FILE] [--parallel] [--validate-first] [--dry-run] [--force]`
 - `proxy2vpn fleet status [--format table|json|yaml] [--show-allocation] [--show-health]`
 - `proxy2vpn fleet rotate [--country COUNTRY] [--criteria random|performance|load] [--dry-run]`
 - `proxy2vpn fleet scale up|down [--countries COUNTRIES] [--factor N]`
