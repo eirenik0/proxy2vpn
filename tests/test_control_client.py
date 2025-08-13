@@ -59,3 +59,20 @@ def test_get_public_ip_returns_ip(monkeypatch):
     ip = asyncio.run(control_client.get_public_ip(BASE_URL))
     assert ip == "1.2.3.4"
     assert called["url"] == f"{BASE_URL}/ip"
+
+
+def test_restart_tunnel_puts_status(monkeypatch):
+    called: dict[str, object] = {}
+
+    async def fake_request(method, url, action, **kwargs):
+        called["method"] = method
+        called["url"] = url
+        called["json"] = kwargs.get("json")
+        return {"status": "restarted"}
+
+    monkeypatch.setattr(control_client, "_request", fake_request)
+    result = asyncio.run(control_client.restart_tunnel(BASE_URL))
+    assert result == {"status": "restarted"}
+    assert called["method"] == "put"
+    assert called["url"] == f"{BASE_URL}/openvpn/status"
+    assert called["json"] == {"status": "restarted"}
