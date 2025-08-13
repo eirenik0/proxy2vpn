@@ -16,24 +16,35 @@ class VPNService:
     location: str
     environment: Dict[str, str]
     labels: Dict[str, str]
+    control_port: int = 0
 
     def __post_init__(self) -> None:
         self.name = sanitize_name(self.name)
         self.port = validate_port(self.port)
+        self.control_port = validate_port(self.control_port)
 
     @classmethod
     def from_compose_service(cls, name: str, service_def: Dict) -> "VPNService":
         ports = service_def.get("ports", [])
         host_port = 0
-        if ports:
-            mapping = str(ports[0])
+        control_port = 0
+        for mapping in ports:
+            mapping = str(mapping)
             parts = mapping.split(":")
             if len(parts) >= 3:
-                host_port = int(parts[1])
+                host = int(parts[1])
+                container = parts[2]
             elif len(parts) == 2:
-                host_port = int(parts[0])
+                host = int(parts[0])
+                container = parts[1]
             else:
-                host_port = int(mapping)
+                host = int(mapping)
+                container = ""
+            container_port = container.split("/")[0]
+            if container_port == "8888" and host_port == 0:
+                host_port = host
+            elif container_port == "8000" and control_port == 0:
+                control_port = host
         env_list = service_def.get("environment", [])
         env_dict: Dict[str, str] = {}
         for item in env_list:
@@ -47,6 +58,7 @@ class VPNService:
         return cls(
             name=name,
             port=host_port,
+            control_port=control_port,
             provider=provider,
             profile=profile,
             location=location,
@@ -56,10 +68,17 @@ class VPNService:
 
     def to_compose_service(self) -> Dict:
         env_list = [f"{k}={v}" for k, v in self.environment.items()]
+        ports = [f"{self.port}:8888/tcp"]
+        if self.control_port:
+            ports.append(f"{self.control_port}:8000/tcp")
+        labels = dict(self.labels)
+        labels.setdefault("vpn.port", str(self.port))
+        if self.control_port:
+            labels.setdefault("vpn.control_port", str(self.control_port))
         service = {
-            "ports": [f"{self.port}:8888/tcp"],
+            "ports": ports,
             "environment": env_list,
-            "labels": self.labels,
+            "labels": labels,
         }
         return service
 

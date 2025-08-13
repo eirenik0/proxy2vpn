@@ -202,10 +202,12 @@ def profile_apply(
         )
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
+    control_port = manager.next_available_port(port + 1)
     env = {"VPN_SERVICE_PROVIDER": config.DEFAULT_PROVIDER}
     labels = {
         "vpn.type": "vpn",
         "vpn.port": str(port),
+        "vpn.control_port": str(control_port),
         "vpn.provider": config.DEFAULT_PROVIDER,
         "vpn.profile": profile,
         "vpn.location": "",
@@ -213,6 +215,7 @@ def profile_apply(
     svc = VPNService(
         name=service,
         port=port,
+        control_port=control_port,
         provider=config.DEFAULT_PROVIDER,
         profile=profile,
         location="",
@@ -221,7 +224,7 @@ def profile_apply(
     )
     manager.add_service(svc)
     console.print(
-        f"[green]✓[/green] Service '{service}' created from profile '{profile}' on port {port}."
+        f"[green]✓[/green] Service '{service}' created from profile '{profile}' on port {port} (control {control_port}).",
     )
 
 

@@ -33,5 +33,6 @@ def test_profile_apply(tmp_path):
         assert "test" in profiles
         cli.profile_apply(ctx, "test", "vpn3", port=7777)
     manager = ComposeManager(compose_path)
-    services = {s.name for s in manager.list_services()}
-    assert "vpn3" in services
+    svc = manager.get_service("vpn3")
+    assert svc.control_port != 0
+    assert svc.labels.get("vpn.control_port") == str(svc.control_port)

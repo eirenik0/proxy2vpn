@@ -17,20 +17,24 @@ services:
     <<: *vpn-base-test
     ports:
       - "0.0.0.0:9999:8888/tcp"
+      - "0.0.0.0:19999:8000/tcp"
     environment:
       - SERVER_CITIES=New York
     labels:
       vpn.type: vpn
       vpn.port: "9999"
+      vpn.control_port: "19999"
       vpn.profile: test
 
   testvpn2:
     <<: *vpn-base-test
     ports:
       - "0.0.0.0:9998:8888/tcp"
+      - "0.0.0.0:19998:8000/tcp"
     environment:
       - SERVER_CITIES=Chicago
     labels:
       vpn.type: vpn
       vpn.port: "9998"
+      vpn.control_port: "19998"
       vpn.profile: test
