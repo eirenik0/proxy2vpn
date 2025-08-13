@@ -106,8 +106,11 @@ def fleet_deploy(
         True, help="Validate servers before deployment"
     ),
     dry_run: bool = typer.Option(False, help="Show what would be deployed"),
-    recreate_network: bool = typer.Option(
-        False, help="Recreate Docker network if it already exists"
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Recreate containers and Docker network if they exist",
     ),
 ):
     """Deploy VPN fleet from plan file"""
@@ -141,7 +144,7 @@ def fleet_deploy(
                 plan,
                 validate_servers=validate_first,
                 parallel=parallel,
-                recreate_network=recreate_network,
+                force=force,
             )
         )
 
