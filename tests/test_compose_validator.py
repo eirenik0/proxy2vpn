@@ -29,13 +29,13 @@ def test_valid_compose(tmp_path):
             services:
               svc:
                 <<: *vpn-base-test
-                ports:
-                  - "20000:1194/tcp"
+                ports: ["20000:1194/tcp", "20001:8000/tcp"]
                 environment:
                   VAR: "1"
                 labels:
                   vpn.type: vpn
                   vpn.port: "20000"
+                  vpn.control_port: "20001"
                   vpn.profile: test
             """
         )
@@ -62,11 +62,12 @@ def test_orphaned_profile(tmp_path):
             services:
               svc:
                 <<: *vpn-base-test
-                ports: ["20000:1194/tcp"]
+                ports: ["20000:1194/tcp", "20001:8000/tcp"]
                 environment: {{VAR: "1"}}
                 labels:
                   vpn.type: vpn
                   vpn.port: "20000"
+                  vpn.control_port: "20001"
                   vpn.profile: test
             """
         )
@@ -89,19 +90,21 @@ def test_duplicate_ports(tmp_path):
             services:
               one:
                 <<: *vpn-base-test
-                ports: ["20000:1194/tcp"]
+                ports: ["20000:1194/tcp", "20001:8000/tcp"]
                 environment: {{VAR: "1"}}
                 labels:
                   vpn.type: vpn
                   vpn.port: "20000"
+                  vpn.control_port: "20001"
                   vpn.profile: test
               two:
                 <<: *vpn-base-test
-                ports: ["20000:1194/tcp"]
+                ports: ["20002:1194/tcp", "20001:8000/tcp"]
                 environment: {{VAR: "1"}}
                 labels:
                   vpn.type: vpn
-                  vpn.port: "20000"
+                  vpn.port: "20002"
+                  vpn.control_port: "20001"
                   vpn.profile: test
             """
         )
@@ -116,19 +119,20 @@ def test_missing_profile_field(tmp_path):
     compose.write_text(
         dedent(
             f"""
-            x-vpn-base-test: &vpn-base-test
-              cap_add: [NET_ADMIN]
-              devices: [/dev/net/tun]
-              env_file: {env}
-            services:
-              svc:
-                <<: *vpn-base-test
-                ports: ["20000:1194/tcp"]
-                environment: {{VAR: "1"}}
-                labels:
-                  vpn.type: vpn
-                  vpn.port: "20000"
-                  vpn.profile: test
+              x-vpn-base-test: &vpn-base-test
+                cap_add: [NET_ADMIN]
+                devices: [/dev/net/tun]
+                env_file: {env}
+              services:
+                svc:
+                  <<: *vpn-base-test
+                  ports: ["20000:1194/tcp", "20001:8000/tcp"]
+                  environment: {{VAR: "1"}}
+                  labels:
+                    vpn.type: vpn
+                    vpn.port: "20000"
+                    vpn.control_port: "20001"
+                    vpn.profile: test
             """
         )
     )
