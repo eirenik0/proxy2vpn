@@ -345,6 +345,7 @@ async def vpn_list(
     table.add_column("N", style="dim blue")
     table.add_column("Name", style="green")
     table.add_column("Port")
+    table.add_column("Provider")
     table.add_column("Profile")
     table.add_column("Location")
     table.add_column("Status")
@@ -370,6 +371,7 @@ async def vpn_list(
             str(i),
             svc.name,
             str(svc.port),
+            svc.provider,
             svc.profile,
             svc.location,
             f"[{status_style}]{status}[/{status_style}]",

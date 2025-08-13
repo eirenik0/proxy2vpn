@@ -35,7 +35,7 @@ def test_vpn_list_ips_only_async(monkeypatch):
     assert called["n"] == 1
 
 
-def test_vpn_list_includes_location(monkeypatch):
+def test_vpn_list_includes_provider_and_location(monkeypatch):
     runner = CliRunner()
 
     svc = VPNService(
@@ -71,5 +71,7 @@ def test_vpn_list_includes_location(monkeypatch):
 
     result = runner.invoke(cli.app, ["vpn", "list"])
     assert result.exit_code == 0
+    assert "Provider" in result.stdout
+    assert "prov" in result.stdout
     assert "Location" in result.stdout
     assert "US" in result.stdout
