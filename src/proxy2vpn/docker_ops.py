@@ -62,7 +62,7 @@ def create_container(
     try:
         _retry(client.images.pull, image, exceptions=(DockerException,))
         container = client.containers.create(
-            image, name=name, command=command, detach=True
+            image, name=name, command=list(command) if command else None, detach=True
         )
         logger.info("container_created", extra={"container_name": name, "image": image})
         console.print(f"[green]✅ Created container:[/green] {name}")
@@ -378,7 +378,8 @@ def stop_all_vpn_containers() -> list[str]:
         try:
             container.stop()
             container.remove(force=True)
-            results.append(container.name)
+            if container.name is not None:
+                results.append(container.name)
         except DockerException:
             continue
     return results
@@ -397,7 +398,8 @@ def cleanup_orphaned_containers(manager: ComposeManager) -> list[str]:
         if container.name not in defined:
             try:
                 container.remove(force=True)
-                removed.append(container.name)
+                if container.name is not None:
+                    removed.append(container.name)
             except DockerException:
                 continue
     return removed

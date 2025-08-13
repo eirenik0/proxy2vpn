@@ -1,0 +1,1 @@
+Fixed critical type safety issues in CLI commands and Docker operations that were causing 33+ type checker errors, improving code reliability and maintainability.

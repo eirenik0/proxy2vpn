@@ -341,9 +341,9 @@ async def vpn_list(
             status = container.status
             ip = ip_map.get(svc.name, "N/A")
             health = "N/A"
-            if diagnose:
+            if diagnose and container.name:
                 results = analyze_container_logs(container.name, analyzer=analyzer)
-                health = str(analyzer.health_score(results))
+                health = str(analyzer.health_score(results)) if analyzer else "N/A"
         else:
             status = "not created"
             ip = "N/A"
@@ -399,10 +399,13 @@ def vpn_start(
 
     if name is None:
         abort("Specify a service NAME or use --all")
+    assert name is not None  # Type narrowing
+    svc = None
     try:
         svc = manager.get_service(name)
     except KeyError:
         abort(f"Service '{name}' not found")
+    assert svc is not None  # Type narrowing after successful assignment
 
     from .docker_ops import (
         start_container,
@@ -450,8 +453,9 @@ def vpn_stop(
 
     if name is None:
         abort("Specify a service NAME or use --all")
+    assert name is not None  # Type narrowing
     try:
-        manager.get_service(name)
+        manager.get_service(name)  # Just validate the service exists
     except KeyError:
         abort(f"Service '{name}' not found")
 
@@ -462,10 +466,9 @@ def vpn_stop(
         stop_container(name)
         remove_container(name)
         console.print(f"[green]✓[/green] Stopped and removed '{name}'.")
-    except NotFound:
-        abort(f"Container '{name}' does not exist")
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
+        assert name is not None  # Type narrowing for error handling
         results = analyze_container_logs(name, analyzer=analyzer)
         if results:
             typer.echo("Diagnostic hints:", err=True)
@@ -506,10 +509,13 @@ def vpn_restart(
 
     if name is None:
         abort("Specify a service NAME or use --all")
+    assert name is not None  # Type narrowing
+    svc = None
     try:
         svc = manager.get_service(name)
     except KeyError:
         abort(f"Service '{name}' not found")
+    assert svc is not None  # Type narrowing after successful assignment
 
     from .docker_ops import (
         recreate_vpn_container,
@@ -525,6 +531,7 @@ def vpn_restart(
         console.print(f"[green]✓[/green] Recreated and restarted '{name}'.")
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
+        assert name is not None  # Type narrowing for error handling
         results = analyze_container_logs(name, analyzer=analyzer)
         if results:
             typer.echo("Diagnostic hints:", err=True)
@@ -559,6 +566,47 @@ def vpn_logs(
         abort(f"Container '{name}' does not exist")
 
 
+def _delete_service_containers(service_name: str):
+    """Helper function to delete containers for a service."""
+    from .docker_ops import remove_container, stop_container
+
+    try:
+        stop_container(service_name)
+    except NotFound:
+        pass
+    try:
+        remove_container(service_name)
+    except NotFound:
+        pass
+
+
+def _delete_all_services(manager: ComposeManager, force: bool):
+    """Helper function to delete all services."""
+    services = manager.list_services()
+    if not force and not typer.confirm("Delete all services?"):
+        raise typer.Exit()
+
+    for svc in services:
+        _delete_service_containers(svc.name)
+        manager.remove_service(svc.name)
+        console.print(f"[green]✓[/green] Service '{svc.name}' deleted.")
+
+
+def _delete_single_service(manager: ComposeManager, name: str, force: bool):
+    """Helper function to delete a single service."""
+    try:
+        manager.get_service(name)
+    except KeyError:
+        abort(f"Service '{name}' not found")
+
+    if not force and not typer.confirm(f"Delete service '{name}'?"):
+        raise typer.Exit()
+
+    _delete_service_containers(name)
+    manager.remove_service(name)
+    console.print(f"[green]✓[/green] Service '{name}' deleted.")
+
+
 @vpn_app.command("delete")
 def vpn_delete(
     ctx: typer.Context,
@@ -572,48 +620,19 @@ def vpn_delete(
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
-    from .docker_ops import remove_container, stop_container
 
     if all and name is not None:
         abort("Cannot specify NAME when using --all")
+
     if all:
-        services = manager.list_services()
-        if not force and not typer.confirm("Delete all services?"):
-            raise typer.Exit()
-        for svc in services:
-            try:
-                stop_container(svc.name)
-            except NotFound:
-                pass
-            try:
-                remove_container(svc.name)
-            except NotFound:
-                pass
-            manager.remove_service(svc.name)
-            console.print(f"[green]✓[/green] Service '{svc.name}' deleted.")
+        _delete_all_services(manager, force)
         return
 
     if name is None:
         abort("Specify a service NAME or use --all")
-    try:
-        manager.get_service(name)
-    except KeyError:
-        abort(f"Service '{name}' not found")
 
-    if not force and not typer.confirm(f"Delete service '{name}'?"):
-        raise typer.Exit()
-
-    try:
-        stop_container(name)
-    except NotFound:
-        pass
-    try:
-        remove_container(name)
-    except NotFound:
-        pass
-
-    manager.remove_service(name)
-    console.print(f"[green]✓[/green] Service '{name}' deleted.")
+    assert name is not None  # Type narrowing
+    _delete_single_service(manager, name, force)
 
 
 @vpn_app.command("test")
@@ -805,6 +824,8 @@ def system_diagnose(
 
     summary: list[dict[str, object]] = []
     for container in containers:
+        if container is None or container.name is None:
+            continue
         logger.debug("analyzing_container", extra={"container_name": container.name})
         diag = get_container_diagnostics(container)
         logger.debug(
@@ -812,6 +833,7 @@ def system_diagnose(
             extra={"container_name": container.name, "status": diag["status"]},
         )
 
+        assert container.name is not None  # Type narrowing after null check
         results = analyze_container_logs(container.name, lines=lines, analyzer=analyzer)
         logger.debug(
             "log_analysis_complete",
@@ -845,7 +867,13 @@ def system_diagnose(
                 f"{entry['container']}: status={entry['status']} health={entry['health']}"
             )
             if verbose or entry["issues"]:
-                for issue, rec in zip(entry["issues"], entry["recommendations"]):
+                issues = entry["issues"] if isinstance(entry["issues"], list) else []
+                recommendations = (
+                    entry["recommendations"]
+                    if isinstance(entry["recommendations"], list)
+                    else []
+                )
+                for issue, rec in zip(issues, recommendations):
                     suffix = f": {rec}" if rec else ""
                     typer.echo(f"  - {issue}{suffix}")
 
