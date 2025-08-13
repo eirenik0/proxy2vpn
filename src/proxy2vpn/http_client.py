@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from .config import CONTROL_API_ENDPOINTS, DEFAULT_TIMEOUT, MAX_RETRIES, VERIFY_SSL
 from .logging_utils import get_logger
 
 
@@ -25,7 +26,7 @@ class HTTPClientError(RuntimeError):
 class RetryPolicy:
     """Configuration for request retries."""
 
-    attempts: int = 3
+    attempts: int = MAX_RETRIES
     backoff: float = 0.5
 
 
@@ -34,8 +35,8 @@ class HTTPClientConfig:
     """Settings for :class:`HTTPClient`."""
 
     base_url: str
-    timeout: float = 10
-    verify_ssl: bool = True
+    timeout: float = DEFAULT_TIMEOUT
+    verify_ssl: bool = VERIFY_SSL
     auth: tuple[str, str] | None = None
     retry: RetryPolicy = field(default_factory=RetryPolicy)
 
@@ -150,14 +151,14 @@ class OpenVPNStatusResponse:
 class GluetunControlClient(HTTPClient):
     """Client for interacting with Gluetun's control API."""
 
-    ENDPOINTS = {
-        "status": "/status",
-        "openvpn": "/openvpn",
-        "ip": "/ip",
-        "openvpn_status": "/openvpn/status",
-    }
+    ENDPOINTS = CONTROL_API_ENDPOINTS
 
-    def __init__(self, base_url: str, timeout: float = 10, verify_ssl: bool = True):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = DEFAULT_TIMEOUT,
+        verify_ssl: bool = VERIFY_SSL,
+    ):
         parsed = urlparse(base_url)
         if not (parsed.scheme and parsed.netloc):
             raise ValueError(f"invalid base URL: {base_url}")
