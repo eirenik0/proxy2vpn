@@ -6,6 +6,8 @@
 - `news/`: Towncrier fragments for changelog entries.
 - `scripts/`: Release helpers (e.g., `bump_version.py`).
 - Root: `Makefile`, `pyproject.toml`, example compose files (`compose*.yml`), optional local `profiles/*.env` (gitignored).
+- `config.py` exports HTTP client defaults (`DEFAULT_TIMEOUT`, `MAX_RETRIES`, `VERIFY_SSL`) and `CONTROL_API_ENDPOINTS` for the
+  control API.
 
 ## Build, Test, and Development Commands
 - Setup: `uv sync` or `pip install -e ".[dev]"`.

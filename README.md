@@ -95,6 +95,18 @@ proxy2vpn vpn public-ip vpn1
 proxy2vpn vpn restart-tunnel vpn1
 ```
 
+### Control API client settings
+
+The `proxy2vpn.config` module exports reusable constants for working with the
+Gluetun control API:
+
+- `DEFAULT_TIMEOUT` – request timeout in seconds (default `10`).
+- `MAX_RETRIES` – maximum retry attempts for requests (default `3`).
+- `VERIFY_SSL` – whether SSL certificates are verified (enabled by default).
+- `CONTROL_API_ENDPOINTS` – mapping of available endpoint paths.
+
+Import and override these values in custom clients as needed.
+
 ## Fleet Management
 
 For enterprise-scale deployment across multiple cities and VPN accounts:

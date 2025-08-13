@@ -32,3 +32,20 @@ DEFAULT_PORT_START = 20000
 # cached by :class:`ServerManager` to provide location validation and
 # listing of available servers.
 SERVER_LIST_URL = "https://raw.githubusercontent.com/qdm12/gluetun/master/internal/storage/servers.json"
+
+# Default timeout (seconds) for HTTP requests to the control API.
+DEFAULT_TIMEOUT = 10
+
+# Maximum number of retry attempts for HTTP requests.
+MAX_RETRIES = 3
+
+# Whether to verify SSL certificates for HTTP requests.
+VERIFY_SSL = True
+
+# Mapping of control API endpoints.
+CONTROL_API_ENDPOINTS = {
+    "status": "/status",
+    "openvpn": "/openvpn",
+    "ip": "/ip",
+    "openvpn_status": "/openvpn/status",
+}
