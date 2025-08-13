@@ -109,16 +109,23 @@ def ensure_network(recreate: bool = False) -> None:
     if networks:
         if not recreate:
             return
-        try:
-            networks[0].remove()
-        except DockerException as exc:
-            logger.error(
-                "network_remove_failed",
-                extra={"network_name": network_name, "error": str(exc)},
-            )
-            raise RuntimeError(
-                f"Failed to remove network {network_name}: {exc}"
-            ) from exc
+        network = networks[0]
+        for force in (False, True):
+            try:
+                if force:
+                    network.remove(force=True)
+                else:
+                    network.remove()
+                break
+            except DockerException as exc:
+                if force:
+                    logger.error(
+                        "network_remove_failed",
+                        extra={"network_name": network_name, "error": str(exc)},
+                    )
+                    raise RuntimeError(
+                        f"Failed to remove network {network_name}: {exc}"
+                    ) from exc
     client.networks.create(name=network_name, driver="bridge")
 
 

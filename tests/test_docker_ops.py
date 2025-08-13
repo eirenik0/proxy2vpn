@@ -279,3 +279,31 @@ def test_ensure_network_recreates(monkeypatch):
     monkeypatch.setattr(docker_ops, "_client", lambda timeout=10: Client())
     docker_ops.ensure_network(recreate=True)
     assert removed_created["removed"] and removed_created["created"]
+
+
+def test_ensure_network_force_removes_active(monkeypatch):
+    removed_created: dict[str, list[bool] | bool] = {
+        "removed": [],
+        "created": False,
+    }
+
+    class Network:
+        def remove(self, force: bool = False) -> None:
+            removed_created["removed"].append(force)
+            if not force:
+                raise docker_ops.DockerException("active")
+
+    class Networks:
+        def list(self, names):
+            return [Network()]
+
+        def create(self, name, driver):
+            removed_created["created"] = True
+
+    class Client:
+        networks = Networks()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda timeout=10: Client())
+    docker_ops.ensure_network(recreate=True)
+    assert removed_created["removed"] == [False, True]
+    assert removed_created["created"]
