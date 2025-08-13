@@ -172,7 +172,7 @@ class FleetManager:
                 all_entries = all_entries[:total_slots]
 
             self.profile_allocator.setup_profiles(config.profiles)
-            current_port = config.port_start
+            current_port = self.compose_manager.next_available_port(config.port_start)
 
             for country, city, hostname, ip in all_entries:
                 profile_slot = self.profile_allocator.get_next_available(
@@ -201,7 +201,9 @@ class FleetManager:
                 )
 
                 self.profile_allocator.allocate_slot(profile_slot.name, service_name)
-                current_port += 1
+                current_port = self.compose_manager.next_available_port(
+                    current_port + 2
+                )
 
             return plan
 
@@ -232,7 +234,7 @@ class FleetManager:
 
         self.profile_allocator.setup_profiles(config.profiles)
 
-        current_port = config.port_start
+        current_port = self.compose_manager.next_available_port(config.port_start)
 
         for country, city in all_cities:
             profile_slot = self.profile_allocator.get_next_available(config.profiles)
@@ -257,7 +259,7 @@ class FleetManager:
             )
 
             self.profile_allocator.allocate_slot(profile_slot.name, service_name)
-            current_port += 1
+            current_port = self.compose_manager.next_available_port(current_port + 2)
 
         return plan
 
@@ -324,10 +326,13 @@ class FleetManager:
             env["SERVER_HOSTNAMES"] = service_plan.hostname
         else:
             env["SERVER_CITIES"] = service_plan.location
+        control_port = self.compose_manager.next_available_port(service_plan.port + 1)
+        labels["vpn.control_port"] = str(control_port)
 
         return VPNService(
             name=service_plan.name,
             port=service_plan.port,
+            control_port=control_port,
             provider=service_plan.provider,
             profile=service_plan.profile,
             location=service_plan.location,

@@ -40,7 +40,7 @@ def test_plan_deployment_basic_allocation(fleet_manager, monkeypatch):
         "prov-b-city2",
     ]
     assert [s.profile for s in plan.services] == ["acc1", "acc2"]
-    assert [s.port for s in plan.services] == [30000, 30001]
+    assert [s.port for s in plan.services] == [30000, 30002]
 
 
 def test_plan_deployment_sanitizes_and_limits(fleet_manager, monkeypatch):
@@ -234,6 +234,8 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
 
     def fake_add_service(service):
         added.append(service.name)
+        assert service.control_port != 0
+        assert service.labels.get("vpn.control_port") == str(service.control_port)
 
     async def fake_start(service_names, force):
         start_calls.extend(service_names)
