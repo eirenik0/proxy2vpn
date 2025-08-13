@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import asyncio
 import logging
+from dataclasses import asdict
 
 import typer
 from rich.console import Console
@@ -19,7 +20,7 @@ from .compose_manager import ComposeManager
 from .models import Profile, VPNService
 from .server_manager import ServerManager
 from .compose_validator import validate_compose
-from . import control_client
+from .http_client import GluetunControlClient
 from .utils import abort
 from .validators import sanitize_name, sanitize_path, validate_port
 from .logging_utils import configure_logging, get_logger, set_log_level
@@ -724,8 +725,9 @@ async def vpn_status(
     """
 
     base_url = _service_control_base_url(ctx, service)
-    data = await control_client.get_status(base_url)
-    console.print_json(data=data)
+    async with GluetunControlClient(base_url) as client:
+        data = await client.status()
+    console.print_json(data=asdict(data))
 
 
 @vpn_app.command("public-ip")
@@ -741,8 +743,9 @@ async def vpn_public_ip(
     """
 
     base_url = _service_control_base_url(ctx, service)
-    ip = await control_client.get_public_ip(base_url)
-    console.print(ip)
+    async with GluetunControlClient(base_url) as client:
+        ip = await client.public_ip()
+    console.print(ip.ip)
 
 
 @vpn_app.command("restart-tunnel")
@@ -758,7 +761,8 @@ async def vpn_restart_tunnel(
     """
 
     base_url = _service_control_base_url(ctx, service)
-    await control_client.restart_tunnel(base_url)
+    async with GluetunControlClient(base_url) as client:
+        await client.restart_tunnel()
     console.print("[green]\u2713[/green] Tunnel restart requested.")
 
 
