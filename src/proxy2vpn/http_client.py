@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 import asyncio
+import os
 import time
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -115,3 +117,79 @@ class HTTPClient:
 
     async def post(self, path: str, **kwargs: Any) -> Any:
         return await self.request("POST", path, **kwargs)
+
+
+@dataclass(slots=True)
+class StatusResponse:
+    """Response payload for the ``/status`` endpoint."""
+
+    status: str
+
+
+@dataclass(slots=True)
+class OpenVPNResponse:
+    """Response payload for the ``/openvpn`` endpoint."""
+
+    status: bool
+
+
+@dataclass(slots=True)
+class IPResponse:
+    """Response payload for the ``/ip`` endpoint."""
+
+    ip: str
+
+
+@dataclass(slots=True)
+class OpenVPNStatusResponse:
+    """Response payload for the ``/openvpn/status`` endpoint."""
+
+    status: str
+
+
+class GluetunControlClient(HTTPClient):
+    """Client for interacting with Gluetun's control API."""
+
+    ENDPOINTS = {
+        "status": "/status",
+        "openvpn": "/openvpn",
+        "ip": "/ip",
+        "openvpn_status": "/openvpn/status",
+    }
+
+    def __init__(self, base_url: str, timeout: float = 10, verify_ssl: bool = True):
+        parsed = urlparse(base_url)
+        if not (parsed.scheme and parsed.netloc):
+            raise ValueError(f"invalid base URL: {base_url}")
+        auth: tuple[str, str] | None = None
+        auth_env = os.getenv("GLUETUN_CONTROL_AUTH")
+        if auth_env:
+            username, sep, password = auth_env.partition(":")
+            if not sep:
+                raise ValueError("GLUETUN_CONTROL_AUTH must be in 'user:pass' format")
+            auth = (username, password)
+        config = HTTPClientConfig(
+            base_url=f"{parsed.scheme}://{parsed.netloc}",
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            auth=auth,
+        )
+        super().__init__(config)
+
+    async def status(self) -> StatusResponse:
+        data = await self.get(self.ENDPOINTS["status"])
+        return StatusResponse(**data)
+
+    async def set_openvpn(self, enabled: bool) -> OpenVPNResponse:
+        payload = {"status": enabled}
+        data = await self.post(self.ENDPOINTS["openvpn"], json=payload)
+        return OpenVPNResponse(**data)
+
+    async def public_ip(self) -> IPResponse:
+        data = await self.get(self.ENDPOINTS["ip"])
+        return IPResponse(**data)
+
+    async def restart_tunnel(self) -> OpenVPNStatusResponse:
+        payload = {"status": "restarted"}
+        data = await self.request("PUT", self.ENDPOINTS["openvpn_status"], json=payload)
+        return OpenVPNStatusResponse(**data)
