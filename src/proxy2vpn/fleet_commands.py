@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from typing import Dict, List
 
 import typer
 from ruamel.yaml import YAML
@@ -249,7 +248,7 @@ def fleet_scale(
 
 
 def _display_deployment_plan(
-    plan: DeploymentPlan, profile_config: Dict[str, int] = None
+    plan: DeploymentPlan, profile_config: dict[str, int] = None
 ):
     """Display deployment plan in a formatted table"""
 
@@ -294,7 +293,7 @@ def _display_deployment_plan(
             console.print(f"    - {profile}: {used}/{slots} slots")
 
 
-def _display_allocation_table(allocation_status: Dict[str, Dict]):
+def _display_allocation_table(allocation_status: dict[str, dict]):
     """Display profile allocation status"""
     if not allocation_status:
         console.print("[yellow]No profiles found in fleet[/yellow]")
@@ -325,7 +324,7 @@ def _display_allocation_table(allocation_status: Dict[str, Dict]):
     console.print(table)
 
 
-def _display_health_results(health_results: Dict[str, bool]):
+def _display_health_results(health_results: dict[str, bool]):
     """Display health check results"""
 
     healthy = sum(1 for h in health_results.values() if h)
@@ -340,7 +339,7 @@ def _display_health_results(health_results: Dict[str, bool]):
         console.print(f"[red]Unhealthy services: {', '.join(unhealthy_services)}[/red]")
 
 
-def _display_fleet_services(fleet_status: Dict, format: str):
+def _display_fleet_services(fleet_status: dict, format: str):
     """Display fleet services in specified format"""
 
     if format == "json":
@@ -390,7 +389,7 @@ def _display_fleet_services(fleet_status: Dict, format: str):
             console.print("[yellow]No services found in fleet[/yellow]")
 
 
-def _show_fleet_status_sync(service_names: List[str]):
+def _show_fleet_status_sync(service_names: list[str]):
     """Show basic fleet status without async operations"""
     from .docker_ops import get_vpn_containers
 

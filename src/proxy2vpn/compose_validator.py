@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Set
 
 from ruamel.yaml import YAML
 from ruamel.yaml.nodes import MappingNode, ScalarNode
@@ -27,10 +26,10 @@ def _parse_yaml(path: Path):
     return data, node
 
 
-def validate_compose(path: Path) -> List[str]:
+def validate_compose(path: Path) -> list[str]:
     """Validate a docker compose file and return a list of errors."""
 
-    errors: List[str] = []
+    errors: list[str] = []
     try:
         data, node = _parse_yaml(path)
     except Exception as exc:  # pragma: no cover - error path
@@ -42,7 +41,7 @@ def validate_compose(path: Path) -> List[str]:
             errors.append(f"Missing top-level key: {key}")
 
     # Extract profiles from node to inspect anchors
-    profiles: Dict[str, MappingNode] = {}
+    profiles: dict[str, MappingNode] = {}
     for key_node, value_node in node.value:
         if isinstance(key_node, ScalarNode) and key_node.value.startswith(
             "x-vpn-base-"
@@ -76,8 +75,8 @@ def validate_compose(path: Path) -> List[str]:
             services_node = value_node
             break
     services_data = data.get("services", {})
-    used_profiles: Set[str] = set()
-    ports_seen: Dict[int, str] = {}
+    used_profiles: set[str] = set()
+    ports_seen: dict[int, str] = {}
 
     if services_node is not None:
         for svc_key_node, svc_node in services_node.value:

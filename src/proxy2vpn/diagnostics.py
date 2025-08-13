@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Iterable, List
+from typing import Iterable
 
 from . import ip_utils
 
@@ -34,13 +34,13 @@ class DiagnosticAnalyzer:
             ),
         }
 
-    def analyze_logs(self, log_lines: Iterable[str]) -> List[DiagnosticResult]:
+    def analyze_logs(self, log_lines: Iterable[str]) -> list[DiagnosticResult]:
         counts: dict[str, int] = {k: 0 for k in self.patterns}
         for line in log_lines:
             for key, pattern in self.patterns.items():
                 if pattern.search(line):
                     counts[key] += 1
-        results: List[DiagnosticResult] = []
+        results: list[DiagnosticResult] = []
         for key, count in counts.items():
             if count:
                 msg, rec = self._messages(key)
@@ -68,8 +68,8 @@ class DiagnosticAnalyzer:
         }
         return mapping.get(key, (key, ""))
 
-    def check_connectivity(self, port: int) -> List[DiagnosticResult]:
-        results: List[DiagnosticResult] = []
+    def check_connectivity(self, port: int) -> list[DiagnosticResult]:
+        results: list[DiagnosticResult] = []
         proxies = {
             "http": f"http://localhost:{port}",
             "https": f"http://localhost:{port}",
@@ -112,10 +112,10 @@ class DiagnosticAnalyzer:
             )
         return results
 
-    async def check_connectivity_async(self, port: int) -> List[DiagnosticResult]:
+    async def check_connectivity_async(self, port: int) -> list[DiagnosticResult]:
         import asyncio
 
-        results: List[DiagnosticResult] = []
+        results: list[DiagnosticResult] = []
         proxies = {
             "http": f"http://localhost:{port}",
             "https": f"http://localhost:{port}",
@@ -164,7 +164,7 @@ class DiagnosticAnalyzer:
 
     def analyze(
         self, log_lines: Iterable[str], port: int | None = None
-    ) -> List[DiagnosticResult]:
+    ) -> list[DiagnosticResult]:
         results = self.analyze_logs(log_lines)
         if port:
             results.extend(self.check_connectivity(port))
@@ -172,7 +172,7 @@ class DiagnosticAnalyzer:
 
     async def analyze_async(
         self, log_lines: Iterable[str], port: int | None = None
-    ) -> List[DiagnosticResult]:
+    ) -> list[DiagnosticResult]:
         results = self.analyze_logs(log_lines)
         if port:
             results.extend(await self.check_connectivity_async(port))

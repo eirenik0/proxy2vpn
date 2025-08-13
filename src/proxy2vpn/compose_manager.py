@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 import os
 import shutil
 
@@ -78,11 +78,11 @@ class ComposeManager:
             yaml.dump(data, f)
 
     @property
-    def config(self) -> Dict[str, Any]:
+    def config(self) -> dict[str, Any]:
         """Return global configuration stored under x-config."""
         return self.data.get("x-config", {})
 
-    def list_services(self) -> List[VPNService]:
+    def list_services(self) -> list[VPNService]:
         services = self.data.get("services", {})
         return [
             VPNService.from_compose_service(name, svc) for name, svc in services.items()
@@ -136,8 +136,8 @@ class ComposeManager:
     # Profile management
     # ------------------------------------------------------------------
 
-    def list_profiles(self) -> List[Profile]:
-        profiles: List[Profile] = []
+    def list_profiles(self) -> list[Profile]:
+        profiles: list[Profile] = []
         for key, value in self.data.items():
             if key.startswith("x-vpn-base-"):
                 name = key[len("x-vpn-base-") :]

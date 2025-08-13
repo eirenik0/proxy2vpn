@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 
 class JsonFormatter(logging.Formatter):
     """Format logs as single line JSON."""
 
     def format(self, record: logging.LogRecord) -> str:  # pragma: no cover - trivial
-        log_record: Dict[str, Any] = {
+        log_record: dict[str, Any] = {
             "level": record.levelname,
             "message": record.getMessage(),
             "logger": record.name,
