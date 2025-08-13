@@ -32,9 +32,9 @@ class ComposeManager:
         self.compose_path = compose_path
         self.yaml = YAML()
         self.lock = FileLock(str(compose_path) + ".lock")
-        self.data: Dict[str, Any] = self._load()
+        self.data: CommentedMap = self._load()
 
-    def _load(self) -> Dict[str, Any]:
+    def _load(self) -> CommentedMap:
         if not self.compose_path.exists():
             raise FileNotFoundError(
                 f"compose file '{self.compose_path}' not found. Run 'proxy2vpn system init' to create it."
@@ -44,8 +44,11 @@ class ComposeManager:
             try:
                 with self.compose_path.open("r", encoding="utf-8") as f:
                     data = self.yaml.load(f)
-                if not isinstance(data, dict):
-                    raise ValueError("compose file does not contain a mapping")
+                    if not isinstance(data, dict):
+                        raise ValueError("compose file does not contain a mapping")
+                    # Ensure we have a CommentedMap for proper YAML manipulation
+                    if not isinstance(data, CommentedMap):
+                        data = CommentedMap(data)
                 # basic validation: ensure YAML structure can be parsed
                 validate_compose(self.compose_path)
                 return data
