@@ -17,5 +17,6 @@ __all__ = [
     "config",
     "server_manager",
     "control_client",
+    "http_client",
     "__version__",
 ]
