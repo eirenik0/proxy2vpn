@@ -343,19 +343,16 @@ class FleetManager:
                 raise
 
     async def _create_service_definitions(
-        self, services: list[ServicePlan], force: bool
-    ) -> list[str]:
-        """Create service definitions in compose file and return added service names."""
+        self, services: list[ServicePlan], force: bool, added_services: list[str]
+    ) -> None:
+        """Create service definitions in compose file and update added_services list."""
         await asyncio.to_thread(ensure_network, force)
-        added_services: list[str] = []
 
         for service_plan in services:
             vpn_service = self._create_service_from_plan(service_plan)
             self._add_service_with_force_handling(vpn_service, force)
             added_services.append(service_plan.name)
             console.print(f"[green]✓[/green] Created service: {service_plan.name}")
-
-        return added_services
 
     async def _deploy_containers(
         self, added_services: list[str], parallel: bool, force: bool
@@ -425,8 +422,8 @@ class FleetManager:
 
         try:
             # Create service definitions
-            added_services = await self._create_service_definitions(
-                valid_services, force
+            await self._create_service_definitions(
+                valid_services, force, added_services
             )
 
             # Deploy containers
