@@ -19,6 +19,7 @@ from .compose_manager import ComposeManager
 from .models import Profile, VPNService
 from .server_manager import ServerManager
 from .compose_validator import validate_compose
+from . import control_client
 from .utils import abort
 from .validators import sanitize_name, sanitize_path, validate_port
 from .logging_utils import configure_logging, get_logger, set_log_level
@@ -40,6 +41,21 @@ app.add_typer(fleet_app, name="fleet")
 logger = get_logger(__name__)
 
 console = Console()
+
+
+def _service_control_base_url(ctx: typer.Context, name: str) -> str:
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = ComposeManager(compose_file)
+    try:
+        svc = manager.get_service(name)
+    except KeyError:
+        abort(f"Service '{name}' not found")
+    if not svc.control_port:
+        abort(
+            f"Service '{name}' has no control port published",
+            "Expose port 8000 and set label 'vpn.control_port'",
+        )
+    return f"http://localhost:{svc.control_port}/v1"
 
 
 @app.callback(invoke_without_command=True)
@@ -693,6 +709,57 @@ async def vpn_export_proxies(
     console.print(
         f"[green]\u2713[/green] Exported {len(proxies)} proxies to '{output}'."
     )
+
+
+@vpn_app.command("status")
+@run_async
+async def vpn_status(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show control server status for SERVICE.
+
+    Requires the service to publish port 8000 and set the `vpn.control_port` label.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+    data = await control_client.get_status(base_url)
+    console.print_json(data=data)
+
+
+@vpn_app.command("public-ip")
+@run_async
+async def vpn_public_ip(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show public IP reported by the control API for SERVICE.
+
+    Requires the service to publish port 8000 and set the `vpn.control_port` label.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+    ip = await control_client.get_public_ip(base_url)
+    console.print(ip)
+
+
+@vpn_app.command("restart-tunnel")
+@run_async
+async def vpn_restart_tunnel(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Restart the VPN tunnel for SERVICE via the control API.
+
+    Requires the service to publish port 8000 and set the `vpn.control_port` label.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+    await control_client.restart_tunnel(base_url)
+    console.print("[green]\u2713[/green] Tunnel restart requested.")
 
 
 # ---------------------------------------------------------------------------

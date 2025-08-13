@@ -48,3 +48,10 @@ async def get_public_ip(base_url: str) -> str:
     if isinstance(data, dict):
         return data.get("ip", "")
     return str(data)
+
+
+async def restart_tunnel(base_url: str) -> dict[str, Any]:
+    """Restart the VPN tunnel through the control API."""
+    url = _build_url(base_url, "openvpn/status")
+    payload = {"status": "restarted"}
+    return await _request("put", url, "Failed to restart tunnel", json=payload)
