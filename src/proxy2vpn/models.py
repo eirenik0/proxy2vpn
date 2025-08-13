@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
 
 from .validators import sanitize_name, sanitize_path, validate_port
 
@@ -14,8 +13,8 @@ class VPNService:
     provider: str
     profile: str
     location: str
-    environment: Dict[str, str]
-    labels: Dict[str, str]
+    environment: dict[str, str]
+    labels: dict[str, str]
     control_port: int = 0
 
     def __post_init__(self) -> None:
@@ -24,7 +23,7 @@ class VPNService:
         self.control_port = validate_port(self.control_port)
 
     @classmethod
-    def from_compose_service(cls, name: str, service_def: Dict) -> "VPNService":
+    def from_compose_service(cls, name: str, service_def: dict) -> "VPNService":
         ports = service_def.get("ports", [])
         host_port = 0
         control_port = 0
@@ -46,7 +45,7 @@ class VPNService:
             elif container_port == "8000" and control_port == 0:
                 control_port = host
         env_list = service_def.get("environment", [])
-        env_dict: Dict[str, str] = {}
+        env_dict: dict[str, str] = {}
         for item in env_list:
             if isinstance(item, str) and "=" in item:
                 k, v = item.split("=", 1)
@@ -66,7 +65,7 @@ class VPNService:
             labels=labels,
         )
 
-    def to_compose_service(self) -> Dict:
+    def to_compose_service(self) -> dict:
         env_list = [f"{k}={v}" for k, v in self.environment.items()]
         ports = [f"{self.port}:8888/tcp"]
         if self.control_port:
@@ -96,8 +95,8 @@ class Profile:
     name: str
     env_file: str
     image: str = "qmcgaw/gluetun"
-    cap_add: List[str] = field(default_factory=lambda: ["NET_ADMIN"])
-    devices: List[str] = field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
+    cap_add: list[str] = field(default_factory=lambda: ["NET_ADMIN"])
+    devices: list[str] = field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
 
     def __post_init__(self) -> None:
         self.name = sanitize_name(self.name)
@@ -105,7 +104,7 @@ class Profile:
         self.env_file = str(sanitize_path(Path(self.env_file)))
 
     @classmethod
-    def from_anchor(cls, name: str, data: Dict) -> "Profile":
+    def from_anchor(cls, name: str, data: dict) -> "Profile":
         """Create a :class:`Profile` from an anchor section."""
 
         env_files = data.get("env_file", [])
@@ -118,7 +117,7 @@ class Profile:
             devices=list(data.get("devices", [])),
         )
 
-    def to_anchor(self) -> Dict:
+    def to_anchor(self) -> dict:
         """Return a dictionary representing the profile configuration."""
 
         return {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import difflib
 import asyncio
 import functools
-from typing import Any, Callable, Coroutine, List, Optional, TypeVar
+from typing import Any, Callable, Coroutine, TypeVar
 
 from click.exceptions import UsageError
 from rich.console import Console
@@ -203,7 +203,7 @@ class HelpfulTyper(typer.Typer):
         possibilities = exc.ctx.command.list_commands(exc.ctx) if exc.ctx else []
 
         # Get close matches using different strategies
-        matches: List[str] = []
+        matches: list[str] = []
 
         # 1. Standard fuzzy matching
         fuzzy_matches = difflib.get_close_matches(bad_cmd, possibilities, cutoff=0.4)
@@ -300,7 +300,7 @@ class HelpfulTyper(typer.Typer):
                 return doc.strip().split("\n")[0]
         return ""
 
-    def _find_typo_matches(self, bad_cmd: str, possibilities: List[str]) -> List[str]:
+    def _find_typo_matches(self, bad_cmd: str, possibilities: list[str]) -> list[str]:
         """Find commands that might be typos of the bad command."""
         typo_matches = []
         bad_lower = bad_cmd.lower()
@@ -332,7 +332,7 @@ class HelpfulTyper(typer.Typer):
 
         return typo_matches
 
-    def _get_example_commands(self, command_path: str, bad_cmd: str) -> List[str]:
+    def _get_example_commands(self, command_path: str, bad_cmd: str) -> list[str]:
         """Get example commands based on context."""
         examples = []
 
@@ -365,7 +365,7 @@ class HelpfulTyper(typer.Typer):
         # Limit to 3 most relevant examples
         return examples[:3]
 
-    def _get_documentation_link(self, command_path: str) -> Optional[str]:
+    def _get_documentation_link(self, command_path: str) -> str | None:
         """Get documentation link for the command."""
         # This could be configured per-project
         # For now, return GitHub repository link
@@ -386,11 +386,11 @@ class HelpfulTyper(typer.Typer):
 
         return base_url
 
-    def _all_command_paths(self) -> List[str]:
+    def _all_command_paths(self) -> list[str]:
         """Return all command and subcommand paths for this app."""
 
-        def walk(app: typer.Typer, prefix: str = "") -> List[str]:
-            items: List[str] = []
+        def walk(app: typer.Typer, prefix: str = "") -> list[str]:
+            items: list[str] = []
             for cmd in app.registered_commands:
                 items.append(f"{prefix}{cmd.name}".strip())
             for grp in app.registered_groups:

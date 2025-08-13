@@ -5,7 +5,6 @@ import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 
 from rich.console import Console
 
@@ -25,8 +24,8 @@ class ServerAvailability:
     provider: str
     is_available: bool
     tested_at: datetime
-    response_time: Optional[float] = None
-    error_message: Optional[str] = None
+    response_time: float | None = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -54,7 +53,7 @@ class ServiceRotation:
 class RotationPlan:
     """Complete rotation plan"""
 
-    rotations: List[ServiceRotation] = field(default_factory=list)
+    rotations: list[ServiceRotation] = field(default_factory=list)
 
     def add_rotation(
         self, service_name: str, old_location: str, new_location: str, reason: str
@@ -76,7 +75,7 @@ class RotationResult:
 
     rotated: int
     failed: int
-    services: List[str]
+    services: list[str]
     dry_run: bool = False
 
 
@@ -86,9 +85,9 @@ class ServerMonitor:
     def __init__(self, fleet_manager, http_client: HTTPClient | None = None):
         self.fleet_manager = fleet_manager
         self.http_client = http_client or HTTPClient(HTTPClientConfig(base_url=""))
-        self.availability_cache: Dict[str, ServerAvailability] = {}
-        self.rotation_history: List[RotationRecord] = []
-        self.failed_servers: Dict[str, List[datetime]] = {}  # Track failure history
+        self.availability_cache: dict[str, ServerAvailability] = {}
+        self.rotation_history: list[RotationRecord] = []
+        self.failed_servers: dict[str, list[datetime]] = {}  # Track failure history
 
     async def check_service_health(
         self, service: VPNService, timeout: int = 30
@@ -177,7 +176,7 @@ class ServerMonitor:
 
         return len(recent_failures) > 0
 
-    async def check_fleet_health(self) -> Dict[str, bool]:
+    async def check_fleet_health(self) -> dict[str, bool]:
         """Check health of all VPN services in fleet"""
         services = self.fleet_manager.compose_manager.list_services()
         vpn_services = [s for s in services if hasattr(s, "provider")]
@@ -289,7 +288,7 @@ class ServerMonitor:
         )
 
     async def _generate_rotation_plan(
-        self, failed_services: List[VPNService]
+        self, failed_services: list[VPNService]
     ) -> RotationPlan:
         """Generate an intelligent rotation plan for failed services"""
         plan = RotationPlan()
@@ -400,12 +399,12 @@ class ServerMonitor:
 
         console.print(table)
 
-    def get_rotation_history(self, hours: int = 24) -> List[RotationRecord]:
+    def get_rotation_history(self, hours: int = 24) -> list[RotationRecord]:
         """Get rotation history for specified time period"""
         cutoff = datetime.now() - timedelta(hours=hours)
         return [record for record in self.rotation_history if record.timestamp > cutoff]
 
-    def get_server_failure_stats(self) -> Dict[str, int]:
+    def get_server_failure_stats(self) -> dict[str, int]:
         """Get failure statistics by server location"""
         stats = {}
         for location, failures in self.failed_servers.items():

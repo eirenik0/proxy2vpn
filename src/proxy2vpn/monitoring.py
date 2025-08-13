@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 import psutil
 
@@ -12,10 +12,10 @@ from .logging_utils import get_logger
 logger = get_logger(__name__)
 
 
-def monitor_vpn_health() -> List[Dict[str, Any]]:
+def monitor_vpn_health() -> list[dict[str, Any]]:
     """Return diagnostic details for all VPN containers."""
 
-    diagnostics: List[Dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
     try:
         containers = get_vpn_containers(all=False)
     except RuntimeError:
@@ -37,7 +37,7 @@ def monitor_vpn_health() -> List[Dict[str, Any]]:
     return diagnostics
 
 
-def collect_system_metrics() -> Dict[str, float]:
+def collect_system_metrics() -> dict[str, float]:
     """Return basic CPU and memory metrics for the host system."""
     metrics = {
         "cpu_percent": psutil.cpu_percent(interval=None),

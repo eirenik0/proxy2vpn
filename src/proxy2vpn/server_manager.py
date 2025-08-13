@@ -6,7 +6,6 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Dict, List
 from urllib.parse import urlparse
 
 from . import config
@@ -26,7 +25,7 @@ class ServerManager:
         self.cache_dir = cache_dir or config.CACHE_DIR
         self.cache_file = self.cache_dir / "servers.json"
         self.ttl = ttl
-        self.data: Dict[str, Dict] | None = None
+        self.data: dict[str, dict] | None = None
 
     # ------------------------------------------------------------------
     # Fetching and caching
@@ -38,7 +37,7 @@ class ServerManager:
         age = time.time() - self.cache_file.stat().st_mtime
         return age < self.ttl
 
-    async def _download_servers(self, verify: bool) -> Dict[str, Dict]:
+    async def _download_servers(self, verify: bool) -> dict[str, dict]:
         parsed = urlparse(config.SERVER_LIST_URL)
         cfg = HTTPClientConfig(
             base_url=f"{parsed.scheme}://{parsed.netloc}",
@@ -54,7 +53,7 @@ class ServerManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file.write_text(json.dumps(data), encoding="utf-8")
 
-    def update_servers(self, verify: bool = True) -> Dict[str, Dict]:
+    def update_servers(self, verify: bool = True) -> dict[str, dict]:
         """Fetch the server list, using the cache when possible."""
 
         if not self._is_cache_valid():
@@ -66,7 +65,7 @@ class ServerManager:
             self.data = json.load(f)
         return self.data
 
-    async def fetch_server_list_async(self, verify: bool = True) -> Dict[str, Dict]:
+    async def fetch_server_list_async(self, verify: bool = True) -> dict[str, dict]:
         """Fetch and cache the VPN server list asynchronously."""
 
         if not self._is_cache_valid():
@@ -82,11 +81,11 @@ class ServerManager:
     # Listing helpers
     # ------------------------------------------------------------------
 
-    def list_providers(self) -> List[str]:
+    def list_providers(self) -> list[str]:
         data = self.data or self.update_servers()
         return sorted(k for k in data.keys() if k != "version")
 
-    def list_countries(self, provider: str) -> List[str]:
+    def list_countries(self, provider: str) -> list[str]:
         """Return available countries for PROVIDER."""
 
         data = self.data or self.update_servers()
@@ -95,7 +94,7 @@ class ServerManager:
         countries = {srv.get("country") for srv in servers if srv.get("country")}
         return sorted(countries)
 
-    def list_cities(self, provider: str, country: str) -> List[str]:
+    def list_cities(self, provider: str, country: str) -> list[str]:
         """Return available cities for PROVIDER in COUNTRY."""
 
         data = self.data or self.update_servers()

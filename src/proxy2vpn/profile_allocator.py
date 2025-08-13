@@ -1,7 +1,6 @@
 """Profile allocation system for managing account slots across VPN services."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from rich.console import Console
 
@@ -19,7 +18,7 @@ class ProfileSlot:
     name: str
     total_slots: int
     used_slots: int = 0
-    services: List[str] = field(default_factory=list)
+    services: list[str] = field(default_factory=list)
 
     @property
     def available_slots(self) -> int:
@@ -42,10 +41,10 @@ class ProfileAllocator:
     """Manages automatic profile allocation with slot tracking"""
 
     def __init__(self):
-        self.slots: Dict[str, ProfileSlot] = {}
-        self._last_allocated: Optional[str] = None
+        self.slots: dict[str, ProfileSlot] = {}
+        self._last_allocated: str | None = None
 
-    def setup_profiles(self, profile_config: Dict[str, int]):
+    def setup_profiles(self, profile_config: dict[str, int]):
         """Initialize profile slots from config"""
         self.slots = {
             name: ProfileSlot(name=name, total_slots=slots)
@@ -59,8 +58,8 @@ class ProfileAllocator:
         )
 
     def get_next_available(
-        self, profile_config: Optional[Dict[str, int]] = None
-    ) -> Optional[ProfileSlot]:
+        self, profile_config: dict[str, int] | None = None
+    ) -> ProfileSlot | None:
         """Get next available profile slot using round-robin with load balancing"""
         if profile_config and not self.slots:
             self.setup_profiles(profile_config)
@@ -138,7 +137,7 @@ class ProfileAllocator:
         logger.warning(f"Service {service_name} not found in any profile slot")
         return False
 
-    def get_allocation_status(self) -> Dict[str, Dict]:
+    def get_allocation_status(self) -> dict[str, dict]:
         """Get current allocation status for all profiles"""
         return {
             name: {
@@ -151,14 +150,14 @@ class ProfileAllocator:
             for name, slot in self.slots.items()
         }
 
-    def get_profile_for_service(self, service_name: str) -> Optional[str]:
+    def get_profile_for_service(self, service_name: str) -> str | None:
         """Get profile name that service is allocated to"""
         for profile_name, slot in self.slots.items():
             if service_name in slot.services:
                 return profile_name
         return None
 
-    def validate_allocation(self) -> List[str]:
+    def validate_allocation(self) -> list[str]:
         """Validate current allocation state and return issues"""
         issues = []
 
@@ -185,7 +184,7 @@ class ProfileAllocator:
 
         return issues
 
-    def rebalance_profiles(self) -> Dict[str, List[str]]:
+    def rebalance_profiles(self) -> dict[str, list[str]]:
         """Suggest rebalancing of services across profiles"""
         suggestions = {}
 
@@ -232,7 +231,7 @@ class ProfileAllocator:
 
         return suggestions
 
-    def get_summary(self) -> Dict:
+    def get_summary(self) -> dict:
         """Get summary statistics"""
         if not self.slots:
             return {

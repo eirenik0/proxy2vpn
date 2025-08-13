@@ -2,7 +2,6 @@
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from rich.console import Console
 
@@ -21,11 +20,11 @@ class FleetConfig:
     """Configuration for bulk VPN fleet deployment"""
 
     provider: str
-    countries: List[str]  # ["Germany", "France", "Netherlands"]
-    profiles: Dict[str, int]  # {"acc1": 2, "acc2": 8} - profile slots
+    countries: list[str]  # ["Germany", "France", "Netherlands"]
+    profiles: dict[str, int]  # {"acc1": 2, "acc2": 8} - profile slots
     port_start: int = 20000
     naming_template: str = "{provider}-{country}-{city}"
-    max_per_profile: Optional[int] = None  # Limit services per profile
+    max_per_profile: int | None = None  # Limit services per profile
     unique_ips: bool = False  # Ensure unique city/IP combinations
 
 
@@ -48,10 +47,10 @@ class DeploymentPlan:
     """Complete deployment plan for fleet"""
 
     provider: str
-    services: List[ServicePlan] = field(default_factory=list)
+    services: list[ServicePlan] = field(default_factory=list)
 
     @property
-    def service_names(self) -> List[str]:
+    def service_names(self) -> list[str]:
         return [s.name for s in self.services]
 
     def add_service(
@@ -79,7 +78,7 @@ class DeploymentPlan:
             )
         )
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
         return {
             "provider": self.provider,
@@ -99,7 +98,7 @@ class DeploymentPlan:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "DeploymentPlan":
+    def from_dict(cls, data: dict) -> "DeploymentPlan":
         """Create from dictionary"""
         plan = cls(provider=data["provider"])
         for service_data in data["services"]:
@@ -113,8 +112,8 @@ class DeploymentResult:
 
     deployed: int
     failed: int
-    services: List[str]
-    errors: List[str] = field(default_factory=list)
+    services: list[str]
+    errors: list[str] = field(default_factory=list)
 
 
 class FleetManager:
@@ -257,14 +256,14 @@ class FleetManager:
         return plan
 
     def _validate_service_locations(
-        self, services: List[ServicePlan]
-    ) -> tuple[List[ServicePlan], List[str]]:
+        self, services: list[ServicePlan]
+    ) -> tuple[list[ServicePlan], list[str]]:
         """Validate that each service's target location exists for the provider.
 
         Returns tuple of (valid_services, errors).
         """
-        valid_services: List[ServicePlan] = []
-        errors: List[str] = []
+        valid_services: list[ServicePlan] = []
+        errors: list[str] = []
 
         for svc in services:
             try:
@@ -294,7 +293,7 @@ class FleetManager:
         """Execute bulk deployment with server validation"""
 
         skipped = 0
-        errors: List[str] = []
+        errors: list[str] = []
 
         if validate_servers:
             console.print("[yellow]🔍 Validating server availability...[/yellow]")
@@ -321,7 +320,7 @@ class FleetManager:
         )
 
         deployed = 0
-        added_services: List[str] = []
+        added_services: list[str] = []
 
         try:
             await asyncio.to_thread(ensure_network, force)
@@ -414,7 +413,7 @@ class FleetManager:
             deployed=deployed, failed=failed, services=plan.service_names, errors=errors
         )
 
-    async def _start_services_parallel(self, service_names: List[str], force: bool):
+    async def _start_services_parallel(self, service_names: list[str], force: bool):
         """Start services in parallel with limited concurrency"""
         from docker.errors import NotFound
         from .docker_ops import (
@@ -459,7 +458,7 @@ class FleetManager:
         tasks = [start_service(name) for name in service_names]
         await asyncio.gather(*tasks)
 
-    async def _start_services_sequential(self, service_names: List[str], force: bool):
+    async def _start_services_sequential(self, service_names: list[str], force: bool):
         """Start services one by one"""
         from docker.errors import NotFound
         from .docker_ops import (
@@ -506,7 +505,7 @@ class FleetManager:
     def _rebuild_profile_allocator(self) -> None:
         """Reconstruct allocator state from compose services."""
         services = self.compose_manager.list_services()
-        profile_counts: Dict[str, int] = {}
+        profile_counts: dict[str, int] = {}
 
         for svc in services:
             if svc.profile:
@@ -542,16 +541,16 @@ class FleetManager:
 
         return name.replace("-", " ") or "unknown"
 
-    def get_fleet_status(self) -> Dict:
+    def get_fleet_status(self) -> dict:
         """Get current fleet status and allocation"""
         self._rebuild_profile_allocator()
 
         services = self.compose_manager.list_services()
         allocation_status = self.profile_allocator.get_allocation_status()
 
-        fleet_services: Dict[str, List[VPNService]] = {}
-        country_counts: Dict[str, int] = {}
-        profile_counts: Dict[str, int] = {
+        fleet_services: dict[str, list[VPNService]] = {}
+        country_counts: dict[str, int] = {}
+        profile_counts: dict[str, int] = {
             name: data["used_slots"] for name, data in allocation_status.items()
         }
 
