@@ -167,7 +167,7 @@ def test_deploy_fleet_rolls_back_on_error(monkeypatch, fleet_manager, capsys):
     )
     monkeypatch.setattr("proxy2vpn.fleet_manager.stop_container", fake_stop)
     monkeypatch.setattr("proxy2vpn.fleet_manager.remove_container", fake_remove)
-    monkeypatch.setattr("proxy2vpn.fleet_manager.ensure_network", lambda recreate: None)
+    monkeypatch.setattr("proxy2vpn.fleet_manager.ensure_network", lambda force: None)
 
     result = asyncio.run(
         fleet_manager.deploy_fleet(plan, validate_servers=False, parallel=False)
@@ -218,12 +218,12 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
     def fake_add_service(service):
         added.append(service.name)
 
-    async def fake_start(service_names):
+    async def fake_start(service_names, force):
         start_calls.extend(service_names)
 
     monkeypatch.setattr(fleet_manager.compose_manager, "add_service", fake_add_service)
     monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
-    monkeypatch.setattr("proxy2vpn.fleet_manager.ensure_network", lambda recreate: None)
+    monkeypatch.setattr("proxy2vpn.fleet_manager.ensure_network", lambda force: None)
 
     result = asyncio.run(
         fleet_manager.deploy_fleet(plan, validate_servers=True, parallel=False)
@@ -278,7 +278,7 @@ def test_start_services_sequential_passes_service_name(monkeypatch, tmp_path):
     monkeypatch.setattr("proxy2vpn.docker_ops.start_container", fake_start)
     monkeypatch.setattr("proxy2vpn.docker_ops.recreate_vpn_container", fake_recreate)
 
-    asyncio.run(fm._start_services_sequential([svc.name]))
+    asyncio.run(fm._start_services_sequential([svc.name], True))
 
     assert start_calls == [svc.name]
 

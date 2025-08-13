@@ -263,6 +263,12 @@ def test_ensure_network_recreates(monkeypatch):
     removed_created = {"removed": False, "created": False}
 
     class Network:
+        def __init__(self):
+            self.containers = []
+
+        def reload(self):
+            pass
+
         def remove(self):
             removed_created["removed"] = True
 
@@ -279,3 +285,50 @@ def test_ensure_network_recreates(monkeypatch):
     monkeypatch.setattr(docker_ops, "_client", lambda timeout=10: Client())
     docker_ops.ensure_network(recreate=True)
     assert removed_created["removed"] and removed_created["created"]
+
+
+def test_ensure_network_disconnects_containers_before_removal(monkeypatch):
+    """Test that containers are disconnected before network removal."""
+    operations = {
+        "containers_disconnected": [],
+        "network_removed": False,
+        "network_created": False,
+    }
+
+    class MockContainer:
+        def __init__(self, name):
+            self.name = name
+
+    class Network:
+        def __init__(self):
+            # Simulate having connected containers
+            self.containers = [MockContainer("container1"), MockContainer("container2")]
+
+        def reload(self):
+            pass
+
+        def disconnect(self, container, force=False):
+            operations["containers_disconnected"].append(container.name)
+
+        def remove(self):
+            # Should only succeed after containers are disconnected
+            operations["network_removed"] = True
+
+    class Networks:
+        def list(self, names):
+            return [Network()]
+
+        def create(self, name, driver):
+            operations["network_created"] = True
+
+    class Client:
+        networks = Networks()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda timeout=10: Client())
+    docker_ops.ensure_network(recreate=True)
+
+    # Verify containers were disconnected first
+    assert operations["containers_disconnected"] == ["container1", "container2"]
+    # Verify network was removed and recreated
+    assert operations["network_removed"]
+    assert operations["network_created"]

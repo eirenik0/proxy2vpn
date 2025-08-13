@@ -109,8 +109,44 @@ def ensure_network(recreate: bool = False) -> None:
     if networks:
         if not recreate:
             return
+        network = networks[0]
         try:
-            networks[0].remove()
+            # Disconnect all containers before removing the network
+            network.reload()  # Refresh network data to get current containers
+            connected_containers = list(network.containers)
+            if connected_containers:
+                logger.info(
+                    "disconnecting_containers_from_network",
+                    extra={
+                        "network_name": network_name,
+                        "container_count": len(connected_containers),
+                    },
+                )
+                for container in connected_containers:
+                    try:
+                        network.disconnect(container, force=True)
+                        logger.debug(
+                            "container_disconnected",
+                            extra={
+                                "network_name": network_name,
+                                "container_name": container.name,
+                            },
+                        )
+                    except DockerException as disconnect_exc:
+                        logger.warning(
+                            "container_disconnect_failed",
+                            extra={
+                                "network_name": network_name,
+                                "container_name": getattr(container, "name", "unknown"),
+                                "error": str(disconnect_exc),
+                            },
+                        )
+
+            # Now remove the network
+            network.remove()
+            logger.info(
+                "network_removed_successfully", extra={"network_name": network_name}
+            )
         except DockerException as exc:
             logger.error(
                 "network_remove_failed",

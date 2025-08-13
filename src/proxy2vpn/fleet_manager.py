@@ -289,7 +289,7 @@ class FleetManager:
         plan: DeploymentPlan,
         validate_servers: bool = True,
         parallel: bool = True,
-        recreate_network: bool = False,
+        force: bool = False,
     ) -> DeploymentResult:
         """Execute bulk deployment with server validation"""
 
@@ -324,7 +324,7 @@ class FleetManager:
         added_services: List[str] = []
 
         try:
-            await asyncio.to_thread(ensure_network, recreate_network)
+            await asyncio.to_thread(ensure_network, force)
             # Create services in compose file
             for service_plan in plan.services:
                 # Create Docker labels for service identification and metadata
@@ -354,15 +354,24 @@ class FleetManager:
                     labels=labels,
                 )
 
-                self.compose_manager.add_service(vpn_service)
+                # Handle existing services when force flag is used
+                try:
+                    self.compose_manager.add_service(vpn_service)
+                except ValueError as e:
+                    if "already exists" in str(e) and force:
+                        # Remove existing service and add new one when force=True
+                        self.compose_manager.remove_service(service_plan.name)
+                        self.compose_manager.add_service(vpn_service)
+                    else:
+                        raise
                 added_services.append(service_plan.name)
                 console.print(f"[green]✓[/green] Created service: {service_plan.name}")
 
             # Start containers
             if parallel:
-                await self._start_services_parallel(added_services)
+                await self._start_services_parallel(added_services, force)
             else:
-                await self._start_services_sequential(added_services)
+                await self._start_services_sequential(added_services, force)
 
             deployed = len(added_services)
 
@@ -405,9 +414,14 @@ class FleetManager:
             deployed=deployed, failed=failed, services=plan.service_names, errors=errors
         )
 
-    async def _start_services_parallel(self, service_names: List[str]):
+    async def _start_services_parallel(self, service_names: List[str], force: bool):
         """Start services in parallel with limited concurrency"""
-        from .docker_ops import recreate_vpn_container, start_container
+        from docker.errors import NotFound
+        from .docker_ops import (
+            create_vpn_container,
+            recreate_vpn_container,
+            start_container,
+        )
 
         semaphore = asyncio.Semaphore(5)  # Max 5 concurrent starts
 
@@ -421,8 +435,19 @@ class FleetManager:
                     profile = self.compose_manager.get_profile(service.profile)
 
                     # Create and start container
-                    await asyncio.to_thread(recreate_vpn_container, service, profile)
-                    await asyncio.to_thread(start_container, service_name)
+                    if force:
+                        await asyncio.to_thread(
+                            recreate_vpn_container, service, profile
+                        )
+                        await asyncio.to_thread(start_container, service_name)
+                    else:
+                        try:
+                            await asyncio.to_thread(start_container, service_name)
+                        except NotFound:
+                            await asyncio.to_thread(
+                                create_vpn_container, service, profile
+                            )
+                            await asyncio.to_thread(start_container, service_name)
 
                     console.print(f"[green]✅[/green] Started {service_name}")
 
@@ -434,9 +459,14 @@ class FleetManager:
         tasks = [start_service(name) for name in service_names]
         await asyncio.gather(*tasks)
 
-    async def _start_services_sequential(self, service_names: List[str]):
+    async def _start_services_sequential(self, service_names: List[str], force: bool):
         """Start services one by one"""
-        from .docker_ops import recreate_vpn_container, start_container
+        from docker.errors import NotFound
+        from .docker_ops import (
+            create_vpn_container,
+            recreate_vpn_container,
+            start_container,
+        )
 
         for service_name in service_names:
             try:
@@ -447,8 +477,15 @@ class FleetManager:
                 profile = self.compose_manager.get_profile(service.profile)
 
                 # Create and start container
-                await asyncio.to_thread(recreate_vpn_container, service, profile)
-                await asyncio.to_thread(start_container, service_name)
+                if force:
+                    await asyncio.to_thread(recreate_vpn_container, service, profile)
+                    await asyncio.to_thread(start_container, service_name)
+                else:
+                    try:
+                        await asyncio.to_thread(start_container, service_name)
+                    except NotFound:
+                        await asyncio.to_thread(create_vpn_container, service, profile)
+                        await asyncio.to_thread(start_container, service_name)
 
                 console.print(f"[green]✅[/green] Started {service_name}")
 
