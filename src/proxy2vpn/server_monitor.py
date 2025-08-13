@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-import requests
 from rich.console import Console
 
+from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError
 from .logging_utils import get_logger
 from .models import VPNService
 
@@ -83,8 +83,9 @@ class RotationResult:
 class ServerMonitor:
     """Monitors server availability and manages rotation"""
 
-    def __init__(self, fleet_manager):
+    def __init__(self, fleet_manager, http_client: HTTPClient | None = None):
         self.fleet_manager = fleet_manager
+        self.http_client = http_client or HTTPClient(HTTPClientConfig(base_url=""))
         self.availability_cache: Dict[str, ServerAvailability] = {}
         self.rotation_history: List[RotationRecord] = []
         self.failed_servers: Dict[str, List[datetime]] = {}  # Track failure history
@@ -120,39 +121,26 @@ class ServerMonitor:
             proxies = _get_authenticated_proxy_url(container, str(service.port))
             test_url = "http://httpbin.org/ip"
 
-            start_time = time.time()
-            response = requests.get(
-                test_url,
-                proxies=proxies,
-                timeout=timeout,
+            start_time = time.perf_counter()
+            await self.http_client.get(test_url, proxy=proxies["http"], timeout=timeout)
+            response_time = time.perf_counter() - start_time
+
+            # Update availability cache
+            self.availability_cache[service.location] = ServerAvailability(
+                location=service.location,
+                provider=service.provider,
+                is_available=True,
+                tested_at=datetime.now(),
+                response_time=response_time,
             )
-            response_time = time.time() - start_time
+            return True
 
-            if response.status_code == 200:
-                # Update availability cache
-                self.availability_cache[service.location] = ServerAvailability(
-                    location=service.location,
-                    provider=service.provider,
-                    is_available=True,
-                    tested_at=datetime.now(),
-                    response_time=response_time,
-                )
-                return True
-            else:
-                logger.warning(
-                    f"Proxy test failed for {service.name}: HTTP {response.status_code}"
-                )
-                console.print(
-                    f"[yellow]⚠️ Proxy test failed:[/yellow] {service.name} (HTTP {response.status_code})"
-                )
-                return False
-
-        except requests.exceptions.Timeout:
+        except asyncio.TimeoutError:
             logger.warning(f"Timeout testing service {service.name}")
             console.print(f"[yellow]⏱️ Timeout testing service:[/yellow] {service.name}")
             self._record_failure(service.location)
             return False
-        except requests.exceptions.RequestException as e:
+        except HTTPClientError as e:
             logger.error(f"Network error testing service {service.name}: {e}")
             self._record_failure(service.location)
             return False
