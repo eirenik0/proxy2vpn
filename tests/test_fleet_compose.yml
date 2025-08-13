@@ -1,0 +1,58 @@
+# Fleet test compose file with multiple profiles
+x-config:
+  health_check_interval: "5"
+  auto_restart: "true"
+
+x-vpn-base-test: &vpn-base-test
+  image: qmcgaw/gluetun
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  env_file:
+    - env.test
+
+x-vpn-base-acc1: &vpn-base-acc1
+  image: qmcgaw/gluetun
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  env_file:
+    - env.acc1
+
+x-vpn-base-acc2: &vpn-base-acc2
+  image: qmcgaw/gluetun
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  env_file:
+    - env.acc2
+
+services:
+  testvpn1:
+    <<: *vpn-base-test
+    ports:
+      - "0.0.0.0:9999:8888/tcp"
+      - "0.0.0.0:19999:8000/tcp"
+    environment:
+      - SERVER_CITIES=New York
+    labels:
+      vpn.type: vpn
+      vpn.port: "9999"
+      vpn.control_port: "19999"
+      vpn.profile: test
+
+  testvpn2:
+    <<: *vpn-base-test
+    ports:
+      - "0.0.0.0:9998:8888/tcp"
+      - "0.0.0.0:19998:8000/tcp"
+    environment:
+      - SERVER_CITIES=Chicago
+    labels:
+      vpn.type: vpn
+      vpn.port: "9998"
+      vpn.control_port: "19998"
+      vpn.profile: test
