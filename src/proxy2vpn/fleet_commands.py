@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .fleet_manager import FleetConfig, FleetManager, DeploymentPlan
+from .http_client import HTTPClient, HTTPClientConfig
 from .server_monitor import ServerMonitor
 
 console = Console()
@@ -178,8 +179,10 @@ def fleet_status(
 
         if show_health:
             console.print("\n[bold]Health Status:[/bold]")
-            server_monitor = ServerMonitor(fleet_manager)
+            http_client = HTTPClient(HTTPClientConfig(base_url=""))
+            server_monitor = ServerMonitor(fleet_manager, http_client=http_client)
             health_results = asyncio.run(server_monitor.check_fleet_health())
+            asyncio.run(http_client.close())
             _display_health_results(health_results)
 
         # Show all VPN services grouped by provider
@@ -201,7 +204,8 @@ def fleet_rotate(
     """Rotate VPN servers for better availability"""
 
     fleet_manager = FleetManager()
-    server_monitor = ServerMonitor(fleet_manager)
+    http_client = HTTPClient(HTTPClientConfig(base_url=""))
+    server_monitor = ServerMonitor(fleet_manager, http_client=http_client)
 
     try:
         result = asyncio.run(server_monitor.rotate_failed_servers(dry_run=dry_run))
@@ -216,6 +220,8 @@ def fleet_rotate(
     except Exception as e:
         console.print(f"[red]❌ Rotation failed: {e}[/red]")
         raise typer.Exit(1)
+    finally:
+        asyncio.run(http_client.close())
 
 
 def fleet_scale(
