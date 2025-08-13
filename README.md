@@ -67,6 +67,34 @@ uvx proxy2vpn --help
    proxy2vpn vpn test vpn1
    ```
 
+## HTTP Control Server
+
+Each VPN container exposes an HTTP control API on port `8000`. Publish this port and set the `vpn.control_port` label in your compose file to enable control commands.
+
+### Sample compose snippet
+
+```yaml
+services:
+  vpn1:
+    image: qmcgaw/gluetun
+    ports:
+      - "8888:8888/tcp"    # proxy port
+      - "19999:8000/tcp"   # control server
+    labels:
+      vpn.type: vpn
+      vpn.port: "8888"
+      vpn.control_port: "19999"
+      vpn.profile: myprofile
+```
+
+### CLI commands
+
+```bash
+proxy2vpn vpn status vpn1
+proxy2vpn vpn public-ip vpn1
+proxy2vpn vpn restart-tunnel vpn1
+```
+
 ## Fleet Management
 
 For enterprise-scale deployment across multiple cities and VPN accounts:
