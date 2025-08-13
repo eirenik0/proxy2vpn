@@ -16,5 +16,6 @@ __all__ = [
     "models",
     "config",
     "server_manager",
+    "control_client",
     "__version__",
 ]
