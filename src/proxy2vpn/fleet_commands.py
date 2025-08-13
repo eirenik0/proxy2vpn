@@ -248,7 +248,7 @@ def fleet_scale(
 
 
 def _display_deployment_plan(
-    plan: DeploymentPlan, profile_config: dict[str, int] = None
+    plan: DeploymentPlan, profile_config: dict[str, int] | None = None
 ):
     """Display deployment plan in a formatted table"""
 

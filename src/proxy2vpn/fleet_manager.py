@@ -60,7 +60,7 @@ class DeploymentPlan:
         location: str,
         country: str,
         port: int,
-        provider: str = None,
+        provider: str,
         hostname: str | None = None,
         ip: str | None = None,
     ):
@@ -283,6 +283,118 @@ class FleetManager:
 
         return valid_services, errors
 
+    def _handle_server_validation(
+        self, plan: DeploymentPlan, validate_servers: bool
+    ) -> tuple[list[ServicePlan], int, list[str]]:
+        """Handle server validation and return filtered services, skipped count, and errors."""
+        if not validate_servers:
+            return plan.services, 0, []
+
+        console.print("[yellow]🔍 Validating server availability...[/yellow]")
+        valid_services, validation_errors = self._validate_service_locations(
+            plan.services
+        )
+        skipped = len(plan.services) - len(valid_services)
+
+        if skipped:
+            console.print(f"[yellow]⚠ Skipping {skipped} invalid service(s)[/yellow]")
+
+        return valid_services, skipped, validation_errors
+
+    def _create_service_from_plan(self, service_plan: ServicePlan) -> VPNService:
+        """Create a VPNService object from a ServicePlan."""
+        labels = {
+            "vpn.type": "vpn",
+            "vpn.port": str(service_plan.port),
+            "vpn.provider": service_plan.provider,
+            "vpn.profile": service_plan.profile,
+            "vpn.location": service_plan.location,
+        }
+        if service_plan.hostname:
+            labels["vpn.hostname"] = service_plan.hostname
+
+        env = {"VPN_SERVICE_PROVIDER": service_plan.provider}
+        if service_plan.hostname:
+            env["SERVER_HOSTNAMES"] = service_plan.hostname
+        else:
+            env["SERVER_CITIES"] = service_plan.location
+
+        return VPNService(
+            name=service_plan.name,
+            port=service_plan.port,
+            provider=service_plan.provider,
+            profile=service_plan.profile,
+            location=service_plan.location,
+            environment=env,
+            labels=labels,
+        )
+
+    def _add_service_with_force_handling(
+        self, vpn_service: VPNService, force: bool
+    ) -> None:
+        """Add service to compose manager, handling existing services with force flag."""
+        try:
+            self.compose_manager.add_service(vpn_service)
+        except ValueError as e:
+            if "already exists" in str(e) and force:
+                self.compose_manager.remove_service(vpn_service.name)
+                self.compose_manager.add_service(vpn_service)
+            else:
+                raise
+
+    async def _create_service_definitions(
+        self, services: list[ServicePlan], force: bool
+    ) -> list[str]:
+        """Create service definitions in compose file and return added service names."""
+        await asyncio.to_thread(ensure_network, force)
+        added_services: list[str] = []
+
+        for service_plan in services:
+            vpn_service = self._create_service_from_plan(service_plan)
+            self._add_service_with_force_handling(vpn_service, force)
+            added_services.append(service_plan.name)
+            console.print(f"[green]✓[/green] Created service: {service_plan.name}")
+
+        return added_services
+
+    async def _deploy_containers(
+        self, added_services: list[str], parallel: bool, force: bool
+    ) -> None:
+        """Deploy containers either in parallel or sequential mode."""
+        if parallel:
+            await self._start_services_parallel(added_services, force)
+        else:
+            await self._start_services_sequential(added_services, force)
+
+    async def _handle_deployment_failure(
+        self, added_services: list[str], error: Exception
+    ) -> str:
+        """Handle deployment failure by rolling back added services."""
+        error_msg = f"Deployment failed: {error}"
+        console.print(f"[red]❌[/red] {error_msg}")
+
+        for service_name in added_services:
+            try:
+                self.compose_manager.remove_service(service_name)
+                console.print(f"[yellow]↩ Rolled back service: {service_name}[/yellow]")
+            except Exception as rm_err:
+                console.print(
+                    f"[red]⚠ Failed to remove service {service_name}: {rm_err}"
+                )
+
+            try:
+                await asyncio.to_thread(stop_container, service_name)
+                await asyncio.to_thread(remove_container, service_name)
+                console.print(
+                    f"[yellow]🛑 Stopped and removed container: {service_name}[/yellow]"
+                )
+            except Exception as cleanup_err:
+                console.print(
+                    f"[red]⚠ Failed to cleanup container {service_name}: {cleanup_err}"
+                )
+
+        return error_msg
+
     async def deploy_fleet(
         self,
         plan: DeploymentPlan,
@@ -291,126 +403,53 @@ class FleetManager:
         force: bool = False,
     ) -> DeploymentResult:
         """Execute bulk deployment with server validation"""
-
-        skipped = 0
-        errors: list[str] = []
-
-        if validate_servers:
-            console.print("[yellow]🔍 Validating server availability...[/yellow]")
-            valid_services, validation_errors = self._validate_service_locations(
-                plan.services
-            )
-            skipped = len(plan.services) - len(valid_services)
-            errors.extend(validation_errors)
-            if skipped:
-                console.print(
-                    f"[yellow]⚠ Skipping {skipped} invalid service(s)[/yellow]"
-                )
-            plan.services = valid_services
-            if not plan.services:
-                return DeploymentResult(
-                    deployed=0,
-                    failed=skipped,
-                    services=[],
-                    errors=errors,
-                )
-
-        console.print(
-            f"[green]🚀 Deploying {len(plan.services)} VPN services...[/green]"
+        # Handle server validation
+        valid_services, skipped, errors = self._handle_server_validation(
+            plan, validate_servers
         )
 
-        deployed = 0
-        added_services: list[str] = []
-
-        try:
-            await asyncio.to_thread(ensure_network, force)
-            # Create services in compose file
-            for service_plan in plan.services:
-                # Create Docker labels for service identification and metadata
-                labels = {
-                    "vpn.type": "vpn",
-                    "vpn.port": str(service_plan.port),
-                    "vpn.provider": service_plan.provider,
-                    "vpn.profile": service_plan.profile,
-                    "vpn.location": service_plan.location,
-                }
-                if service_plan.hostname:
-                    labels["vpn.hostname"] = service_plan.hostname
-
-                env = {"VPN_SERVICE_PROVIDER": service_plan.provider}
-                if service_plan.hostname:
-                    env["SERVER_HOSTNAMES"] = service_plan.hostname
-                else:
-                    env["SERVER_CITIES"] = service_plan.location
-
-                vpn_service = VPNService(
-                    name=service_plan.name,
-                    port=service_plan.port,
-                    provider=service_plan.provider,
-                    profile=service_plan.profile,
-                    location=service_plan.location,
-                    environment=env,
-                    labels=labels,
-                )
-
-                # Handle existing services when force flag is used
-                try:
-                    self.compose_manager.add_service(vpn_service)
-                except ValueError as e:
-                    if "already exists" in str(e) and force:
-                        # Remove existing service and add new one when force=True
-                        self.compose_manager.remove_service(service_plan.name)
-                        self.compose_manager.add_service(vpn_service)
-                    else:
-                        raise
-                added_services.append(service_plan.name)
-                console.print(f"[green]✓[/green] Created service: {service_plan.name}")
-
-            # Start containers
-            if parallel:
-                await self._start_services_parallel(added_services, force)
-            else:
-                await self._start_services_sequential(added_services, force)
-
-            deployed = len(added_services)
-
-        except Exception as e:
-            error_msg = f"Deployment failed: {e}"
-            console.print(f"[red]❌[/red] {error_msg}")
-            errors.append(error_msg)
-
-            # Rollback any services that were added before failure
-            for service_name in added_services:
-                try:
-                    self.compose_manager.remove_service(service_name)
-                    console.print(
-                        f"[yellow]↩ Rolled back service: {service_name}[/yellow]"
-                    )
-                except Exception as rm_err:
-                    console.print(
-                        f"[red]⚠ Failed to remove service {service_name}: {rm_err}"
-                    )
-                try:
-                    await asyncio.to_thread(stop_container, service_name)
-                    await asyncio.to_thread(remove_container, service_name)
-                    console.print(
-                        f"[yellow]🛑 Stopped and removed container: {service_name}[/yellow]"
-                    )
-                except Exception as cleanup_err:
-                    console.print(
-                        f"[red]⚠ Failed to cleanup container {service_name}: {cleanup_err}"
-                    )
-
+        if not valid_services:
             return DeploymentResult(
                 deployed=0,
-                failed=len(plan.services) + skipped,
+                failed=skipped,
                 services=[],
                 errors=errors,
             )
 
-        failed = len(plan.services) - deployed + skipped
+        console.print(
+            f"[green]🚀 Deploying {len(valid_services)} VPN services...[/green]"
+        )
+
+        added_services: list[str] = []
+        deployed = 0
+
+        try:
+            # Create service definitions
+            added_services = await self._create_service_definitions(
+                valid_services, force
+            )
+
+            # Deploy containers
+            await self._deploy_containers(added_services, parallel, force)
+
+            deployed = len(added_services)
+
+        except Exception as e:
+            error_msg = await self._handle_deployment_failure(added_services, e)
+            errors.append(error_msg)
+            return DeploymentResult(
+                deployed=0,
+                failed=len(valid_services) + skipped,
+                services=[],
+                errors=errors,
+            )
+
+        failed = len(valid_services) - deployed + skipped
         return DeploymentResult(
-            deployed=deployed, failed=failed, services=plan.service_names, errors=errors
+            deployed=deployed,
+            failed=failed,
+            services=[s.name for s in valid_services],
+            errors=errors,
         )
 
     async def _start_services_parallel(self, service_names: list[str], force: bool):
