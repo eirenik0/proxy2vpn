@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.12.0]
+
+### Bug fixes
+
+- Fixed missing --recreate-network option in fleet deploy command help output (#80)
+- Fixed critical type safety issues in CLI commands and Docker operations that were causing 33+ type checker errors, improving code reliability and maintainability. (#81)
+
+### Features
+
+- Add comprehensive VPN control API system including aiohttp-based control client helpers, GluetunControlClient subclass with typed responses, HTTP control server on port 8000, CLI commands for querying status/public IP/tunnel restart, and control server port allocation and validation. (#68)
+- Include direct and proxied IP addresses in connectivity diagnostics and system diagnose output. (#79)
+
+### Miscellaneous
+
+- Added asynchronous HTTP client with configurable retries and request timing metrics. Refactored IP address lookup, server list downloads, and proxy health checks to use centralized HTTPClient with sync and async support. (#72)
+
+
 ## [0.11.0]
 
 ### Bug fixes
