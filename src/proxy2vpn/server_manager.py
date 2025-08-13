@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
 from typing import Dict, List
-
-import aiohttp
-import requests
-import typer
+from urllib.parse import urlparse
 
 from . import config
+from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError, RetryPolicy
 from .utils import abort
 
 
@@ -19,7 +18,7 @@ class ServerManager:
     """Manage gluetun server list information.
 
     The server list is downloaded from GitHub and cached locally to avoid
-    repeated network requests.  The cache is considered valid for ``ttl``
+    repeated network requests. The cache is considered valid for ``ttl``
     seconds (24h by default).
     """
 
@@ -39,91 +38,42 @@ class ServerManager:
         age = time.time() - self.cache_file.stat().st_mtime
         return age < self.ttl
 
-    def update_servers(self, verify: bool = True) -> Dict[str, Dict]:
-        """Fetch the server list, using the cache when possible.
+    async def _download_servers(self, verify: bool) -> Dict[str, Dict]:
+        parsed = urlparse(config.SERVER_LIST_URL)
+        cfg = HTTPClientConfig(
+            base_url=f"{parsed.scheme}://{parsed.netloc}",
+            timeout=config.DEFAULT_TIMEOUT,
+            verify_ssl=verify,
+            retry=RetryPolicy(attempts=config.MAX_RETRIES),
+        )
+        async with HTTPClient(cfg) as client:
+            return await client.get(parsed.path)
 
-        Parameters
-        ----------
-        verify:
-            Whether to verify SSL certificates when downloading the server
-            list. Set to ``False`` for troubleshooting.
-        """
+    async def _fetch_and_cache(self, verify: bool) -> None:
+        data = await self._download_servers(verify)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_file.write_text(json.dumps(data), encoding="utf-8")
+
+    def update_servers(self, verify: bool = True) -> Dict[str, Dict]:
+        """Fetch the server list, using the cache when possible."""
 
         if not self._is_cache_valid():
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
             try:
-                response = requests.get(
-                    config.SERVER_LIST_URL,
-                    timeout=30,
-                    verify=verify,
-                    stream=True,
-                )
-            except requests.exceptions.SSLError:
-                abort(
-                    "Failed to download server list (SSL error)",
-                    "Check network connection or CA certificates",
-                )
-            except requests.exceptions.RequestException as exc:
+                asyncio.run(self._fetch_and_cache(verify))
+            except HTTPClientError as exc:
                 abort("Failed to download server list", str(exc))
-            response.raise_for_status()
-            total = int(response.headers.get("content-length", 0)) or None
-            chunks: list[bytes] = []
-            with typer.progressbar(length=total, label="Downloading server list") as pb:
-                for chunk in response.iter_content(chunk_size=8192):
-                    chunks.append(chunk)
-                    pb.update(len(chunk))
-            self.cache_file.write_bytes(b"".join(chunks))
         with self.cache_file.open("r", encoding="utf-8") as f:
             self.data = json.load(f)
         return self.data
 
-    async def fetch_server_list_async(self, verify: bool = True) -> Dict:
-        """Fetch and cache the VPN server list asynchronously.
-
-        Returns
-        -------
-        dict
-            The server list data as a dictionary.
-
-        Parameters
-        ----------
-        verify:
-            Whether to verify SSL certificates when downloading the server
-            list. Set to ``False`` for troubleshooting.
-        """
+    async def fetch_server_list_async(self, verify: bool = True) -> Dict[str, Dict]:
+        """Fetch and cache the VPN server list asynchronously."""
 
         if not self._is_cache_valid():
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-
-            timeout = aiohttp.ClientTimeout(total=30)
-            connector = aiohttp.TCPConnector(verify_ssl=verify)
-
             try:
-                async with aiohttp.ClientSession(
-                    timeout=timeout, connector=connector
-                ) as session:
-                    async with session.get(config.SERVER_LIST_URL) as response:
-                        response.raise_for_status()
-                        total = int(response.headers.get("content-length", 0)) or None
-                        chunks: list[bytes] = []
-
-                        with typer.progressbar(
-                            length=total, label="Downloading server list"
-                        ) as pb:
-                            async for chunk in response.content.iter_chunked(8192):
-                                chunks.append(chunk)
-                                pb.update(len(chunk))
-
-                        self.cache_file.write_bytes(b"".join(chunks))
-
-            except aiohttp.ClientSSLError:
-                abort(
-                    "Failed to download server list (SSL error)",
-                    "Check network connection or CA certificates",
-                )
-            except aiohttp.ClientError as exc:
+                await self._fetch_and_cache(verify)
+            except HTTPClientError as exc:
                 abort("Failed to download server list", str(exc))
-
         with self.cache_file.open("r", encoding="utf-8") as f:
             self.data = json.load(f)
         return self.data

@@ -1,17 +1,26 @@
 import pytest
-import requests
 import typer
-
-from proxy2vpn.server_manager import ServerManager
+from proxy2vpn import server_manager
+from proxy2vpn.http_client import HTTPClientError
 
 
 def test_update_servers_ssl_error(tmp_path, monkeypatch):
-    mgr = ServerManager(cache_dir=tmp_path)
+    mgr = server_manager.ServerManager(cache_dir=tmp_path)
 
-    def fake_get(*args, **kwargs):
-        raise requests.exceptions.SSLError("bad ssl")
+    class DummyClient:
+        def __init__(self, cfg):
+            pass
 
-    monkeypatch.setattr(requests, "get", fake_get)
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, path):
+            raise HTTPClientError("bad ssl")
+
+    monkeypatch.setattr(server_manager, "HTTPClient", lambda cfg: DummyClient(cfg))
 
     with pytest.raises(typer.Exit) as excinfo:
         mgr.update_servers()
@@ -21,29 +30,28 @@ def test_update_servers_ssl_error(tmp_path, monkeypatch):
 def test_update_servers_insecure_flag(tmp_path, monkeypatch):
     called = {}
 
-    class Resp:
-        text = "{}"
-        headers = {"content-length": "2"}
+    class DummyClient:
+        def __init__(self, cfg):
+            called["verify"] = cfg.verify_ssl
 
-        def raise_for_status(self):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
             pass
 
-        def iter_content(self, chunk_size: int):
-            yield b"{}"
+        async def get(self, path):
+            return {}
 
-    def fake_get(url, timeout, verify, stream=False):
-        called["verify"] = verify
-        return Resp()
+    monkeypatch.setattr(server_manager, "HTTPClient", DummyClient)
 
-    monkeypatch.setattr(requests, "get", fake_get)
-
-    mgr = ServerManager(cache_dir=tmp_path)
+    mgr = server_manager.ServerManager(cache_dir=tmp_path)
     mgr.update_servers(verify=False)
     assert called["verify"] is False
 
 
 def test_location_helpers():
-    mgr = ServerManager()
+    mgr = server_manager.ServerManager()
     mgr.data = {
         "prov": {
             "servers": [
