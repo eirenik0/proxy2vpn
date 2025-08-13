@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
 import asyncio
 import os
 import time
+from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
 
 from .config import CONTROL_API_ENDPOINTS, DEFAULT_TIMEOUT, MAX_RETRIES, VERIFY_SSL
 from .logging_utils import get_logger
-
+from typing import Self
 
 logger = get_logger(__name__)
 
@@ -48,7 +48,7 @@ class HTTPClient:
         self._config = config
         self._session: aiohttp.ClientSession | None = None
 
-    async def __aenter__(self) -> "HTTPClient":
+    async def __aenter__(self) -> Self:
         await self._ensure_session()
         return self
 
@@ -113,7 +113,7 @@ class HTTPClient:
                     raise HTTPClientError(str(exc)) from exc
                 await asyncio.sleep(self._config.retry.backoff * attempt)
 
-    async def request_text(self, method: str, path: str, **kwargs: Any) -> str:
+    async def request_text(self, method: str, path: str, **kwargs: Any) -> str | None:
         await self._ensure_session()
         if not self._session:
             raise HTTPClientError("session not initialized")
@@ -157,7 +157,7 @@ class HTTPClient:
     async def post(self, path: str, **kwargs: Any) -> Any:
         return await self.request("POST", path, **kwargs)
 
-    async def get_text(self, path: str, **kwargs: Any) -> str:
+    async def get_text(self, path: str, **kwargs: Any) -> str | None:
         return await self.request_text("GET", path, **kwargs)
 
 

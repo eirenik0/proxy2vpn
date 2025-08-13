@@ -64,3 +64,11 @@ proxy2vpn = "proxy2vpn.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pyright]
+include = ["src"]
+exclude = [
+    "**/__pycache__",
+    "tests/",
+    "venv/"
+]

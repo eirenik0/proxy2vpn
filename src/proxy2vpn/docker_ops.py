@@ -20,7 +20,7 @@ from docker.errors import DockerException
 
 console = Console()
 
-DEFAULT_TIMEOUT = 10
+DEFAULT_TIMEOUT = 60
 MAX_RETRIES = 3
 
 logger = get_logger(__name__)
