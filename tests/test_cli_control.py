@@ -5,7 +5,8 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from typer.testing import CliRunner
 
-from proxy2vpn import cli, control_client
+from proxy2vpn import cli
+from proxy2vpn.http_client import IPResponse, OpenVPNStatusResponse, StatusResponse
 
 
 COMPOSE_FILE = pathlib.Path(__file__).with_name("test_compose.yml")
@@ -15,11 +16,20 @@ def test_vpn_status_uses_control_port(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    async def fake_get_status(base_url):
-        called["base_url"] = base_url
-        return {"status": "ok"}
+    class FakeClient:
+        def __init__(self, base_url, *args, **kwargs):
+            called["base_url"] = base_url
 
-    monkeypatch.setattr(control_client, "get_status", fake_get_status)
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):  # pragma: no cover - trivial
+            return False
+
+        async def status(self):
+            return StatusResponse(status="ok")
+
+    monkeypatch.setattr(cli, "GluetunControlClient", FakeClient)
 
     result = runner.invoke(
         cli.app,
@@ -33,11 +43,20 @@ def test_vpn_public_ip_uses_control_port(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    async def fake_get_public_ip(base_url):
-        called["base_url"] = base_url
-        return "1.2.3.4"
+    class FakeClient:
+        def __init__(self, base_url, *args, **kwargs):
+            called["base_url"] = base_url
 
-    monkeypatch.setattr(control_client, "get_public_ip", fake_get_public_ip)
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):  # pragma: no cover - trivial
+            return False
+
+        async def public_ip(self):
+            return IPResponse(ip="1.2.3.4")
+
+    monkeypatch.setattr(cli, "GluetunControlClient", FakeClient)
 
     result = runner.invoke(
         cli.app,
@@ -51,11 +70,20 @@ def test_vpn_restart_tunnel_uses_control_port(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    async def fake_restart_tunnel(base_url):
-        called["base_url"] = base_url
-        return {}
+    class FakeClient:
+        def __init__(self, base_url, *args, **kwargs):
+            called["base_url"] = base_url
 
-    monkeypatch.setattr(control_client, "restart_tunnel", fake_restart_tunnel)
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):  # pragma: no cover - trivial
+            return False
+
+        async def restart_tunnel(self):
+            return OpenVPNStatusResponse(status="restarted")
+
+    monkeypatch.setattr(cli, "GluetunControlClient", FakeClient)
 
     result = runner.invoke(
         cli.app,
