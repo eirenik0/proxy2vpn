@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Mapping
 
-import aiohttp
 import ipaddress
 import re
+
+from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError
 
 IP_SERVICES = ("https://ipinfo.io/ip", "https://ifconfig.me/ip")
 
@@ -31,15 +32,14 @@ def _parse_ip(text: str) -> str:
     return ""
 
 
-async def _fetch_ip(session: aiohttp.ClientSession, url: str, proxy: str | None) -> str:
+async def _fetch_ip(client: HTTPClient, url: str, proxy: str | None) -> str:
     """Fetch IP address from a single service."""
     try:
-        async with session.get(url, proxy=proxy) as resp:
-            text = await resp.text()
-            ip = _parse_ip(text)
-            if ip:
-                return ip
-    except aiohttp.ClientError:
+        text = await client.get_text(url, proxy=proxy)
+        ip = _parse_ip(text)
+        if ip:
+            return ip
+    except HTTPClientError:
         return ""
     return ""
 
@@ -52,13 +52,10 @@ async def fetch_ip_async(
     if proxies:
         proxy = proxies.get("http") or proxies.get("https")
 
-    timeout_cfg = aiohttp.ClientTimeout(total=timeout)
-    connector = aiohttp.TCPConnector(limit=10)
-    async with aiohttp.ClientSession(
-        timeout=timeout_cfg, connector=connector
-    ) as session:
+    cfg = HTTPClientConfig(base_url="http://0.0.0.0", timeout=timeout)
+    async with HTTPClient(cfg) as client:
         tasks = [
-            asyncio.create_task(_fetch_ip(session, url, proxy)) for url in IP_SERVICES
+            asyncio.create_task(_fetch_ip(client, url, proxy)) for url in IP_SERVICES
         ]
         try:
             for task in asyncio.as_completed(tasks):

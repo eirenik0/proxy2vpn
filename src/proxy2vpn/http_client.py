@@ -113,11 +113,52 @@ class HTTPClient:
                     raise HTTPClientError(str(exc)) from exc
                 await asyncio.sleep(self._config.retry.backoff * attempt)
 
+    async def request_text(self, method: str, path: str, **kwargs: Any) -> str:
+        await self._ensure_session()
+        if not self._session:
+            raise HTTPClientError("session not initialized")
+
+        for attempt in range(1, self._config.retry.attempts + 2):
+            start = time.perf_counter()
+            try:
+                async with self._session.request(method, path, **kwargs) as resp:
+                    resp.raise_for_status()
+                    text = await resp.text()
+                    elapsed = time.perf_counter() - start
+                    logger.info(
+                        "http_request",
+                        extra={
+                            "method": method.upper(),
+                            "path": path,
+                            "status": resp.status,
+                            "elapsed": elapsed,
+                        },
+                    )
+                    return text
+            except aiohttp.ClientError as exc:
+                elapsed = time.perf_counter() - start
+                logger.warning(
+                    "http_request_error",
+                    extra={
+                        "method": method.upper(),
+                        "path": path,
+                        "elapsed": elapsed,
+                        "error": str(exc),
+                        "attempt": attempt,
+                    },
+                )
+                if attempt > self._config.retry.attempts:
+                    raise HTTPClientError(str(exc)) from exc
+                await asyncio.sleep(self._config.retry.backoff * attempt)
+
     async def get(self, path: str, **kwargs: Any) -> Any:
         return await self.request("GET", path, **kwargs)
 
     async def post(self, path: str, **kwargs: Any) -> Any:
         return await self.request("POST", path, **kwargs)
+
+    async def get_text(self, path: str, **kwargs: Any) -> str:
+        return await self.request_text("GET", path, **kwargs)
 
 
 @dataclass(slots=True)
