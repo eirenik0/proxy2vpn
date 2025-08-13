@@ -14,7 +14,7 @@ from proxy2vpn.models import Profile, VPNService
 
 @pytest.fixture
 def fleet_manager():
-    return FleetManager(compose_file_path=Path("tests/test_compose.yml"))
+    return FleetManager(compose_file_path=Path("tests/test_fleet_compose.yml"))
 
 
 def test_plan_deployment_basic_allocation(fleet_manager, monkeypatch):
@@ -116,6 +116,23 @@ def test_plan_deployment_unique_ips(fleet_manager):
     assert len(set(hostnames)) == 3
     ips = [s.ip for s in plan.services]
     assert len(set(ips)) == 3
+
+
+def test_plan_deployment_missing_profile(fleet_manager, monkeypatch):
+    def fake_list_cities(provider, country):
+        return {"A": ["City1"]}[country]
+
+    monkeypatch.setattr(fleet_manager.server_manager, "list_cities", fake_list_cities)
+
+    config = FleetConfig(
+        provider="prov",
+        countries=["A"],
+        profiles={"missing": 1},
+        port_start=30000,
+    )
+
+    with pytest.raises(ValueError):
+        fleet_manager.plan_deployment(config)
 
 
 def test_deploy_fleet_rolls_back_on_error(monkeypatch, fleet_manager, capsys):

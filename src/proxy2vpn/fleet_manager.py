@@ -132,6 +132,12 @@ class FleetManager:
     def plan_deployment(self, config: FleetConfig) -> DeploymentPlan:
         """Create deployment plan for cities across countries"""
         plan = DeploymentPlan(provider=config.provider)
+
+        defined_profiles = {p.name for p in self.compose_manager.list_profiles()}
+        missing_profiles = set(config.profiles) - defined_profiles
+        if missing_profiles:
+            raise ValueError(f"Unknown profiles: {', '.join(sorted(missing_profiles))}")
+
         if config.unique_ips:
             data = self.server_manager.data or self.server_manager.update_servers()
             prov = data.get(config.provider, {})
