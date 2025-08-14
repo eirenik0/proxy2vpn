@@ -71,12 +71,12 @@ def _service_control_base_url(ctx: typer.Context, name: str) -> str:
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
     try:
-        manager.get_service(name)
+        service = manager.get_service(name)
     except KeyError:
         abort(f"Service '{name}' not found")
 
-    # Always use internal Docker networking for security
-    return f"internal://{name}"
+    # Use direct localhost connection via control port
+    return service.get_control_url()
 
 
 @app.callback(invoke_without_command=True)
@@ -383,7 +383,7 @@ async def vpn_list(
                 if status == "running":
                     logs = list(container_logs(container.name, lines=50, follow=False))
                     results = await analyzer.analyze_full_async(
-                        logs, container.name, port=svc.port, include_control_server=True
+                        logs, svc, port=svc.port, include_control_server=True
                     )
                 else:
                     results = analyze_container_logs(container.name, analyzer=analyzer)
@@ -959,8 +959,10 @@ def system_diagnose(
         analyze_container_logs,
     )
     from .diagnostics import DiagnosticAnalyzer
+    from .compose_manager import ComposeManager
 
     analyzer = DiagnosticAnalyzer()
+    manager = ComposeManager(config.COMPOSE_FILE)
     if name and all_containers:
         abort("Cannot specify NAME when using --all")
     if name:
@@ -1008,9 +1010,25 @@ def system_diagnose(
             port_str = container.labels.get("vpn.port")
             port = int(port_str) if port_str and port_str.isdigit() else None
 
+            # Get service for control URL access
+            try:
+                service = manager.get_service(container.name)
+            except KeyError:
+                # If service not found, create minimal service object for compatibility
+                from .models import VPNService
+
+                service = VPNService(
+                    name=container.name,
+                    port=port or 0,
+                    provider="",
+                    profile="",
+                    location="",
+                    environment={},
+                    labels={},
+                )
             results = asyncio.run(
                 analyzer.analyze_full_async(
-                    logs, container.name, port=port, include_control_server=True
+                    logs, service, port=port, include_control_server=True
                 )
             )
         else:

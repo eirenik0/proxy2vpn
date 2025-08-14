@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
-import json
 
 import aiohttp
 
@@ -229,62 +228,27 @@ class GluetunControlClient(HTTPClient):
         timeout: float = DEFAULT_TIMEOUT,
         verify_ssl: bool = VERIFY_SSL,
     ):
-        # Handle internal Docker network URLs
-        if base_url.startswith("internal://"):
-            self._use_docker_network = True
-            self._container_name = base_url.replace("internal://", "")
-            # Create dummy config for parent class - won't be used for internal requests
-            config = HTTPClientConfig(
-                base_url="http://localhost:8000",
-                timeout=timeout,
-                verify_ssl=False,
-            )
-        else:
-            self._use_docker_network = False
-            self._container_name = None
-            parsed = urlparse(base_url)
-            if not (parsed.scheme and parsed.netloc):
-                raise ValueError(f"invalid base URL: {base_url}")
-            auth: tuple[str, str] | None = None
-            auth_env = os.getenv("GLUETUN_CONTROL_AUTH")
-            if auth_env:
-                username, sep, password = auth_env.partition(":")
-                if not sep:
-                    raise ValueError(
-                        "GLUETUN_CONTROL_AUTH must be in 'user:pass' format"
-                    )
-                auth = (username, password)
-            config = HTTPClientConfig(
-                base_url=f"{parsed.scheme}://{parsed.netloc}",
-                timeout=timeout,
-                verify_ssl=verify_ssl,
-                auth=auth,
-            )
+        parsed = urlparse(base_url)
+        if not (parsed.scheme and parsed.netloc):
+            raise ValueError(f"invalid base URL: {base_url}")
+        auth: tuple[str, str] | None = None
+        auth_env = os.getenv("GLUETUN_CONTROL_AUTH")
+        if auth_env:
+            username, sep, password = auth_env.partition(":")
+            if not sep:
+                raise ValueError("GLUETUN_CONTROL_AUTH must be in 'user:pass' format")
+            auth = (username, password)
+        config = HTTPClientConfig(
+            base_url=f"{parsed.scheme}://{parsed.netloc}",
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            auth=auth,
+        )
         super().__init__(config)
 
     async def request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
-        """Override request method to handle Docker network communication."""
-        if self._use_docker_network:
-            return await self._docker_network_request(method, path, **kwargs)
-        else:
-            return await super().request(method, path, **kwargs)
-
-    async def _docker_network_request(
-        self, method: str, path: str, **kwargs
-    ) -> dict[str, Any]:
-        """Make HTTP request via Docker internal network."""
-        from .docker_ops import async_docker_network_request
-
-        json_data = kwargs.get("json")
-        response_text = await async_docker_network_request(
-            self._container_name, path, method, json_data
-        )
-
-        # Parse JSON response
-        try:
-            return json.loads(response_text) if response_text.strip() else {}
-        except json.JSONDecodeError as e:
-            raise HTTPClientError(f"Invalid JSON response: {response_text}") from e
+        """Make HTTP request using standard aiohttp client."""
+        return await super().request(method, path, **kwargs)
 
     async def status(self) -> StatusResponse:
         data = await self.get(self.ENDPOINTS["status"])

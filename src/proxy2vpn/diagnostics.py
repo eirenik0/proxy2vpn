@@ -162,12 +162,12 @@ class DiagnosticAnalyzer:
             )
         return results
 
-    async def check_control_server(self, container_name: str) -> list[DiagnosticResult]:
+    async def check_control_server(self, service) -> list[DiagnosticResult]:
         """Check control server health using Gluetun control API."""
         from .http_client import GluetunControlClient
 
         results: list[DiagnosticResult] = []
-        base_url = f"internal://{container_name}"
+        base_url = service.get_control_url()
 
         # Test basic control server connectivity
         try:
@@ -293,7 +293,7 @@ class DiagnosticAnalyzer:
     async def analyze_full_async(
         self,
         log_lines: Iterable[str],
-        container_name: str,
+        service,
         port: int | None = None,
         include_control_server: bool = True,
     ) -> list[DiagnosticResult]:
@@ -306,7 +306,7 @@ class DiagnosticAnalyzer:
 
         # Add control server checks if requested
         if include_control_server:
-            results.extend(await self.check_control_server(container_name))
+            results.extend(await self.check_control_server(service))
 
         return results
 

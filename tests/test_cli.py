@@ -31,7 +31,7 @@ def test_system_diagnose_specific_container(monkeypatch):
     monkeypatch.setattr(docker_ops, "container_logs", lambda name, lines, follow: [])
 
     async def mock_analyze_full_async(
-        self, logs, container_name, port=None, include_control_server=True
+        self, logs, service, port=None, include_control_server=True
     ):
         return []
 
