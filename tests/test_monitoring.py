@@ -35,10 +35,10 @@ def test_monitor_health_handles_errors(monkeypatch):
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
 def test_monitor_vpn_health(tmp_path):
     import uuid
-    
+
     # Use unique container name to avoid conflicts in parallel tests
     unique_name = f"vpn-test-{uuid.uuid4().hex[:8]}"
-    
+
     env_file = tmp_path / "test.env"
     env_file.write_text("")
     profile = docker_ops.Profile(

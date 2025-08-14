@@ -15,17 +15,20 @@ def test_vpn_status_uses_internal_networking(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_docker_request(container_name, url_path, method="GET"):
+    async def fake_async_docker_request(
+        container_name, url_path, method="GET", json_data=None
+    ):
         called["container_name"] = container_name
         called["url_path"] = url_path
         called["method"] = method
+        called["json_data"] = json_data
         return '{"status": "running"}'
 
-    # Mock the docker network request function that gets imported dynamically
+    # Mock the async docker network request function
     import proxy2vpn.docker_ops
 
     monkeypatch.setattr(
-        proxy2vpn.docker_ops, "docker_network_request", fake_docker_request
+        proxy2vpn.docker_ops, "async_docker_network_request", fake_async_docker_request
     )
 
     result = runner.invoke(
@@ -34,23 +37,26 @@ def test_vpn_status_uses_internal_networking(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["container_name"] == "testvpn1"
-    assert called["url_path"] == "/v1/openvpn/status"
+    assert called["url_path"] == "/status"
 
 
 def test_vpn_public_ip_uses_internal_networking(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_docker_request(container_name, url_path, method="GET"):
+    async def fake_async_docker_request(
+        container_name, url_path, method="GET", json_data=None
+    ):
         called["container_name"] = container_name
         called["url_path"] = url_path
         called["method"] = method
+        called["json_data"] = json_data
         return '{"ip": "1.2.3.4"}'
 
     import proxy2vpn.docker_ops
 
     monkeypatch.setattr(
-        proxy2vpn.docker_ops, "docker_network_request", fake_docker_request
+        proxy2vpn.docker_ops, "async_docker_network_request", fake_async_docker_request
     )
 
     result = runner.invoke(
@@ -59,23 +65,26 @@ def test_vpn_public_ip_uses_internal_networking(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["container_name"] == "testvpn1"
-    assert called["url_path"] == "/v1/publicip/ip"
+    assert called["url_path"] == "/ip"
 
 
 def test_vpn_restart_tunnel_uses_internal_networking(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_docker_request(container_name, url_path, method="GET"):
+    async def fake_async_docker_request(
+        container_name, url_path, method="GET", json_data=None
+    ):
         called["container_name"] = container_name
         called["url_path"] = url_path
         called["method"] = method
+        called["json_data"] = json_data
         return '{"status": "restarted"}'
 
     import proxy2vpn.docker_ops
 
     monkeypatch.setattr(
-        proxy2vpn.docker_ops, "docker_network_request", fake_docker_request
+        proxy2vpn.docker_ops, "async_docker_network_request", fake_async_docker_request
     )
 
     result = runner.invoke(
@@ -84,5 +93,5 @@ def test_vpn_restart_tunnel_uses_internal_networking(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["container_name"] == "testvpn1"
-    assert called["url_path"] == "/v1/openvpn/actions/restart"
+    assert called["url_path"] == "/openvpn/status"
     assert called["method"] == "PUT"

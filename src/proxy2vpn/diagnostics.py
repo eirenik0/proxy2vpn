@@ -164,105 +164,111 @@ class DiagnosticAnalyzer:
 
     async def check_control_server(self, container_name: str) -> list[DiagnosticResult]:
         """Check control server health using Gluetun control API."""
-        from .docker_ops import docker_network_request
-        import json
+        from .http_client import GluetunControlClient
 
         results: list[DiagnosticResult] = []
+        base_url = f"internal://{container_name}"
 
         # Test basic control server connectivity
         try:
-            response = docker_network_request(container_name, "/v1/openvpn/status")
-            data = json.loads(response)
-            status = data.get("status", "").lower()
+            async with GluetunControlClient(base_url) as client:
+                data = await client.status()
+                status = data.status.lower()
 
-            if status in ["running", "stopped"]:
-                results.append(
-                    DiagnosticResult(
-                        "control_server",
-                        True,
-                        f"Control server accessible (OpenVPN: {status})",
-                        "",
+                if status in ["running", "stopped"]:
+                    results.append(
+                        DiagnosticResult(
+                            "control_server",
+                            True,
+                            f"Control server accessible (OpenVPN: {status})",
+                            "",
+                        )
                     )
-                )
-            else:
-                results.append(
-                    DiagnosticResult(
-                        "control_server",
-                        False,
-                        f"Control server reports unexpected status: {status}",
-                        "Check container health and network connectivity.",
+                else:
+                    results.append(
+                        DiagnosticResult(
+                            "control_server",
+                            False,
+                            f"Control server reports unknown status: {status}",
+                            "Check Gluetun container logs for control server errors.",
+                        )
                     )
-                )
         except Exception as e:
             results.append(
                 DiagnosticResult(
                     "control_server",
                     False,
-                    f"Control server unreachable: {str(e)}",
-                    "Ensure container exposes port 8000 and is running.",
+                    f"Control server unreachable: {e}",
+                    "Verify container is running and control server is enabled.",
                 )
             )
-            return results
 
-        # Test DNS status if control server is accessible
+        # Test DNS server if available
         try:
-            response = docker_network_request(container_name, "/v1/dns/status")
-            data = json.loads(response)
-            dns_status = data.get("status", "").lower()
+            async with GluetunControlClient(base_url) as client:
+                data = await client.dns_status()
+                dns_status = data.status.lower()
 
-            if dns_status == "running":
-                results.append(
-                    DiagnosticResult(
-                        "dns_server",
-                        True,
-                        "DNS server running properly",
-                        "",
+                if dns_status == "running":
+                    results.append(
+                        DiagnosticResult(
+                            "dns_server",
+                            True,
+                            "DNS server running properly",
+                            "",
+                        )
                     )
-                )
-            else:
-                results.append(
-                    DiagnosticResult(
-                        "dns_server",
-                        False,
-                        f"DNS server not running (status: {dns_status})",
-                        "Check DNS configuration or enable unbound DNS.",
+                else:
+                    results.append(
+                        DiagnosticResult(
+                            "dns_server",
+                            False,
+                            f"DNS server not running (status: {dns_status})",
+                            "Enable DNS server in Gluetun configuration if needed.",
+                        )
                     )
-                )
         except Exception:
-            # DNS endpoint not available or failing - this is optional
-            pass
+            # DNS server might not be enabled, which is okay
+            results.append(
+                DiagnosticResult(
+                    "dns_server",
+                    True,  # Not an error if DNS is disabled
+                    "DNS server status unavailable (likely disabled)",
+                    "",
+                )
+            )
 
-        # Test public IP availability
+        # Test public IP reporting
         try:
-            response = docker_network_request(container_name, "/v1/publicip/ip")
-            data = json.loads(response)
-            public_ip = data.get("public_ip")
+            async with GluetunControlClient(base_url) as client:
+                ip_data = await client.public_ip()
+                public_ip = ip_data.ip
 
-            if public_ip:
-                results.append(
-                    DiagnosticResult(
-                        "public_ip",
-                        True,
-                        f"Public IP available: {public_ip}",
-                        "",
+                if public_ip:
+                    results.append(
+                        DiagnosticResult(
+                            "public_ip",
+                            True,
+                            f"Public IP available: {public_ip}",
+                            "",
+                        )
                     )
-                )
-            else:
-                results.append(
-                    DiagnosticResult(
-                        "public_ip",
-                        False,
-                        "Public IP not available via control API",
-                        "Check VPN connection and routing.",
+                else:
+                    results.append(
+                        DiagnosticResult(
+                            "public_ip",
+                            False,
+                            "Public IP not available",
+                            "Check VPN connection and external IP detection.",
+                        )
                     )
-                )
-        except Exception:
+        except Exception as e:
             results.append(
                 DiagnosticResult(
                     "public_ip",
                     False,
-                    "Failed to retrieve public IP via control API",
-                    "Check control server connectivity and VPN status.",
+                    f"Failed to get public IP: {e}",
+                    "Verify VPN connection and control server accessibility.",
                 )
             )
 

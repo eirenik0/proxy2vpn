@@ -611,15 +611,16 @@ def test_vpn_connection(name: str) -> bool:
     )
 
 
-def docker_network_request(
-    container_name: str, url_path: str, method: str = "GET"
+async def async_docker_network_request(
+    container_name: str, url_path: str, method: str = "GET", json_data: dict = None
 ) -> str:
-    """Make an HTTP request to a container via Docker internal network.
+    """Make an async HTTP request to a container via Docker internal network.
 
     Args:
         container_name: Name of the target container
         url_path: Path to request (e.g., "/v1/publicip/ip")
         method: HTTP method (default: GET)
+        json_data: Optional JSON payload for POST/PUT requests
 
     Returns:
         Response body as string
@@ -627,6 +628,9 @@ def docker_network_request(
     Raises:
         RuntimeError: If the request fails or container is not accessible
     """
+    import asyncio
+    import json
+
     client = _client()
 
     # Create a temporary container to make the HTTP request
@@ -634,20 +638,32 @@ def docker_network_request(
     image = "curlimages/curl:latest"
 
     target_url = f"http://{container_name}:8000{url_path}"
-    command = ["curl", "-s", "-X", method, target_url]
+    command = ["curl", "-s", "-X", method]
 
-    try:
-        # Run curl command in a temporary container on the same network
-        result = client.containers.run(
-            image=image,
-            command=command,
-            network=network_name,
-            remove=True,
-            stdout=True,
-            stderr=True,
-        )
-        return result.decode("utf-8").strip()
-    except DockerException as exc:
-        raise RuntimeError(
-            f"Failed to make request to {container_name}: {exc}"
-        ) from exc
+    # Add JSON data if provided
+    if json_data:
+        command.extend(["-H", "Content-Type: application/json"])
+        command.extend(["-d", json.dumps(json_data)])
+
+    command.append(target_url)
+
+    def _run_container():
+        try:
+            # Run curl command in a temporary container on the same network
+            result = client.containers.run(
+                image=image,
+                command=command,
+                network=network_name,
+                remove=True,
+                stdout=True,
+                stderr=True,
+            )
+            return result.decode("utf-8").strip()
+        except DockerException as exc:
+            raise RuntimeError(
+                f"Failed to make request to {container_name}: {exc}"
+            ) from exc
+
+    # Run the blocking Docker operation in a thread pool
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _run_container)
