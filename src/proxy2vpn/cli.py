@@ -44,16 +44,39 @@ logger = get_logger(__name__)
 console = Console()
 
 
+def format_health_score(score) -> str:
+    """Format health score with color gradient from red (0) to green (100)."""
+    if score == "N/A":
+        return "N/A"
+
+    try:
+        score = int(score)
+    except (ValueError, TypeError):
+        return str(score)
+
+    # Clamp score to 0-100 range
+    score = max(0, min(100, score))
+
+    # Calculate RGB values for gradient from red to green
+    # Red (255, 0, 0) at score 0 -> Green (0, 255, 0) at score 100
+    red = int(255 * (100 - score) / 100)
+    green = int(255 * score / 100)
+    blue = 0
+
+    # Format as Rich RGB color
+    return f"[rgb({red},{green},{blue})]{score}[/rgb({red},{green},{blue})]"
+
+
 def _service_control_base_url(ctx: typer.Context, name: str) -> str:
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
     try:
-        manager.get_service(name)
+        service = manager.get_service(name)
     except KeyError:
         abort(f"Service '{name}' not found")
 
-    # Always use internal Docker networking for security
-    return f"internal://{name}:8000/v1"
+    # Use direct localhost connection via control port
+    return service.get_control_url()
 
 
 @app.callback(invoke_without_command=True)
@@ -299,14 +322,11 @@ def vpn_create(
 @run_async
 async def vpn_list(
     ctx: typer.Context,
-    diagnose: bool = typer.Option(
-        False, "--diagnose", help="Include diagnostic health scores"
-    ),
     ips_only: bool = typer.Option(
         False, "--ips-only", help="Show only container IP addresses"
     ),
 ):
-    """List VPN services with their status and IP addresses."""
+    """List VPN services with their status, IP addresses, and health diagnostics."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
@@ -314,6 +334,7 @@ async def vpn_list(
         get_vpn_containers,
         get_container_ip_async,
         analyze_container_logs,
+        container_logs,
     )
     from .diagnostics import DiagnosticAnalyzer
 
@@ -328,7 +349,7 @@ async def vpn_list(
 
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
-    analyzer = DiagnosticAnalyzer() if diagnose else None
+    analyzer = DiagnosticAnalyzer()
 
     running = {name: c for name, c in containers.items() if c.status == "running"}
     ips = await asyncio.gather(
@@ -345,8 +366,7 @@ async def vpn_list(
     table.add_column("Location")
     table.add_column("Status")
     table.add_column("IP")
-    if diagnose:
-        table.add_column("Health")
+    table.add_column("Health")
 
     async def add_row(i: int, svc: VPNService):
         container = containers.get(svc.name)
@@ -354,9 +374,16 @@ async def vpn_list(
             status = container.status
             ip = ip_map.get(svc.name, "N/A")
             health = "N/A"
-            if diagnose and container.name:
-                results = analyze_container_logs(container.name, analyzer=analyzer)
-                health = str(analyzer.health_score(results)) if analyzer else "N/A"
+            if container.name and analyzer:
+                # Use enhanced diagnostics with control server checks
+                if status == "running":
+                    logs = list(container_logs(container.name, lines=50, follow=False))
+                    results = await analyzer.analyze_full_async(
+                        logs, svc, port=svc.port, include_control_server=True
+                    )
+                else:
+                    results = analyze_container_logs(container.name, analyzer=analyzer)
+                health = str(analyzer.health_score(results))
         else:
             status = "not created"
             ip = "N/A"
@@ -372,19 +399,19 @@ async def vpn_list(
             f"[{status_style}]{status}[/{status_style}]",
             ip,
         ]
-        if diagnose:
-            row.append(health)
+        row.append(format_health_score(health))
         table.add_row(*row)
 
-    if diagnose:
-        with Progress() as progress:
-            task = progress.add_task("[cyan]Checking", total=len(services))
-            for i, svc in enumerate(services, 1):
-                await add_row(i, svc)
-                progress.advance(task)
-    else:
-        for i, svc in enumerate(services, 1):
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Checking", total=len(services))
+
+        async def process_service(i: int, svc: VPNService):
             await add_row(i, svc)
+            progress.advance(task)
+
+        await asyncio.gather(
+            *[process_service(i, svc) for i, svc in enumerate(services, 1)]
+        )
 
     console.print(table)
 
@@ -723,22 +750,9 @@ async def vpn_status(
 
     base_url = _service_control_base_url(ctx, service)
 
-    # Handle internal Docker network requests
-    if base_url.startswith("internal://"):
-        from .docker_ops import docker_network_request
-        import json
-
-        container_name = service
-        try:
-            response = docker_network_request(container_name, "/v1/openvpn/status")
-            data = json.loads(response)
-            console.print_json(data=data)
-        except Exception as e:
-            abort(f"Failed to get status via internal network: {e}")
-    else:
-        async with GluetunControlClient(base_url) as client:
-            data = await client.status()
-        console.print_json(data=asdict(data))
+    async with GluetunControlClient(base_url) as client:
+        data = await client.status()
+    console.print_json(data=asdict(data))
 
 
 @vpn_app.command("public-ip")
@@ -755,22 +769,9 @@ async def vpn_public_ip(
 
     base_url = _service_control_base_url(ctx, service)
 
-    # Handle internal Docker network requests
-    if base_url.startswith("internal://"):
-        from .docker_ops import docker_network_request
-        import json
-
-        container_name = service
-        try:
-            response = docker_network_request(container_name, "/v1/publicip/ip")
-            data = json.loads(response)
-            console.print(data.get("public_ip", "N/A"))
-        except Exception as e:
-            abort(f"Failed to get public IP via internal network: {e}")
-    else:
-        async with GluetunControlClient(base_url) as client:
-            ip = await client.public_ip()
-        console.print(ip.ip)
+    async with GluetunControlClient(base_url) as client:
+        ip = await client.public_ip()
+    console.print(ip.ip)
 
 
 @vpn_app.command("restart-tunnel")
@@ -787,22 +788,66 @@ async def vpn_restart_tunnel(
 
     base_url = _service_control_base_url(ctx, service)
 
-    # Handle internal Docker network requests
-    if base_url.startswith("internal://"):
-        from .docker_ops import docker_network_request
+    async with GluetunControlClient(base_url) as client:
+        await client.restart_tunnel()
+    console.print("[green]✓[/green] Tunnel restart requested.")
 
-        container_name = service
-        try:
-            docker_network_request(
-                container_name, "/v1/openvpn/actions/restart", method="PUT"
-            )
-            console.print("[green]\u2713[/green] Tunnel restart requested.")
-        except Exception as e:
-            abort(f"Failed to restart tunnel via internal network: {e}")
-    else:
-        async with GluetunControlClient(base_url) as client:
-            await client.restart_tunnel()
-        console.print("[green]\u2713[/green] Tunnel restart requested.")
+
+@vpn_app.command("dns-status")
+@run_async
+async def vpn_dns_status(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show DNS server status for SERVICE via the control API.
+
+    Uses internal Docker networking to communicate with the container's control API.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+
+    async with GluetunControlClient(base_url) as client:
+        data = await client.dns_status()
+    console.print_json(data=asdict(data))
+
+
+@vpn_app.command("updater-status")
+@run_async
+async def vpn_updater_status(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show updater service status for SERVICE via the control API.
+
+    Uses internal Docker networking to communicate with the container's control API.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+
+    async with GluetunControlClient(base_url) as client:
+        data = await client.updater_status()
+    console.print_json(data=asdict(data))
+
+
+@vpn_app.command("port-forwarded")
+@run_async
+async def vpn_port_forwarded(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show forwarded port for SERVICE via the control API.
+
+    Uses internal Docker networking to communicate with the container's control API.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+
+    async with GluetunControlClient(base_url) as client:
+        port = await client.port_forwarded()
+    console.print(port.port)
 
 
 # ---------------------------------------------------------------------------
@@ -906,8 +951,10 @@ def system_diagnose(
         analyze_container_logs,
     )
     from .diagnostics import DiagnosticAnalyzer
+    from .compose_manager import ComposeManager
 
     analyzer = DiagnosticAnalyzer()
+    manager = ComposeManager(config.COMPOSE_FILE)
     if name and all_containers:
         abort("Cannot specify NAME when using --all")
     if name:
@@ -944,7 +991,43 @@ def system_diagnose(
         )
 
         assert container.name is not None  # Type narrowing after null check
-        results = analyze_container_logs(container.name, lines=lines, analyzer=analyzer)
+
+        # Use enhanced diagnostics for running containers
+        if container.status == "running":
+            from .docker_ops import container_logs
+            import asyncio
+
+            logs = list(container_logs(container.name, lines=lines, follow=False))
+            # Get port from container labels
+            port_str = container.labels.get("vpn.port")
+            port = int(port_str) if port_str and port_str.isdigit() else None
+
+            # Get service for control URL access
+            try:
+                service = manager.get_service(container.name)
+            except KeyError:
+                # If service not found, create minimal service object for compatibility
+                from .models import VPNService
+
+                service = VPNService(
+                    name=container.name,
+                    port=port or 0,
+                    provider="",
+                    profile="",
+                    location="",
+                    environment={},
+                    labels={},
+                )
+            results = asyncio.run(
+                analyzer.analyze_full_async(
+                    logs, service, port=port, include_control_server=True
+                )
+            )
+        else:
+            results = analyze_container_logs(
+                container.name, lines=lines, analyzer=analyzer
+            )
+
         logger.debug(
             "log_analysis_complete",
             extra={"container_name": container.name, "issues_found": len(results)},

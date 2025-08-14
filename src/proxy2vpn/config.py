@@ -26,7 +26,12 @@ DEFAULT_PROVIDER = "protonvpn"
 # Starting port used when automatically allocating ports for new VPN
 # services.  The manager will search for the next free port starting from
 # this value.
-DEFAULT_PORT_START = 20000
+DEFAULT_PORT_START = 8080
+
+# Starting port for VPN control API endpoints. Control ports are allocated
+# in the range 18000-19999 to avoid conflicts with proxy ports (20000+).
+# Each VPN service gets a unique control port for its Gluetun HTTP API.
+DEFAULT_CONTROL_PORT_START = 18000
 
 # URL of the gluetun server list JSON file.  This file is fetched and
 # cached by :class:`ServerManager` to provide location validation and
@@ -48,4 +53,8 @@ CONTROL_API_ENDPOINTS = {
     "openvpn": "/openvpn",
     "ip": "/ip",
     "openvpn_status": "/openvpn/status",
+    "dns_status": "/dns/status",
+    "updater_status": "/updater/status",
+    "port_forwarded": "/openvpn/portforwarded",
+    "openvpn_settings": "/openvpn/settings",
 }

@@ -162,6 +162,118 @@ class DiagnosticAnalyzer:
             )
         return results
 
+    async def check_control_server(self, service) -> list[DiagnosticResult]:
+        """Check control server health using Gluetun control API."""
+        from .http_client import GluetunControlClient
+
+        results: list[DiagnosticResult] = []
+        base_url = service.get_control_url()
+
+        # Test basic control server connectivity
+        try:
+            async with GluetunControlClient(base_url) as client:
+                data = await client.status()
+                status = data.status.lower()
+
+                if status in ["running", "stopped"]:
+                    results.append(
+                        DiagnosticResult(
+                            "control_server",
+                            True,
+                            f"Control server accessible (OpenVPN: {status})",
+                            "",
+                        )
+                    )
+                else:
+                    results.append(
+                        DiagnosticResult(
+                            "control_server",
+                            False,
+                            f"Control server reports unknown status: {status}",
+                            "Check Gluetun container logs for control server errors.",
+                        )
+                    )
+        except Exception as e:
+            results.append(
+                DiagnosticResult(
+                    "control_server",
+                    False,
+                    f"Control server unreachable: {e}",
+                    "Verify container is running and control server is enabled.",
+                )
+            )
+
+        # Test DNS server if available
+        try:
+            async with GluetunControlClient(base_url) as client:
+                data = await client.dns_status()
+                dns_status = data.status.lower()
+
+                if dns_status == "running":
+                    results.append(
+                        DiagnosticResult(
+                            "dns_server",
+                            True,
+                            "DNS server running properly",
+                            "",
+                        )
+                    )
+                else:
+                    results.append(
+                        DiagnosticResult(
+                            "dns_server",
+                            False,
+                            f"DNS server not running (status: {dns_status})",
+                            "Enable DNS server in Gluetun configuration if needed.",
+                        )
+                    )
+        except Exception:
+            # DNS server might not be enabled, which is okay
+            results.append(
+                DiagnosticResult(
+                    "dns_server",
+                    True,  # Not an error if DNS is disabled
+                    "DNS server status unavailable (likely disabled)",
+                    "",
+                )
+            )
+
+        # Test public IP reporting
+        try:
+            async with GluetunControlClient(base_url) as client:
+                ip_data = await client.public_ip()
+                public_ip = ip_data.ip
+
+                if public_ip:
+                    results.append(
+                        DiagnosticResult(
+                            "public_ip",
+                            True,
+                            f"Public IP available: {public_ip}",
+                            "",
+                        )
+                    )
+                else:
+                    results.append(
+                        DiagnosticResult(
+                            "public_ip",
+                            False,
+                            "Public IP not available",
+                            "Check VPN connection and external IP detection.",
+                        )
+                    )
+        except Exception as e:
+            results.append(
+                DiagnosticResult(
+                    "public_ip",
+                    False,
+                    f"Failed to get public IP: {e}",
+                    "Verify VPN connection and control server accessibility.",
+                )
+            )
+
+        return results
+
     def analyze(
         self, log_lines: Iterable[str], port: int | None = None
     ) -> list[DiagnosticResult]:
@@ -176,6 +288,26 @@ class DiagnosticAnalyzer:
         results = self.analyze_logs(log_lines)
         if port:
             results.extend(await self.check_connectivity_async(port))
+        return results
+
+    async def analyze_full_async(
+        self,
+        log_lines: Iterable[str],
+        service,
+        port: int | None = None,
+        include_control_server: bool = True,
+    ) -> list[DiagnosticResult]:
+        """Full diagnostic analysis including control server checks."""
+        results = self.analyze_logs(log_lines)
+
+        # Add connectivity check if port is provided
+        if port:
+            results.extend(await self.check_connectivity_async(port))
+
+        # Add control server checks if requested
+        if include_control_server:
+            results.extend(await self.check_control_server(service))
+
         return results
 
     def health_score(self, results: Iterable[DiagnosticResult]) -> int:

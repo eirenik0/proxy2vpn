@@ -188,6 +188,31 @@ class ComposeManager:
             port += 1
         return port
 
+    def next_available_control_port(self, start: int = 0) -> int:
+        """Find the next available control port starting from START.
+
+        Control ports are allocated separately from proxy ports to prevent
+        conflicts. If START is 0, begins from 18000 (default control port range).
+        """
+        from .config import DEFAULT_CONTROL_PORT_START
+
+        port = start or DEFAULT_CONTROL_PORT_START
+        services = self.list_services()
+        used_control = {getattr(svc, "control_port", 0) for svc in services}
+        used_proxy = {svc.port for svc in services}
+        used_ports = used_control | used_proxy
+
+        while port in used_ports:
+            port += 1
+        return port
+
+    def get_all_used_ports(self) -> set[int]:
+        """Get all ports (proxy + control) currently in use by services."""
+        services = self.list_services()
+        proxy_ports = {svc.port for svc in services}
+        control_ports = {getattr(svc, "control_port", 0) for svc in services}
+        return proxy_ports | control_ports - {0}  # Remove 0 (unset ports)
+
     def save(self) -> None:
         backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
         tmp_path = self.compose_path.with_suffix(self.compose_path.suffix + ".tmp")
