@@ -48,15 +48,12 @@ def _service_control_base_url(ctx: typer.Context, name: str) -> str:
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
     try:
-        svc = manager.get_service(name)
+        manager.get_service(name)
     except KeyError:
         abort(f"Service '{name}' not found")
-    if not svc.control_port:
-        abort(
-            f"Service '{name}' has no control port published",
-            "Expose port 8000 and set label 'vpn.control_port'",
-        )
-    return f"http://localhost:{svc.control_port}/v1"
+
+    # Always use internal Docker networking for security
+    return f"internal://{name}:8000/v1"
 
 
 @app.callback(invoke_without_command=True)
@@ -276,6 +273,7 @@ def vpn_create(
         )
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
+
     env = {"VPN_SERVICE_PROVIDER": provider}
     location = location.strip()
     if location:
@@ -727,9 +725,23 @@ async def vpn_status(
     """
 
     base_url = _service_control_base_url(ctx, service)
-    async with GluetunControlClient(base_url) as client:
-        data = await client.status()
-    console.print_json(data=asdict(data))
+
+    # Handle internal Docker network requests
+    if base_url.startswith("internal://"):
+        from .docker_ops import docker_network_request
+        import json
+
+        container_name = service
+        try:
+            response = docker_network_request(container_name, "/v1/openvpn/status")
+            data = json.loads(response)
+            console.print_json(data=data)
+        except Exception as e:
+            abort(f"Failed to get status via internal network: {e}")
+    else:
+        async with GluetunControlClient(base_url) as client:
+            data = await client.status()
+        console.print_json(data=asdict(data))
 
 
 @vpn_app.command("public-ip")
@@ -745,9 +757,23 @@ async def vpn_public_ip(
     """
 
     base_url = _service_control_base_url(ctx, service)
-    async with GluetunControlClient(base_url) as client:
-        ip = await client.public_ip()
-    console.print(ip.ip)
+
+    # Handle internal Docker network requests
+    if base_url.startswith("internal://"):
+        from .docker_ops import docker_network_request
+        import json
+
+        container_name = service
+        try:
+            response = docker_network_request(container_name, "/v1/publicip/ip")
+            data = json.loads(response)
+            console.print(data.get("ip", "N/A"))
+        except Exception as e:
+            abort(f"Failed to get public IP via internal network: {e}")
+    else:
+        async with GluetunControlClient(base_url) as client:
+            ip = await client.public_ip()
+        console.print(ip.ip)
 
 
 @vpn_app.command("restart-tunnel")
@@ -763,9 +789,23 @@ async def vpn_restart_tunnel(
     """
 
     base_url = _service_control_base_url(ctx, service)
-    async with GluetunControlClient(base_url) as client:
-        await client.restart_tunnel()
-    console.print("[green]\u2713[/green] Tunnel restart requested.")
+
+    # Handle internal Docker network requests
+    if base_url.startswith("internal://"):
+        from .docker_ops import docker_network_request
+
+        container_name = service
+        try:
+            docker_network_request(
+                container_name, "/v1/openvpn/actions/restart", method="PUT"
+            )
+            console.print("[green]\u2713[/green] Tunnel restart requested.")
+        except Exception as e:
+            abort(f"Failed to restart tunnel via internal network: {e}")
+    else:
+        async with GluetunControlClient(base_url) as client:
+            await client.restart_tunnel()
+        console.print("[green]\u2713[/green] Tunnel restart requested.")
 
 
 # ---------------------------------------------------------------------------
