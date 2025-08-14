@@ -764,7 +764,7 @@ async def vpn_public_ip(
         try:
             response = docker_network_request(container_name, "/v1/publicip/ip")
             data = json.loads(response)
-            console.print(data.get("ip", "N/A"))
+            console.print(data.get("public_ip", "N/A"))
         except Exception as e:
             abort(f"Failed to get public IP via internal network: {e}")
     else:
