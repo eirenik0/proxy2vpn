@@ -168,8 +168,6 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         env.update(service.environment)
         ensure_network()
         port_bindings = {"8888/tcp": service.port}
-        if service.control_port:
-            port_bindings["8000/tcp"] = service.control_port
         container = client.containers.create(
             profile.image,
             name=service.name,

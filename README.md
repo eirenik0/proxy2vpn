@@ -69,7 +69,7 @@ uvx proxy2vpn --help
 
 ## HTTP Control Server
 
-Each VPN container exposes an HTTP control API on port `8000`. Publish this port and set the `vpn.control_port` label in your compose file to enable control commands.
+Each VPN container exposes an HTTP control API on port `8000` internally. Control commands automatically use secure internal Docker networking to communicate with containers.
 
 ### Sample compose snippet
 
@@ -79,11 +79,9 @@ services:
     image: qmcgaw/gluetun
     ports:
       - "8888:8888/tcp"    # proxy port
-      - "19999:8000/tcp"   # control server
     labels:
       vpn.type: vpn
       vpn.port: "8888"
-      vpn.control_port: "19999"
       vpn.profile: myprofile
 ```
 

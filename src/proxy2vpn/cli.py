@@ -216,12 +216,10 @@ def profile_apply(
         )
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
-    control_port = manager.next_available_port(port + 1)
     env = {"VPN_SERVICE_PROVIDER": config.DEFAULT_PROVIDER}
     labels = {
         "vpn.type": "vpn",
         "vpn.port": str(port),
-        "vpn.control_port": str(control_port),
         "vpn.provider": config.DEFAULT_PROVIDER,
         "vpn.profile": profile,
         "vpn.location": "",
@@ -229,7 +227,6 @@ def profile_apply(
     svc = VPNService(
         name=service,
         port=port,
-        control_port=control_port,
         provider=config.DEFAULT_PROVIDER,
         profile=profile,
         location="",
@@ -238,7 +235,7 @@ def profile_apply(
     )
     manager.add_service(svc)
     console.print(
-        f"[green]✓[/green] Service '{service}' created from profile '{profile}' on port {port} (control {control_port}).",
+        f"[green]✓[/green] Service '{service}' created from profile '{profile}' on port {port}.",
     )
 
 
@@ -720,7 +717,7 @@ async def vpn_status(
 ):
     """Show control server status for SERVICE.
 
-    Requires the service to publish port 8000 and set the `vpn.control_port` label.
+    Uses internal Docker networking to communicate with the container's control API.
     Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
     """
 
@@ -752,7 +749,7 @@ async def vpn_public_ip(
 ):
     """Show public IP reported by the control API for SERVICE.
 
-    Requires the service to publish port 8000 and set the `vpn.control_port` label.
+    Uses internal Docker networking to communicate with the container's control API.
     Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
     """
 
@@ -784,7 +781,7 @@ async def vpn_restart_tunnel(
 ):
     """Restart the VPN tunnel for SERVICE via the control API.
 
-    Requires the service to publish port 8000 and set the `vpn.control_port` label.
+    Uses internal Docker networking to communicate with the container's control API.
     Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
     """
 
