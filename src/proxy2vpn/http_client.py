@@ -189,6 +189,34 @@ class OpenVPNStatusResponse:
     status: str
 
 
+@dataclass(slots=True)
+class DNSStatusResponse:
+    """Response payload for the ``/dns/status`` endpoint."""
+
+    status: str
+
+
+@dataclass(slots=True)
+class UpdaterStatusResponse:
+    """Response payload for the ``/updater/status`` endpoint."""
+
+    status: str
+
+
+@dataclass(slots=True)
+class PortForwardedResponse:
+    """Response payload for the ``/openvpn/portforwarded`` endpoint."""
+
+    port: int
+
+
+@dataclass(slots=True)
+class OpenVPNSettingsResponse:
+    """Response payload for the ``/openvpn/settings`` endpoint."""
+
+    settings: dict[str, str]
+
+
 class GluetunControlClient(HTTPClient):
     """Client for interacting with Gluetun's control API."""
 
@@ -235,3 +263,29 @@ class GluetunControlClient(HTTPClient):
         payload = {"status": "restarted"}
         data = await self.request("PUT", self.ENDPOINTS["openvpn_status"], json=payload)
         return OpenVPNStatusResponse(**data)
+
+    async def dns_status(self) -> DNSStatusResponse:
+        data = await self.get(self.ENDPOINTS["dns_status"])
+        return DNSStatusResponse(**data)
+
+    async def set_dns_status(self, enabled: bool) -> DNSStatusResponse:
+        payload = {"status": "running" if enabled else "stopped"}
+        data = await self.request("PUT", self.ENDPOINTS["dns_status"], json=payload)
+        return DNSStatusResponse(**data)
+
+    async def updater_status(self) -> UpdaterStatusResponse:
+        data = await self.get(self.ENDPOINTS["updater_status"])
+        return UpdaterStatusResponse(**data)
+
+    async def set_updater_status(self, enabled: bool) -> UpdaterStatusResponse:
+        payload = {"status": "running" if enabled else "stopped"}
+        data = await self.request("PUT", self.ENDPOINTS["updater_status"], json=payload)
+        return UpdaterStatusResponse(**data)
+
+    async def port_forwarded(self) -> PortForwardedResponse:
+        data = await self.get(self.ENDPOINTS["port_forwarded"])
+        return PortForwardedResponse(**data)
+
+    async def openvpn_settings(self) -> OpenVPNSettingsResponse:
+        data = await self.get(self.ENDPOINTS["openvpn_settings"])
+        return OpenVPNSettingsResponse(**data)

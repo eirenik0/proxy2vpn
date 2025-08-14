@@ -48,4 +48,8 @@ CONTROL_API_ENDPOINTS = {
     "openvpn": "/openvpn",
     "ip": "/ip",
     "openvpn_status": "/openvpn/status",
+    "dns_status": "/dns/status",
+    "updater_status": "/updater/status",
+    "port_forwarded": "/openvpn/portforwarded",
+    "openvpn_settings": "/openvpn/settings",
 }

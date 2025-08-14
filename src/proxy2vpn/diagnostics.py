@@ -162,6 +162,112 @@ class DiagnosticAnalyzer:
             )
         return results
 
+    async def check_control_server(self, container_name: str) -> list[DiagnosticResult]:
+        """Check control server health using Gluetun control API."""
+        from .docker_ops import docker_network_request
+        import json
+
+        results: list[DiagnosticResult] = []
+
+        # Test basic control server connectivity
+        try:
+            response = docker_network_request(container_name, "/v1/openvpn/status")
+            data = json.loads(response)
+            status = data.get("status", "").lower()
+
+            if status in ["running", "stopped"]:
+                results.append(
+                    DiagnosticResult(
+                        "control_server",
+                        True,
+                        f"Control server accessible (OpenVPN: {status})",
+                        "",
+                    )
+                )
+            else:
+                results.append(
+                    DiagnosticResult(
+                        "control_server",
+                        False,
+                        f"Control server reports unexpected status: {status}",
+                        "Check container health and network connectivity.",
+                    )
+                )
+        except Exception as e:
+            results.append(
+                DiagnosticResult(
+                    "control_server",
+                    False,
+                    f"Control server unreachable: {str(e)}",
+                    "Ensure container exposes port 8000 and is running.",
+                )
+            )
+            return results
+
+        # Test DNS status if control server is accessible
+        try:
+            response = docker_network_request(container_name, "/v1/dns/status")
+            data = json.loads(response)
+            dns_status = data.get("status", "").lower()
+
+            if dns_status == "running":
+                results.append(
+                    DiagnosticResult(
+                        "dns_server",
+                        True,
+                        "DNS server running properly",
+                        "",
+                    )
+                )
+            else:
+                results.append(
+                    DiagnosticResult(
+                        "dns_server",
+                        False,
+                        f"DNS server not running (status: {dns_status})",
+                        "Check DNS configuration or enable unbound DNS.",
+                    )
+                )
+        except Exception:
+            # DNS endpoint not available or failing - this is optional
+            pass
+
+        # Test public IP availability
+        try:
+            response = docker_network_request(container_name, "/v1/publicip/ip")
+            data = json.loads(response)
+            public_ip = data.get("public_ip")
+
+            if public_ip:
+                results.append(
+                    DiagnosticResult(
+                        "public_ip",
+                        True,
+                        f"Public IP available: {public_ip}",
+                        "",
+                    )
+                )
+            else:
+                results.append(
+                    DiagnosticResult(
+                        "public_ip",
+                        False,
+                        "Public IP not available via control API",
+                        "Check VPN connection and routing.",
+                    )
+                )
+        except Exception:
+            results.append(
+                DiagnosticResult(
+                    "public_ip",
+                    False,
+                    "Failed to retrieve public IP via control API",
+                    "Check control server connectivity and VPN status.",
+                )
+            )
+
+        return results
+
     def analyze(
         self, log_lines: Iterable[str], port: int | None = None
     ) -> list[DiagnosticResult]:
@@ -176,6 +282,26 @@ class DiagnosticAnalyzer:
         results = self.analyze_logs(log_lines)
         if port:
             results.extend(await self.check_connectivity_async(port))
+        return results
+
+    async def analyze_full_async(
+        self,
+        log_lines: Iterable[str],
+        container_name: str,
+        port: int | None = None,
+        include_control_server: bool = True,
+    ) -> list[DiagnosticResult]:
+        """Full diagnostic analysis including control server checks."""
+        results = self.analyze_logs(log_lines)
+
+        # Add connectivity check if port is provided
+        if port:
+            results.extend(await self.check_connectivity_async(port))
+
+        # Add control server checks if requested
+        if include_control_server:
+            results.extend(await self.check_control_server(container_name))
+
         return results
 
     def health_score(self, results: Iterable[DiagnosticResult]) -> int:

@@ -314,6 +314,7 @@ async def vpn_list(
         get_vpn_containers,
         get_container_ip_async,
         analyze_container_logs,
+        container_logs,
     )
     from .diagnostics import DiagnosticAnalyzer
 
@@ -354,9 +355,16 @@ async def vpn_list(
             status = container.status
             ip = ip_map.get(svc.name, "N/A")
             health = "N/A"
-            if diagnose and container.name:
-                results = analyze_container_logs(container.name, analyzer=analyzer)
-                health = str(analyzer.health_score(results)) if analyzer else "N/A"
+            if diagnose and container.name and analyzer:
+                # Use enhanced diagnostics with control server checks
+                if status == "running":
+                    logs = list(container_logs(container.name, lines=50, follow=False))
+                    results = await analyzer.analyze_full_async(
+                        logs, container.name, port=svc.port, include_control_server=True
+                    )
+                else:
+                    results = analyze_container_logs(container.name, analyzer=analyzer)
+                health = str(analyzer.health_score(results))
         else:
             status = "not created"
             ip = "N/A"
@@ -805,6 +813,104 @@ async def vpn_restart_tunnel(
         console.print("[green]\u2713[/green] Tunnel restart requested.")
 
 
+@vpn_app.command("dns-status")
+@run_async
+async def vpn_dns_status(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show DNS server status for SERVICE via the control API.
+
+    Uses internal Docker networking to communicate with the container's control API.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+
+    # Handle internal Docker network requests
+    if base_url.startswith("internal://"):
+        from .docker_ops import docker_network_request
+        import json
+
+        container_name = service
+        try:
+            response = docker_network_request(container_name, "/v1/dns/status")
+            data = json.loads(response)
+            console.print_json(data=data)
+        except Exception as e:
+            abort(f"Failed to get DNS status via internal network: {e}")
+    else:
+        async with GluetunControlClient(base_url) as client:
+            data = await client.dns_status()
+        console.print_json(data=asdict(data))
+
+
+@vpn_app.command("updater-status")
+@run_async
+async def vpn_updater_status(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show updater service status for SERVICE via the control API.
+
+    Uses internal Docker networking to communicate with the container's control API.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+
+    # Handle internal Docker network requests
+    if base_url.startswith("internal://"):
+        from .docker_ops import docker_network_request
+        import json
+
+        container_name = service
+        try:
+            response = docker_network_request(container_name, "/v1/updater/status")
+            data = json.loads(response)
+            console.print_json(data=data)
+        except Exception as e:
+            abort(f"Failed to get updater status via internal network: {e}")
+    else:
+        async with GluetunControlClient(base_url) as client:
+            data = await client.updater_status()
+        console.print_json(data=asdict(data))
+
+
+@vpn_app.command("port-forwarded")
+@run_async
+async def vpn_port_forwarded(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show forwarded port for SERVICE via the control API.
+
+    Uses internal Docker networking to communicate with the container's control API.
+    Optional basic auth can be provided via the `GLUETUN_CONTROL_AUTH` env var.
+    """
+
+    base_url = _service_control_base_url(ctx, service)
+
+    # Handle internal Docker network requests
+    if base_url.startswith("internal://"):
+        from .docker_ops import docker_network_request
+        import json
+
+        container_name = service
+        try:
+            response = docker_network_request(
+                container_name, "/v1/openvpn/portforwarded"
+            )
+            data = json.loads(response)
+            console.print(data.get("port", "N/A"))
+        except Exception as e:
+            abort(f"Failed to get forwarded port via internal network: {e}")
+    else:
+        async with GluetunControlClient(base_url) as client:
+            port = await client.port_forwarded()
+        console.print(port.port)
+
+
 # ---------------------------------------------------------------------------
 # Server commands
 # ---------------------------------------------------------------------------
@@ -944,7 +1050,27 @@ def system_diagnose(
         )
 
         assert container.name is not None  # Type narrowing after null check
-        results = analyze_container_logs(container.name, lines=lines, analyzer=analyzer)
+
+        # Use enhanced diagnostics for running containers
+        if container.status == "running":
+            from .docker_ops import container_logs
+            import asyncio
+
+            logs = list(container_logs(container.name, lines=lines, follow=False))
+            # Get port from container labels
+            port_str = container.labels.get("vpn.port")
+            port = int(port_str) if port_str and port_str.isdigit() else None
+
+            results = asyncio.run(
+                analyzer.analyze_full_async(
+                    logs, container.name, port=port, include_control_server=True
+                )
+            )
+        else:
+            results = analyze_container_logs(
+                container.name, lines=lines, analyzer=analyzer
+            )
+
         logger.debug(
             "log_analysis_complete",
             extra={"container_name": container.name, "issues_found": len(results)},
