@@ -322,9 +322,6 @@ def vpn_create(
 @run_async
 async def vpn_list(
     ctx: typer.Context,
-    diagnose: bool = typer.Option(
-        False, "--diagnose", help="(Deprecated: diagnostics are now always included)"
-    ),
     ips_only: bool = typer.Option(
         False, "--ips-only", help="Show only container IP addresses"
     ),
