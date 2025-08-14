@@ -44,6 +44,29 @@ logger = get_logger(__name__)
 console = Console()
 
 
+def format_health_score(score) -> str:
+    """Format health score with color gradient from red (0) to green (100)."""
+    if score == "N/A":
+        return "N/A"
+
+    try:
+        score = int(score)
+    except (ValueError, TypeError):
+        return str(score)
+
+    # Clamp score to 0-100 range
+    score = max(0, min(100, score))
+
+    # Calculate RGB values for gradient from red to green
+    # Red (255, 0, 0) at score 0 -> Green (0, 255, 0) at score 100
+    red = int(255 * (100 - score) / 100)
+    green = int(255 * score / 100)
+    blue = 0
+
+    # Format as Rich RGB color
+    return f"[rgb({red},{green},{blue})]{score}[/rgb({red},{green},{blue})]"
+
+
 def _service_control_base_url(ctx: typer.Context, name: str) -> str:
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
@@ -381,7 +404,7 @@ async def vpn_list(
             ip,
         ]
         if diagnose:
-            row.append(health)
+            row.append(format_health_score(health))
         table.add_row(*row)
 
     if diagnose:
@@ -392,15 +415,11 @@ async def vpn_list(
                 await add_row(i, svc)
                 progress.advance(task)
 
-            await asyncio.gather(*[
-                process_service(i, svc)
-                for i, svc in enumerate(services, 1)
-            ])
+            await asyncio.gather(
+                *[process_service(i, svc) for i, svc in enumerate(services, 1)]
+            )
     else:
-        await asyncio.gather(*[
-            add_row(i, svc)
-            for i, svc in enumerate(services, 1)
-        ])
+        await asyncio.gather(*[add_row(i, svc) for i, svc in enumerate(services, 1)])
 
     console.print(table)
 
