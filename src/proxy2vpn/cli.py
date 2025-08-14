@@ -387,12 +387,20 @@ async def vpn_list(
     if diagnose:
         with Progress() as progress:
             task = progress.add_task("[cyan]Checking", total=len(services))
-            for i, svc in enumerate(services, 1):
+
+            async def process_service(i: int, svc: VPNService):
                 await add_row(i, svc)
                 progress.advance(task)
+
+            await asyncio.gather(*[
+                process_service(i, svc)
+                for i, svc in enumerate(services, 1)
+            ])
     else:
-        for i, svc in enumerate(services, 1):
-            await add_row(i, svc)
+        await asyncio.gather(*[
+            add_row(i, svc)
+            for i, svc in enumerate(services, 1)
+        ])
 
     console.print(table)
 
