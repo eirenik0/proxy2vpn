@@ -323,13 +323,13 @@ def vpn_create(
 async def vpn_list(
     ctx: typer.Context,
     diagnose: bool = typer.Option(
-        False, "--diagnose", help="Include diagnostic health scores"
+        False, "--diagnose", help="(Deprecated: diagnostics are now always included)"
     ),
     ips_only: bool = typer.Option(
         False, "--ips-only", help="Show only container IP addresses"
     ),
 ):
-    """List VPN services with their status and IP addresses."""
+    """List VPN services with their status, IP addresses, and health diagnostics."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
@@ -352,7 +352,7 @@ async def vpn_list(
 
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
-    analyzer = DiagnosticAnalyzer() if diagnose else None
+    analyzer = DiagnosticAnalyzer()
 
     running = {name: c for name, c in containers.items() if c.status == "running"}
     ips = await asyncio.gather(
@@ -369,8 +369,7 @@ async def vpn_list(
     table.add_column("Location")
     table.add_column("Status")
     table.add_column("IP")
-    if diagnose:
-        table.add_column("Health")
+    table.add_column("Health")
 
     async def add_row(i: int, svc: VPNService):
         container = containers.get(svc.name)
@@ -378,7 +377,7 @@ async def vpn_list(
             status = container.status
             ip = ip_map.get(svc.name, "N/A")
             health = "N/A"
-            if diagnose and container.name and analyzer:
+            if container.name and analyzer:
                 # Use enhanced diagnostics with control server checks
                 if status == "running":
                     logs = list(container_logs(container.name, lines=50, follow=False))
@@ -403,23 +402,19 @@ async def vpn_list(
             f"[{status_style}]{status}[/{status_style}]",
             ip,
         ]
-        if diagnose:
-            row.append(format_health_score(health))
+        row.append(format_health_score(health))
         table.add_row(*row)
 
-    if diagnose:
-        with Progress() as progress:
-            task = progress.add_task("[cyan]Checking", total=len(services))
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Checking", total=len(services))
 
-            async def process_service(i: int, svc: VPNService):
-                await add_row(i, svc)
-                progress.advance(task)
+        async def process_service(i: int, svc: VPNService):
+            await add_row(i, svc)
+            progress.advance(task)
 
-            await asyncio.gather(
-                *[process_service(i, svc) for i, svc in enumerate(services, 1)]
-            )
-    else:
-        await asyncio.gather(*[add_row(i, svc) for i, svc in enumerate(services, 1)])
+        await asyncio.gather(
+            *[process_service(i, svc) for i, svc in enumerate(services, 1)]
+        )
 
     console.print(table)
 
