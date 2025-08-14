@@ -184,9 +184,6 @@ class ComposeManager:
 
         port = start or 20000
         used = {svc.port for svc in self.list_services()}
-        used.update(
-            {svc.control_port for svc in self.list_services() if svc.control_port}
-        )
         while port in used:
             port += 1
         return port

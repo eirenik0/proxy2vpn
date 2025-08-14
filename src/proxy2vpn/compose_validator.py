@@ -15,7 +15,7 @@ class ValidationError(Exception):
 REQUIRED_TOP_LEVEL_KEYS = ["services"]
 PROFILE_REQUIRED_FIELDS = ["image", "cap_add", "devices", "env_file"]
 SERVICE_REQUIRED_FIELDS = ["ports", "environment", "labels"]
-LABEL_REQUIRED_FIELDS = ["vpn.type", "vpn.port", "vpn.control_port", "vpn.profile"]
+LABEL_REQUIRED_FIELDS = ["vpn.type", "vpn.port", "vpn.profile"]
 
 
 def _parse_yaml(path: Path):
