@@ -66,6 +66,19 @@ def test_vpn_list_includes_provider_and_location(monkeypatch):
     async def fake_get_ip(container):
         return "1.2.3.4"
 
+    # Mock container_logs to avoid Docker API calls
+    monkeypatch.setattr(docker_ops, "container_logs", lambda name, lines, follow: [])
+    
+    # Mock DiagnosticAnalyzer methods
+    async def mock_analyze_full_async(self, logs, service, port=None, include_control_server=True):
+        return []
+    
+    monkeypatch.setattr(docker_ops, "analyze_container_logs", lambda name, analyzer: [])
+
+    from proxy2vpn.diagnostics import DiagnosticAnalyzer
+    monkeypatch.setattr(DiagnosticAnalyzer, "analyze_full_async", mock_analyze_full_async)
+    monkeypatch.setattr(DiagnosticAnalyzer, "health_score", lambda self, results: 100)
+
     monkeypatch.setattr(docker_ops, "get_container_ip_async", fake_get_ip)
     monkeypatch.setattr(cli, "ComposeManager", DummyComposeManager)
 

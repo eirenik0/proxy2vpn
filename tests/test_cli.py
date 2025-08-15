@@ -39,6 +39,13 @@ def test_system_diagnose_specific_container(monkeypatch):
         diagnostics.DiagnosticAnalyzer, "analyze_full_async", mock_analyze_full_async
     )
 
+    # Mock ComposeManager to avoid compose.yml file requirement
+    class DummyComposeManager:
+        def __init__(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(cli, "ComposeManager", DummyComposeManager)
+
     result = runner.invoke(cli.app, ["system", "diagnose", "vpn1"])
     assert result.exit_code == 0
     assert "vpn1: status=running health=100" in result.stdout
