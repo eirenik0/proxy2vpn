@@ -244,6 +244,20 @@ def profile_apply(
 # ---------------------------------------------------------------------------
 
 
+def _validate_service_locations(services: list[VPNService], force: bool) -> None:
+    if force:
+        return
+    mgr = ServerManager()
+    for svc in services:
+        loc = getattr(svc, "location", "")
+        provider = getattr(svc, "provider", "")
+        if loc and not mgr.validate_location(provider, loc):
+            abort(
+                f"Invalid location '{loc}' for {provider}",
+                "Use --force to override",
+            )
+
+
 @vpn_app.command("create")
 def vpn_create(
     ctx: typer.Context,
@@ -256,6 +270,9 @@ def vpn_create(
     ),
     provider: str = typer.Option(config.DEFAULT_PROVIDER),
     location: str = typer.Option("", help="Optional location, e.g. city"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Ignore location validation"
+    ),
 ):
     """Create a VPN service entry in the compose file."""
 
@@ -274,7 +291,17 @@ def vpn_create(
     env = {"VPN_SERVICE_PROVIDER": provider}
     location = location.strip()
     if location:
-        env["SERVER_CITIES"] = location
+        mgr = ServerManager()
+        if not force and not mgr.validate_location(provider, location):
+            abort(
+                f"Invalid location '{location}' for {provider}",
+                "Use --force to override",
+            )
+        city, country = mgr.parse_location(provider, location)
+        if city:
+            env["SERVER_CITIES"] = city
+        if country:
+            env["SERVER_COUNTRIES"] = country
     labels = {
         "vpn.type": "vpn",
         "vpn.port": str(port),
@@ -396,6 +423,9 @@ def vpn_start(
         None, callback=lambda v: sanitize_name(v) if v else None
     ),
     all: bool = typer.Option(False, "--all", help="Start all VPN services"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Ignore location validation"
+    ),
 ):
     """Start one or all VPN containers."""
 
@@ -404,6 +434,8 @@ def vpn_start(
     if all and name is not None:
         abort("Cannot specify NAME when using --all")
     if all:
+        services = manager.list_services()
+        _validate_service_locations(services, force)
         from .docker_ops import start_all_vpn_containers
 
         results = start_all_vpn_containers(manager)
@@ -420,6 +452,7 @@ def vpn_start(
     except KeyError:
         abort(f"Service '{name}' not found")
     assert svc is not None  # Type narrowing after successful assignment
+    _validate_service_locations([svc], force)
 
     from .docker_ops import (
         start_container,
@@ -498,6 +531,9 @@ def vpn_restart(
         None, callback=lambda v: sanitize_name(v) if v else None
     ),
     all: bool = typer.Option(False, "--all", help="Restart all VPN services"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Ignore location validation"
+    ),
 ):
     """Restart one or all VPN containers."""
 
@@ -506,9 +542,10 @@ def vpn_restart(
     if all and name is not None:
         abort("Cannot specify NAME when using --all")
     if all:
+        services = manager.list_services()
+        _validate_service_locations(services, force)
         from .docker_ops import recreate_vpn_container, start_container
 
-        services = manager.list_services()
         for svc in services:
             profile = manager.get_profile(svc.profile)
             try:
@@ -530,6 +567,7 @@ def vpn_restart(
     except KeyError:
         abort(f"Service '{name}' not found")
     assert svc is not None  # Type narrowing after successful assignment
+    _validate_service_locations([svc], force)
 
     from .docker_ops import (
         recreate_vpn_container,
