@@ -8,6 +8,7 @@ import shutil
 from filelock import FileLock
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, merge_attrib
+from ruamel.yaml.mergevalue import MergeValue
 
 from .models import Profile, VPNService
 from .compose_validator import validate_compose
@@ -103,7 +104,11 @@ class ComposeManager:
         if profile_map is None:
             raise KeyError(f"Profile '{service.profile}' not found")
         svc_map = CommentedMap(service.to_compose_service())
-        setattr(svc_map, merge_attrib, [(0, profile_map)])
+        merge_val = MergeValue()
+        merge_val.value = [profile_map]
+        merge_val.merge_pos = 0
+        merge_val.sequence = None
+        setattr(svc_map, merge_attrib, merge_val)
         services[service.name] = svc_map
         self.save()
 
@@ -128,7 +133,11 @@ class ComposeManager:
 
         # Update service configuration
         svc_map = CommentedMap(service.to_compose_service())
-        setattr(svc_map, merge_attrib, [(0, profile_map)])  # YAML merge
+        merge_val = MergeValue()
+        merge_val.value = [profile_map]
+        merge_val.merge_pos = 0
+        merge_val.sequence = None
+        setattr(svc_map, merge_attrib, merge_val)  # YAML merge
         services[service.name] = svc_map
         self.save()
 

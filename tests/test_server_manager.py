@@ -64,4 +64,10 @@ def test_location_helpers():
     assert mgr.list_countries("prov") == ["CA", "US"]
     assert mgr.list_cities("prov", "US") == ["Los Angeles", "New York"]
     assert mgr.validate_location("prov", "Toronto")
+    assert mgr.validate_location("prov", "CA")
+    assert mgr.validate_location("prov", "Toronto,CA")
     assert not mgr.validate_location("prov", "Paris")
+    assert not mgr.validate_location("prov", "Paris,FR")
+    assert mgr.parse_location("prov", "Toronto") == ("Toronto", None)
+    assert mgr.parse_location("prov", "CA") == (None, "CA")
+    assert mgr.parse_location("prov", "Toronto,CA") == ("Toronto", "CA")

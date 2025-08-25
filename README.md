@@ -78,7 +78,7 @@ services:
   vpn1:
     image: qmcgaw/gluetun
     ports:
-      - "8888:8888/tcp"    # proxy port
+      - "0.0.0.0:8888:8888/tcp"    # proxy port
     labels:
       vpn.type: vpn
       vpn.port: "8888"

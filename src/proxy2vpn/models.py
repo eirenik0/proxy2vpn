@@ -87,7 +87,7 @@ class VPNService:
         env_list = [f"{k}={v}" for k, v in self.environment.items()]
         # Add both proxy port (8888) and control API port (8000)
         ports = [
-            f"{self.port}:8888/tcp",  # Proxy port
+            f"0.0.0.0:{self.port}:8888/tcp",  # Proxy port
             f"{self.control_port}:8000/tcp",  # Control API port
         ]
         labels = dict(self.labels)

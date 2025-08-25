@@ -41,6 +41,7 @@ def test_plan_deployment_basic_allocation(fleet_manager, monkeypatch):
     ]
     assert [s.profile for s in plan.services] == ["acc1", "acc2"]
     assert [s.port for s in plan.services] == [30000, 30001]
+    assert [s.country for s in plan.services] == ["A", "B"]
 
 
 def test_plan_deployment_sanitizes_and_limits(fleet_manager, monkeypatch):
@@ -116,6 +117,20 @@ def test_plan_deployment_unique_ips(fleet_manager):
     assert len(set(hostnames)) == 3
     ips = [s.ip for s in plan.services]
     assert len(set(ips)) == 3
+
+
+def test_create_service_from_plan_includes_country_env(fleet_manager):
+    sp = ServicePlan(
+        name="prov-a-city1",
+        profile="acc",
+        location="City1",
+        country="A",
+        port=20000,
+        provider="prov",
+    )
+    svc = fleet_manager._create_service_from_plan(sp)
+    assert svc.environment["SERVER_CITIES"] == "City1"
+    assert svc.environment["SERVER_COUNTRIES"] == "A"
 
 
 def test_plan_deployment_missing_profile(fleet_manager, monkeypatch):
@@ -270,7 +285,11 @@ def test_start_services_sequential_passes_service_name(monkeypatch, tmp_path):
         provider="prov",
         profile="acc",
         location="city1",
-        environment={"VPN_SERVICE_PROVIDER": "prov", "SERVER_CITIES": "city1"},
+        environment={
+            "VPN_SERVICE_PROVIDER": "prov",
+            "SERVER_CITIES": "city1",
+            "SERVER_COUNTRIES": "a",
+        },
         labels={
             "vpn.type": "vpn",
             "vpn.port": "21000",
@@ -319,7 +338,11 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
         provider="prov",
         profile="acc1",
         location="city1",
-        environment={"VPN_SERVICE_PROVIDER": "prov", "SERVER_CITIES": "city1"},
+        environment={
+            "VPN_SERVICE_PROVIDER": "prov",
+            "SERVER_CITIES": "city1",
+            "SERVER_COUNTRIES": "a",
+        },
         labels={
             "vpn.type": "vpn",
             "vpn.port": "20000",
@@ -334,7 +357,11 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
         provider="prov",
         profile="acc1",
         location="city2",
-        environment={"VPN_SERVICE_PROVIDER": "prov", "SERVER_CITIES": "city2"},
+        environment={
+            "VPN_SERVICE_PROVIDER": "prov",
+            "SERVER_CITIES": "city2",
+            "SERVER_COUNTRIES": "a",
+        },
         labels={
             "vpn.type": "vpn",
             "vpn.port": "20001",
@@ -349,7 +376,11 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
         provider="prov",
         profile="acc2",
         location="city3",
-        environment={"VPN_SERVICE_PROVIDER": "prov", "SERVER_CITIES": "city3"},
+        environment={
+            "VPN_SERVICE_PROVIDER": "prov",
+            "SERVER_CITIES": "city3",
+            "SERVER_COUNTRIES": "b",
+        },
         labels={
             "vpn.type": "vpn",
             "vpn.port": "20002",
