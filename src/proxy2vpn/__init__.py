@@ -52,12 +52,14 @@ class CLI:
         from .adapters.server_manager import ServerManager
         from .adapters.http_client import GluetunControlClient
         from .cli.commands.profile import apply as profile_apply
+        from .cli.commands.system import init as system_init
 
         mapping = {
             "ComposeManager": ComposeManager,
             "ServerManager": ServerManager,
             "GluetunControlClient": GluetunControlClient,
             "profile_apply": profile_apply,
+            "system_init": system_init,
         }
         if name in mapping:
             return mapping[name]

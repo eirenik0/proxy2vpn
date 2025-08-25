@@ -35,6 +35,7 @@ logger = get_logger(__name__)
 
 
 def _service_control_base_url(ctx: typer.Context, name: str) -> str:
+    # Delay compose file access until needed
     manager = get_compose_manager(ctx)
     svc = validate_service_exists(manager, name)
     return f"http://localhost:{svc.control_port}/v1"
@@ -160,6 +161,7 @@ async def list_services(
             console.print(f"{container.name}: {ip}")
         return
 
+    manager = get_compose_manager(ctx)
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
     analyzer = DiagnosticAnalyzer() if diagnose else None
