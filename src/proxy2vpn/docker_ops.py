@@ -12,7 +12,7 @@ from .compose_manager import ComposeManager
 from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from .models import Profile, VPNService
 from .logging_utils import get_logger
-from . import ip_utils
+from . import config, ip_utils
 
 import docker
 from docker.models.containers import Container
@@ -171,6 +171,16 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
             "8888/tcp": service.port,
             "8000/tcp": ("127.0.0.1", service.control_port),
         }
+        auth_config = config.CONTROL_AUTH_CONFIG_FILE
+        if not auth_config.exists():
+            auth_config.parent.mkdir(parents=True, exist_ok=True)
+            auth_config.write_text(config.CONTROL_AUTH_CONFIG_TEMPLATE)
+        volumes = {
+            str(auth_config.resolve()): {
+                "bind": "/gluetun/auth/config.toml",
+                "mode": "ro",
+            }
+        }
         container = client.containers.create(
             profile.image,
             name=service.name,
@@ -181,6 +191,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
             cap_add=profile.cap_add,
             devices=profile.devices,
             network="proxy2vpn_network",
+            volumes=volumes,
         )
         logger.info(
             "vpn_container_created",

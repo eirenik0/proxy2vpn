@@ -53,3 +53,23 @@ CONTROL_API_ENDPOINTS = {
     "ip": "/ip",
     "openvpn_status": "/openvpn/status",
 }
+
+# Path to the control server authentication configuration mounted into
+# each Gluetun container.  The configuration disables authentication for
+# a small set of non-sensitive routes used by proxy2vpn so the control
+# API can be queried without manual setup.
+CONTROL_AUTH_CONFIG_FILE: Path = Path("control-server-auth.toml")
+
+# Default content of the control server authentication configuration.
+# It declares a single role allowing access to the endpoints required by
+# proxy2vpn with ``auth = "none"`` so no credentials are needed.
+CONTROL_AUTH_CONFIG_TEMPLATE = """[[roles]]
+name = "proxy2vpn"
+auth = "none"
+routes = [
+  "GET /v1/status",
+  "GET /v1/ip",
+  "POST /v1/openvpn",
+  "PUT /v1/openvpn/status",
+]
+"""
