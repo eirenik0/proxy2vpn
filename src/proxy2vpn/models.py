@@ -61,7 +61,7 @@ class VPNService:
 
     def to_compose_service(self) -> dict:
         env_list = [f"{k}={v}" for k, v in self.environment.items()]
-        ports = [f"{self.port}:8888/tcp"]
+        ports = [f"0.0.0.0:{self.port}:8888/tcp"]
         labels = dict(self.labels)
         labels.setdefault("vpn.port", str(self.port))
         service = {
