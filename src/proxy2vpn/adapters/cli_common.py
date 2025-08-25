@@ -4,9 +4,9 @@ from pathlib import Path
 
 import typer
 
-from . import config
+from ..core import config
 from .compose_manager import ComposeManager
-from .models import VPNService
+from ..core.models import VPNService
 from .utils import abort
 
 

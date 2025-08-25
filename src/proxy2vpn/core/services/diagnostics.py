@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 from typing import Iterable
 
-from . import ip_utils
+from ...adapters import ip_utils
 
 
 @dataclass

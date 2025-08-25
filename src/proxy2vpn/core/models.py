@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .validators import sanitize_name, sanitize_path, validate_port
+from ..adapters.validators import sanitize_name, sanitize_path, validate_port
 
 
 @dataclass

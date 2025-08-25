@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from .display_utils import console
 from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError
 from .logging_utils import get_logger
-from .models import VPNService
+from ..core.models import VPNService
 
 logger = get_logger(__name__)
 

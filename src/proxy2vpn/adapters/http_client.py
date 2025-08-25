@@ -11,7 +11,12 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from .config import CONTROL_API_ENDPOINTS, DEFAULT_TIMEOUT, MAX_RETRIES, VERIFY_SSL
+from ..core.config import (
+    CONTROL_API_ENDPOINTS,
+    DEFAULT_TIMEOUT,
+    MAX_RETRIES,
+    VERIFY_SSL,
+)
 from .logging_utils import get_logger
 from typing import Self
 

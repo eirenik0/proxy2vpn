@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import config
+from ..core import config
 from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError, RetryPolicy
 from .utils import abort
 

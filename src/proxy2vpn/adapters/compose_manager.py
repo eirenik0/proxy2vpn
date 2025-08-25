@@ -8,11 +8,19 @@ import shutil
 from filelock import FileLock
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, merge_attrib
-from ruamel.yaml.mergevalue import MergeValue
 
-from .models import Profile, VPNService
+from ..core.models import Profile, VPNService
+from ..core import config
 from .compose_validator import validate_compose
-from . import config
+
+
+# Simple MergeValue replacement for YAML merge operations
+class MergeValue:
+    def __init__(self):
+        self.value = None
+        self.merge_pos = 0
+        self.sequence = None
+
 
 # Minimal compose template used when initializing a new project
 INITIAL_COMPOSE_TEMPLATE = """\

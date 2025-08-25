@@ -7,7 +7,7 @@ from .compose_manager import ComposeManager
 from .display_utils import console
 from .docker_ops import ensure_network, remove_container, stop_container
 from .logging_utils import get_logger
-from .models import VPNService
+from ..core.models import VPNService
 from .server_manager import ServerManager
 
 logger = get_logger(__name__)
@@ -123,7 +123,7 @@ class FleetManager:
     """Manages bulk VPN deployments across cities and profiles"""
 
     def __init__(self, compose_file_path=None):
-        from . import config
+        from ..core import config
 
         self.server_manager = ServerManager()
         compose_path = compose_file_path or config.COMPOSE_FILE

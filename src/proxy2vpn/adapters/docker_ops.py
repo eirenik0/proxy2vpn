@@ -7,11 +7,12 @@ from typing import Iterable, Iterator, Callable, Any
 import time
 
 from .compose_manager import ComposeManager
-from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
+from ..core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from .display_utils import console
-from .models import Profile, VPNService
+from ..core.models import Profile, VPNService
 from .logging_utils import get_logger
-from . import config, ip_utils
+from ..core import config
+from . import ip_utils
 
 import docker
 from docker.models.containers import Container
