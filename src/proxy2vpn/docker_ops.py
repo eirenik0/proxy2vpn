@@ -224,6 +224,32 @@ def start_container(name: str) -> Container:
         raise  # Let the original exception propagate to preserve NotFound type
 
 
+def start_vpn_service(service: VPNService, profile: Profile, force: bool) -> Container:
+    """Ensure a VPN service container exists and is running.
+
+    If ``force`` is True the container is recreated before being started.
+    Otherwise an attempt is made to start an existing container and a new
+    one is created only if it does not already exist.
+    """
+
+    from docker.errors import NotFound
+
+    try:
+        if force:
+            container = recreate_vpn_container(service, profile)
+            _retry(container.start, exceptions=(DockerException,))
+            return container
+
+        try:
+            return start_container(service.name)
+        except NotFound:
+            container = create_vpn_container(service, profile)
+            _retry(container.start, exceptions=(DockerException,))
+            return container
+    except DockerException as exc:
+        raise RuntimeError(f"Failed to start container {service.name}: {exc}") from exc
+
+
 def stop_container(name: str) -> Container:
     """Stop a running container by name."""
     client = _client()
@@ -389,14 +415,10 @@ def start_all_vpn_containers(manager: ComposeManager) -> list[str]:
     """Recreate and start all VPN containers."""
 
     results: list[str] = []
-    try:
-        for svc in manager.list_services():
-            profile = manager.get_profile(svc.profile)
-            container = recreate_vpn_container(svc, profile)
-            _retry(container.start, exceptions=(DockerException,))
-            results.append(svc.name)
-    except DockerException as exc:
-        raise RuntimeError(f"Failed to start containers: {exc}") from exc
+    for svc in manager.list_services():
+        profile = manager.get_profile(svc.profile)
+        start_vpn_service(svc, profile, force=True)
+        results.append(svc.name)
     return results
 
 

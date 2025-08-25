@@ -472,12 +472,7 @@ class FleetManager:
 
     async def _start_services_parallel(self, service_names: list[str], force: bool):
         """Start services in parallel with limited concurrency"""
-        from docker.errors import NotFound
-        from .docker_ops import (
-            create_vpn_container,
-            recreate_vpn_container,
-            start_container,
-        )
+        from .docker_ops import start_vpn_service
 
         semaphore = asyncio.Semaphore(5)  # Max 5 concurrent starts
 
@@ -490,20 +485,7 @@ class FleetManager:
                     service = self.compose_manager.get_service(service_name)
                     profile = self.compose_manager.get_profile(service.profile)
 
-                    # Create and start container
-                    if force:
-                        await asyncio.to_thread(
-                            recreate_vpn_container, service, profile
-                        )
-                        await asyncio.to_thread(start_container, service_name)
-                    else:
-                        try:
-                            await asyncio.to_thread(start_container, service_name)
-                        except NotFound:
-                            await asyncio.to_thread(
-                                create_vpn_container, service, profile
-                            )
-                            await asyncio.to_thread(start_container, service_name)
+                    await asyncio.to_thread(start_vpn_service, service, profile, force)
 
                     console.print(f"[green]✅[/green] Started {service_name}")
 
@@ -517,12 +499,7 @@ class FleetManager:
 
     async def _start_services_sequential(self, service_names: list[str], force: bool):
         """Start services one by one"""
-        from docker.errors import NotFound
-        from .docker_ops import (
-            create_vpn_container,
-            recreate_vpn_container,
-            start_container,
-        )
+        from .docker_ops import start_vpn_service
 
         for service_name in service_names:
             try:
@@ -532,16 +509,7 @@ class FleetManager:
                 service = self.compose_manager.get_service(service_name)
                 profile = self.compose_manager.get_profile(service.profile)
 
-                # Create and start container
-                if force:
-                    await asyncio.to_thread(recreate_vpn_container, service, profile)
-                    await asyncio.to_thread(start_container, service_name)
-                else:
-                    try:
-                        await asyncio.to_thread(start_container, service_name)
-                    except NotFound:
-                        await asyncio.to_thread(create_vpn_container, service, profile)
-                        await asyncio.to_thread(start_container, service_name)
+                await asyncio.to_thread(start_vpn_service, service, profile, force)
 
                 console.print(f"[green]✅[/green] Started {service_name}")
 
