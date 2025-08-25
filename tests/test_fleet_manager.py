@@ -398,3 +398,25 @@ def test_start_services_sequential_uses_helper(monkeypatch, fleet_manager):
     )
 
     assert calls == [("testvpn1", "test", True), ("testvpn2", "test", True)]
+
+
+def test_get_service_status_counts(monkeypatch):
+    from proxy2vpn.docker_ops import get_service_status_counts
+
+    class FakeContainer:
+        def __init__(self, name, status):
+            self.name = name
+            self.status = status
+
+    containers = [
+        FakeContainer("svc1", "running"),
+        FakeContainer("svc2", "exited"),
+    ]
+
+    monkeypatch.setattr(
+        "proxy2vpn.docker_ops.get_vpn_containers", lambda all=True: containers
+    )
+
+    running, stopped = get_service_status_counts(["svc1", "svc2", "svc3"])
+    assert running == 1
+    assert stopped == 2
