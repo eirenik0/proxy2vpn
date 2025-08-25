@@ -242,24 +242,132 @@ def test_start_all_vpn_containers_recreates(monkeypatch):
         def get_profile(self, name):
             return profile
 
-    class DummyContainer:
-        status = "created"
+    called: list[tuple[str, str, bool]] = []
 
-        def start(self):
-            return None
+    def fake_start(service, profile, force):
+        called.append((service.name, profile.name, force))
 
-    called = {"recreate": 0}
-
-    def fake_recreate(service, profile):
-        called["recreate"] += 1
-        return DummyContainer()
-
-    monkeypatch.setattr(docker_ops, "recreate_vpn_container", fake_recreate)
-    monkeypatch.setattr(docker_ops, "_retry", lambda func, **kw: func())
+    monkeypatch.setattr(docker_ops, "start_vpn_service", fake_start)
 
     results = docker_ops.start_all_vpn_containers(Manager())
     assert results == ["svc"]
-    assert called["recreate"] == 1
+    assert called == [("svc", "p", True)]
+
+
+def test_start_vpn_service_force_recreates(monkeypatch):
+    svc = docker_ops.VPNService(
+        name="svc",
+        port=1,
+        control_port=30002,
+        provider="",
+        profile="p",
+        location="",
+        environment={},
+        labels={},
+    )
+    profile = docker_ops.Profile(
+        name="p", env_file="", image="alpine", cap_add=[], devices=[]
+    )
+
+    calls = {"recreate": 0, "start": 0}
+
+    class DummyContainer:
+        def start(self):
+            calls["start"] += 1
+
+    def fake_recreate(service, profile):
+        calls["recreate"] += 1
+        return DummyContainer()
+
+    def should_not_be_called(*args, **kwargs):  # pragma: no cover - fails if called
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(docker_ops, "recreate_vpn_container", fake_recreate)
+    monkeypatch.setattr(docker_ops, "create_vpn_container", should_not_be_called)
+    monkeypatch.setattr(docker_ops, "start_container", should_not_be_called)
+    monkeypatch.setattr(docker_ops, "_retry", lambda func, **kw: func())
+
+    docker_ops.start_vpn_service(svc, profile, force=True)
+    assert calls == {"recreate": 1, "start": 1}
+
+
+def test_start_vpn_service_creates_when_missing(monkeypatch):
+    from docker.errors import NotFound
+
+    svc = docker_ops.VPNService(
+        name="svc",
+        port=1,
+        control_port=30002,
+        provider="",
+        profile="p",
+        location="",
+        environment={},
+        labels={},
+    )
+    profile = docker_ops.Profile(
+        name="p", env_file="", image="alpine", cap_add=[], devices=[]
+    )
+
+    calls = {"start_container": 0, "create": 0, "start": 0}
+
+    def fake_start_container(name):
+        calls["start_container"] += 1
+        raise NotFound("missing")
+
+    class DummyContainer:
+        def start(self):
+            calls["start"] += 1
+
+    def fake_create(service, profile):
+        calls["create"] += 1
+        return DummyContainer()
+
+    def should_not_be_called(*args, **kwargs):  # pragma: no cover - fails if called
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(docker_ops, "start_container", fake_start_container)
+    monkeypatch.setattr(docker_ops, "create_vpn_container", fake_create)
+    monkeypatch.setattr(docker_ops, "recreate_vpn_container", should_not_be_called)
+    monkeypatch.setattr(docker_ops, "_retry", lambda func, **kw: func())
+
+    docker_ops.start_vpn_service(svc, profile, force=False)
+    assert calls == {"start_container": 1, "create": 1, "start": 1}
+
+
+def test_start_vpn_service_starts_existing(monkeypatch):
+    svc = docker_ops.VPNService(
+        name="svc",
+        port=1,
+        control_port=30002,
+        provider="",
+        profile="p",
+        location="",
+        environment={},
+        labels={},
+    )
+    profile = docker_ops.Profile(
+        name="p", env_file="", image="alpine", cap_add=[], devices=[]
+    )
+
+    calls = {"start_container": 0}
+
+    class DummyContainer:
+        pass
+
+    def fake_start_container(name):
+        calls["start_container"] += 1
+        return DummyContainer()
+
+    def should_not_be_called(*args, **kwargs):  # pragma: no cover - fails if called
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(docker_ops, "start_container", fake_start_container)
+    monkeypatch.setattr(docker_ops, "create_vpn_container", should_not_be_called)
+    monkeypatch.setattr(docker_ops, "recreate_vpn_container", should_not_be_called)
+
+    result = docker_ops.start_vpn_service(svc, profile, force=False)
+    assert calls["start_container"] == 1
+    assert isinstance(result, DummyContainer)
 
 
 def test_ensure_network_recreates(monkeypatch):
