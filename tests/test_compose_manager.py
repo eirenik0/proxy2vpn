@@ -43,6 +43,7 @@ def test_add_and_remove_service(tmp_path):
     new_service = VPNService(
         name="vpn3",
         port=7777,
+        control_port=30002,
         provider="protonvpn",
         profile="test",
         location="LA",
@@ -53,6 +54,7 @@ def test_add_and_remove_service(tmp_path):
         labels={
             "vpn.type": "vpn",
             "vpn.port": "8888",
+            "vpn.control_port": "30002",
             "vpn.provider": "protonvpn",
             "vpn.profile": "test",
             "vpn.location": "LA",
@@ -79,6 +81,7 @@ def test_add_service_after_init(tmp_path):
     service = VPNService(
         name="vpn1",
         port=12345,
+        control_port=30003,
         provider="protonvpn",
         profile="andr",
         location="LA",
@@ -89,6 +92,7 @@ def test_add_service_after_init(tmp_path):
         labels={
             "vpn.type": "vpn",
             "vpn.port": "12345",
+            "vpn.control_port": "30003",
             "vpn.provider": "protonvpn",
             "vpn.profile": "andr",
             "vpn.location": "LA",
@@ -98,6 +102,7 @@ def test_add_service_after_init(tmp_path):
     compose_text = compose_path.read_text()
     assert "<<: *vpn-base-andr" in compose_text
     assert "0.0.0.0:12345:8888/tcp" in compose_text
+    assert "127.0.0.1:30003:8000/tcp" in compose_text
 
 
 def test_recover_from_corruption(tmp_path):

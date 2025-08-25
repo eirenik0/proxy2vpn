@@ -126,6 +126,7 @@ def test_create_service_from_plan_includes_country_env(fleet_manager):
         location="City1",
         country="A",
         port=20000,
+        control_port=30000,
         provider="prov",
     )
     svc = fleet_manager._create_service_from_plan(sp)
@@ -159,6 +160,7 @@ def test_deploy_fleet_rolls_back_on_error(monkeypatch, fleet_manager, capsys):
             location="L1",
             country="C",
             port=10000,
+            control_port=30000,
             provider="prov",
         ),
         ServicePlan(
@@ -167,6 +169,7 @@ def test_deploy_fleet_rolls_back_on_error(monkeypatch, fleet_manager, capsys):
             location="L2",
             country="C",
             port=10001,
+            control_port=30001,
             provider="prov",
         ),
     ]
@@ -225,6 +228,7 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
             location="good",
             country="C",
             port=10000,
+            control_port=30000,
             provider="prov",
         ),
         ServicePlan(
@@ -233,6 +237,7 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
             location="bad",
             country="C",
             port=10001,
+            control_port=30001,
             provider="prov",
         ),
     ]
@@ -282,6 +287,7 @@ def test_start_services_sequential_passes_service_name(monkeypatch, tmp_path):
     svc = VPNService(
         name="prov-a-city1",
         port=21000,
+        control_port=30000,
         provider="prov",
         profile="acc",
         location="city1",
@@ -293,6 +299,7 @@ def test_start_services_sequential_passes_service_name(monkeypatch, tmp_path):
         labels={
             "vpn.type": "vpn",
             "vpn.port": "21000",
+            "vpn.control_port": "30000",
             "vpn.provider": "prov",
             "vpn.profile": "acc",
             "vpn.location": "city1",
@@ -335,6 +342,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
     svc1 = VPNService(
         name="prov-a-city1",
         port=20000,
+        control_port=31000,
         provider="prov",
         profile="acc1",
         location="city1",
@@ -346,6 +354,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
         labels={
             "vpn.type": "vpn",
             "vpn.port": "20000",
+            "vpn.control_port": "31000",
             "vpn.provider": "prov",
             "vpn.profile": "acc1",
             "vpn.location": "city1",
@@ -354,6 +363,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
     svc2 = VPNService(
         name="prov-a-city2",
         port=20001,
+        control_port=31001,
         provider="prov",
         profile="acc1",
         location="city2",
@@ -365,6 +375,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
         labels={
             "vpn.type": "vpn",
             "vpn.port": "20001",
+            "vpn.control_port": "31001",
             "vpn.provider": "prov",
             "vpn.profile": "acc1",
             "vpn.location": "city2",
@@ -373,6 +384,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
     svc3 = VPNService(
         name="prov-b-city3",
         port=20002,
+        control_port=31002,
         provider="prov",
         profile="acc2",
         location="city3",
@@ -384,6 +396,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
         labels={
             "vpn.type": "vpn",
             "vpn.port": "20002",
+            "vpn.control_port": "31002",
             "vpn.provider": "prov",
             "vpn.profile": "acc2",
             "vpn.location": "city3",

@@ -167,7 +167,10 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         env = _load_env_file(profile.env_file)
         env.update(service.environment)
         ensure_network()
-        port_bindings = {"8888/tcp": service.port}
+        port_bindings = {
+            "8888/tcp": service.port,
+            "8000/tcp": ("127.0.0.1", service.control_port),
+        }
         container = client.containers.create(
             profile.image,
             name=service.name,
@@ -609,45 +612,3 @@ def test_vpn_connection(name: str) -> bool:
     raise RuntimeError(
         "test_vpn_connection() cannot be called from an async context; use test_vpn_connection_async()."
     )
-
-
-def docker_network_request(
-    container_name: str, url_path: str, method: str = "GET"
-) -> str:
-    """Make an HTTP request to a container via Docker internal network.
-
-    Args:
-        container_name: Name of the target container
-        url_path: Path to request (e.g., "/v1/publicip/ip")
-        method: HTTP method (default: GET)
-
-    Returns:
-        Response body as string
-
-    Raises:
-        RuntimeError: If the request fails or container is not accessible
-    """
-    client = _client()
-
-    # Create a temporary container to make the HTTP request
-    network_name = "proxy2vpn_network"
-    image = "curlimages/curl:latest"
-
-    target_url = f"http://{container_name}:8000{url_path}"
-    command = ["curl", "-s", "-X", method, target_url]
-
-    try:
-        # Run curl command in a temporary container on the same network
-        result = client.containers.run(
-            image=image,
-            command=command,
-            network=network_name,
-            remove=True,
-            stdout=True,
-            stderr=True,
-        )
-        return result.decode("utf-8").strip()
-    except DockerException as exc:
-        raise RuntimeError(
-            f"Failed to make request to {container_name}: {exc}"
-        ) from exc

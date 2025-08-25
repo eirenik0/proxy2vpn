@@ -1,7 +1,5 @@
 import pathlib
-import sys
-
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
+from dataclasses import dataclass
 
 from typer.testing import CliRunner
 
@@ -11,78 +9,90 @@ from proxy2vpn import cli
 COMPOSE_FILE = pathlib.Path(__file__).with_name("test_compose.yml")
 
 
-def test_vpn_status_uses_internal_networking(monkeypatch):
+@dataclass
+class _Status:
+    status: str
+    openvpn: str
+
+
+@dataclass
+class _IP:
+    ip: str
+
+
+@dataclass
+class _Restart:
+    status: str
+
+
+class DummyClient:
+    def __init__(self, base_url):
+        self.base_url = base_url
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def status(self):
+        return _Status(status="running", openvpn="enabled")
+
+    async def public_ip(self):
+        return _IP(ip="1.2.3.4")
+
+    async def restart_tunnel(self):
+        return _Restart(status="restarted")
+
+
+def test_vpn_status_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_docker_request(container_name, url_path, method="GET"):
-        called["container_name"] = container_name
-        called["url_path"] = url_path
-        called["method"] = method
-        return '{"status": "running"}'
+    def fake_client(base_url):
+        called["base_url"] = base_url
+        return DummyClient(base_url)
 
-    # Mock the docker network request function that gets imported dynamically
-    import proxy2vpn.docker_ops
-
-    monkeypatch.setattr(
-        proxy2vpn.docker_ops, "docker_network_request", fake_docker_request
-    )
+    monkeypatch.setattr(cli, "GluetunControlClient", fake_client)
 
     result = runner.invoke(
-        cli.app,
-        ["--compose-file", str(COMPOSE_FILE), "vpn", "status", "testvpn1"],
+        cli.app, ["--compose-file", str(COMPOSE_FILE), "vpn", "status", "testvpn1"]
     )
     assert result.exit_code == 0
-    assert called["container_name"] == "testvpn1"
-    assert called["url_path"] == "/v1/openvpn/status"
+    assert called["base_url"] == "http://localhost:30000/v1"
 
 
-def test_vpn_public_ip_uses_internal_networking(monkeypatch):
+def test_vpn_public_ip_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_docker_request(container_name, url_path, method="GET"):
-        called["container_name"] = container_name
-        called["url_path"] = url_path
-        called["method"] = method
-        return '{"ip": "1.2.3.4"}'
+    def fake_client(base_url):
+        called["base_url"] = base_url
+        return DummyClient(base_url)
 
-    import proxy2vpn.docker_ops
-
-    monkeypatch.setattr(
-        proxy2vpn.docker_ops, "docker_network_request", fake_docker_request
-    )
+    monkeypatch.setattr(cli, "GluetunControlClient", fake_client)
 
     result = runner.invoke(
         cli.app,
         ["--compose-file", str(COMPOSE_FILE), "vpn", "public-ip", "testvpn1"],
     )
     assert result.exit_code == 0
-    assert called["container_name"] == "testvpn1"
-    assert called["url_path"] == "/v1/publicip/ip"
+    assert called["base_url"] == "http://localhost:30000/v1"
 
 
-def test_vpn_restart_tunnel_uses_internal_networking(monkeypatch):
+def test_vpn_restart_tunnel_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_docker_request(container_name, url_path, method="GET"):
-        called["container_name"] = container_name
-        called["url_path"] = url_path
-        called["method"] = method
-        return '{"status": "restarted"}'
+    def fake_client(base_url):
+        called["base_url"] = base_url
+        return DummyClient(base_url)
 
-    import proxy2vpn.docker_ops
-
-    monkeypatch.setattr(
-        proxy2vpn.docker_ops, "docker_network_request", fake_docker_request
-    )
+    monkeypatch.setattr(cli, "GluetunControlClient", fake_client)
 
     result = runner.invoke(
         cli.app,
         ["--compose-file", str(COMPOSE_FILE), "vpn", "restart-tunnel", "testvpn1"],
     )
     assert result.exit_code == 0
-    assert called["container_name"] == "testvpn1"
-    assert called["url_path"] == "/v1/openvpn/actions/restart"
-    assert called["method"] == "PUT"
+    assert called["base_url"] == "http://localhost:30000/v1"

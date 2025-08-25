@@ -41,6 +41,7 @@ def test_vpn_list_includes_provider_and_location(monkeypatch):
     svc = VPNService(
         name="svc",
         port=8080,
+        control_port=30000,
         provider="prov",
         profile="pro",
         location="US",

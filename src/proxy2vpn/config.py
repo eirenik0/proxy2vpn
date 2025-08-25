@@ -28,6 +28,10 @@ DEFAULT_PROVIDER = "protonvpn"
 # this value.
 DEFAULT_PORT_START = 20000
 
+# Starting port used when allocating host ports for the control API.
+# Control ports are bound to localhost and kept separate from proxy ports.
+DEFAULT_CONTROL_PORT_START = 30000
+
 # URL of the gluetun server list JSON file.  This file is fetched and
 # cached by :class:`ServerManager` to provide location validation and
 # listing of available servers.
