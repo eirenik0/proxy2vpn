@@ -362,6 +362,17 @@ def get_container_by_service_name(service_name: str) -> Container | None:
         return None
 
 
+def get_service_status_counts(names: list[str]) -> tuple[int, int]:
+    """Return counts of running and stopped services for given names."""
+    containers = {c.name: c for c in get_vpn_containers(all=True)}
+    running = sum(
+        1
+        for name in names
+        if (container := containers.get(name)) and container.status == "running"
+    )
+    return running, len(names) - running
+
+
 def get_problematic_containers(all: bool = False) -> list[Container]:
     """Return containers that are not running properly."""
 

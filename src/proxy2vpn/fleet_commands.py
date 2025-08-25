@@ -391,21 +391,10 @@ def _display_fleet_services(fleet_status: dict, format: str):
 
 def _show_fleet_status_sync(service_names: list[str]):
     """Show basic fleet status without async operations"""
-    from .docker_ops import get_vpn_containers
+    from .docker_ops import get_service_status_counts
 
     try:
-        containers = {c.name: c for c in get_vpn_containers(all=True)}
-
-        running = 0
-        stopped = 0
-
-        for name in service_names:
-            container = containers.get(name)
-            if container and container.status == "running":
-                running += 1
-            else:
-                stopped += 1
-
+        running, stopped = get_service_status_counts(service_names)
         console.print(f"  • Running: {running}")
         console.print(f"  • Stopped: {stopped}")
 
