@@ -97,6 +97,7 @@ def test_add_service_after_init(tmp_path):
     manager.add_service(service)
     compose_text = compose_path.read_text()
     assert "<<: *vpn-base-andr" in compose_text
+    assert "0.0.0.0:12345:8888/tcp" in compose_text
 
 
 def test_recover_from_corruption(tmp_path):
