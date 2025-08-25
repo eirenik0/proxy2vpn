@@ -77,8 +77,7 @@ def create(
 ):
     """Create a VPN service entry in the compose file."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
+    manager = get_compose_manager(ctx)
     try:
         manager.get_profile(profile)
     except KeyError:
@@ -115,7 +114,7 @@ def create(
         "vpn.profile": profile,
         "vpn.location": location,
     }
-    svc = VPNService(
+    svc = VPNService.create(
         name=name,
         port=port,
         control_port=control_port,
@@ -144,8 +143,7 @@ async def list_services(
 ):
     """List VPN services with their status and IP addresses."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
+    manager = get_compose_manager(ctx)
     from ...adapters.docker_ops import (
         get_vpn_containers,
         get_container_ip_async,

@@ -7,79 +7,172 @@ from ..adapters.validators import sanitize_name, sanitize_path, validate_port
 
 
 @dataclass
-class VPNService:
+class VPNContainer:
+    """Container configuration for VPN service."""
+
     name: str
-    port: int
+    proxy_port: int
     control_port: int
-    provider: str
-    profile: str
-    location: str
-    environment: dict[str, str]
-    labels: dict[str, str]
 
     def __post_init__(self) -> None:
         self.name = sanitize_name(self.name)
-        self.port = validate_port(self.port)
+        self.proxy_port = validate_port(self.proxy_port)
         self.control_port = validate_port(self.control_port)
+
+
+@dataclass
+class VPNConfig:
+    """VPN-specific configuration."""
+
+    provider: str
+    location: str
+    profile: str
+    environment: dict[str, str]
+    labels: dict[str, str]
+
+
+@dataclass
+class VPNService:
+    """Complete VPN service combining container and configuration."""
+
+    container: VPNContainer
+    config: VPNConfig
+
+    @property
+    def name(self) -> str:
+        return self.container.name
+
+    @property
+    def port(self) -> int:
+        return self.container.proxy_port
+
+    @property
+    def control_port(self) -> int:
+        return self.container.control_port
+
+    @property
+    def provider(self) -> str:
+        return self.config.provider
+
+    @property
+    def profile(self) -> str:
+        return self.config.profile
+
+    @property
+    def location(self) -> str:
+        return self.config.location
+
+    @property
+    def environment(self) -> dict[str, str]:
+        return self.config.environment
+
+    @property
+    def labels(self) -> dict[str, str]:
+        return self.config.labels
+
+    @classmethod
+    def create(
+        cls,
+        name: str,
+        port: int,
+        control_port: int,
+        provider: str,
+        profile: str,
+        location: str,
+        environment: dict[str, str],
+        labels: dict[str, str],
+    ) -> "VPNService":
+        """Backward compatible constructor for tests."""
+        container = VPNContainer(name=name, proxy_port=port, control_port=control_port)
+        config = VPNConfig(
+            provider=provider,
+            location=location,
+            profile=profile,
+            environment=environment,
+            labels=labels,
+        )
+        return cls(container=container, config=config)
 
     @classmethod
     def from_compose_service(cls, name: str, service_def: dict) -> "VPNService":
-        ports = service_def.get("ports", [])
         host_port = 0
         control_host_port = 0
-        for mapping in ports:
-            mapping = str(mapping)
-            parts = mapping.split(":")
-            if len(parts) >= 3:
-                host = int(parts[1])
-                container = parts[2]
-            elif len(parts) == 2:
-                host = int(parts[0])
-                container = parts[1]
-            else:
-                host = int(mapping)
-                container = ""
-            container_port = container.split("/")[0]
-            if container_port == "8888" and host_port == 0:
+
+        def _parse_port_mapping(p: object) -> tuple[int | None, int | None]:
+            """Return (container_port, host_port) if parseable, else (None, None)."""
+            try:
+                if isinstance(p, dict):
+                    # Compose long syntax: {target: 8888, published: 12345, protocol: tcp}
+                    target = p.get("target")
+                    published = p.get("published") or p.get("host_port")
+                    if target is not None and published is not None:
+                        return int(target), int(published)
+                    return None, None
+                # Treat everything else as string-like
+                s = str(p)
+                parts = s.split(":")
+                cont_raw = parts[-1]
+                cont_port = int(cont_raw.split("/")[0])
+                if len(parts) == 2:
+                    host = int(parts[0])
+                else:
+                    host = int(parts[-2])
+                return cont_port, host
+            except Exception:
+                return None, None
+
+        for p in service_def.get("ports", []) or []:
+            cont, host = _parse_port_mapping(p)
+            if cont == 8888 and host is not None:
                 host_port = host
-            if container_port == "8000" and control_host_port == 0:
+            elif cont == 8000 and host is not None:
                 control_host_port = host
-        env_list = service_def.get("environment", [])
+        # Parse environment variables (list or mapping)
         env_dict: dict[str, str] = {}
-        for item in env_list:
-            if isinstance(item, str) and "=" in item:
-                k, v = item.split("=", 1)
-                env_dict[k] = v
-        labels = dict(service_def.get("labels", {}))
-        provider = labels.get("vpn.provider", env_dict.get("VPN_SERVICE_PROVIDER", ""))
-        profile = labels.get("vpn.profile", "")
-        location = labels.get("vpn.location", env_dict.get("SERVER_CITIES", ""))
-        return cls(
-            name=name,
-            port=host_port,
-            control_port=control_host_port,
-            provider=provider,
-            profile=profile,
-            location=location,
-            environment=env_dict,
-            labels=labels,
-        )
+        env_entries = service_def.get("environment", []) or []
+        if isinstance(env_entries, dict):
+            env_dict = {str(k): str(v) for k, v in env_entries.items()}
+        else:
+            for item in env_entries:
+                if isinstance(item, str) and "=" in item:
+                    k, v = item.split("=", 1)
+                    env_dict[k] = v
+
+                labels = dict(service_def.get("labels", {}))
+
+                # Create container and config components
+                container = VPNContainer(
+                    name=name, proxy_port=host_port, control_port=control_host_port
+                )
+
+                config = VPNConfig(
+                    provider=labels.get(
+                        "vpn.provider", env_dict.get("VPN_SERVICE_PROVIDER", "")
+                    ),
+                    profile=labels.get("vpn.profile", ""),
+                    location=labels.get(
+                        "vpn.location", env_dict.get("SERVER_CITIES", "")
+                    ),
+                    environment=env_dict,
+                    labels=labels,
+                )
+
+                return cls(container=container, config=config)
 
     def to_compose_service(self) -> dict:
-        env_list = [f"{k}={v}" for k, v in self.environment.items()]
+        env_list = [f"{k}={v}" for k, v in self.config.environment.items()]
         ports = [
-            f"0.0.0.0:{self.port}:8888/tcp",
-            f"127.0.0.1:{self.control_port}:8000/tcp",
+            f"0.0.0.0:{self.container.proxy_port}:8888/tcp",
+            f"127.0.0.1:{self.container.control_port}:8000/tcp",
         ]
-        labels = dict(self.labels)
-        labels.setdefault("vpn.port", str(self.port))
-        labels.setdefault("vpn.control_port", str(self.control_port))
-        service = {
+        labels = dict(self.config.labels)
+        labels.setdefault("vpn.port", str(self.container.proxy_port))
+        labels.setdefault("vpn.control_port", str(self.container.control_port))
+        return {
             "ports": ports,
             "environment": env_list,
             "labels": labels,
         }
-        return service
 
 
 @dataclass

@@ -2,7 +2,7 @@ import pathlib
 from typer.testing import CliRunner
 
 from proxy2vpn import cli
-from proxy2vpn.compose_manager import ComposeManager
+from proxy2vpn.adapters.compose_manager import ComposeManager
 
 
 def _copy_compose(tmp_path: pathlib.Path) -> pathlib.Path:

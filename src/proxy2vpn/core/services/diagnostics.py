@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from typing import Iterable
 
 from ...adapters import ip_utils
@@ -21,173 +20,118 @@ class DiagnosticResult:
 
 
 class DiagnosticAnalyzer:
-    """Run VPN specific health checks on container logs and connectivity."""
-
-    def __init__(self) -> None:
-        self.patterns: dict[str, re.Pattern[str]] = {
-            "auth_failure": re.compile(
-                r"AUTH_FAILED|authentication (failed|failure)", re.I
-            ),
-            "tls_error": re.compile(r"tls|certificate|ssl", re.I),
-            "dns_error": re.compile(
-                r"(dns (resolution|lookup) failed)|no such host", re.I
-            ),
-        }
+    """Simple VPN health checks on container logs and connectivity."""
 
     def analyze_logs(self, log_lines: Iterable[str]) -> list[DiagnosticResult]:
-        counts: dict[str, int] = {k: 0 for k in self.patterns}
-        for line in log_lines:
-            for key, pattern in self.patterns.items():
-                if pattern.search(line):
-                    counts[key] += 1
-        results: list[DiagnosticResult] = []
-        for key, count in counts.items():
-            if count:
-                msg, rec = self._messages(key)
-                results.append(
-                    DiagnosticResult(key, False, msg, rec, persistent=count > 1)
-                )
-        if not results:
-            results.append(DiagnosticResult("logs", True, "No critical log errors", ""))
-        return results
+        """Simple log analysis - detect common errors and persistence."""
+        lines = [str(line) for line in log_lines]
+        log_text = " ".join(lines).lower()
 
-    def _messages(self, key: str) -> tuple[str, str]:
-        mapping = {
-            "auth_failure": (
-                "Authentication failure detected",
-                "Verify credentials and provider configuration.",
-            ),
-            "tls_error": (
-                "TLS or certificate issue detected",
-                "Check certificates and TLS settings.",
-            ),
-            "dns_error": (
-                "DNS resolution failure detected",
-                "Verify DNS settings or server availability.",
-            ),
-        }
-        return mapping.get(key, (key, ""))
+        # Authentication failures, detect repeated occurrences as persistent
+        if ("auth" in log_text and "fail" in log_text) or any(
+            "auth_failed" in line.lower() for line in lines
+        ):
+            persistent = sum("auth_failed" in line.lower() for line in lines) >= 2
+            return [
+                DiagnosticResult(
+                    "auth_failure",
+                    False,
+                    "Authentication failure detected",
+                    "Verify credentials and provider configuration.",
+                    persistent=persistent,
+                )
+            ]
+
+        if "tls" in log_text or "certificate" in log_text or "ssl" in log_text:
+            return [
+                DiagnosticResult(
+                    "tls_error",
+                    False,
+                    "TLS or certificate issue detected",
+                    "Check certificates and TLS settings.",
+                )
+            ]
+
+        if "dns" in log_text and "fail" in log_text:
+            return [
+                DiagnosticResult(
+                    "dns_error",
+                    False,
+                    "DNS resolution failure detected",
+                    "Verify DNS settings or server availability.",
+                )
+            ]
+
+        return [DiagnosticResult("logs", True, "No critical log errors", "")]
 
     def check_connectivity(self, port: int) -> list[DiagnosticResult]:
-        results: list[DiagnosticResult] = []
-        proxies = {
-            "http": f"http://localhost:{port}",
-            "https": f"http://localhost:{port}",
-        }
-        direct = ip_utils.fetch_ip()
-        proxied = ip_utils.fetch_ip(proxies=proxies)
-        details: list[str] = []
-        if direct:
-            details.append(f"direct={direct}")
-        if proxied:
-            details.append(f"proxied={proxied}")
-        detail_msg = f" ({', '.join(details)})" if details else ""
-
-        if not proxied:
-            results.append(
-                DiagnosticResult(
-                    "connectivity",
-                    False,
-                    f"Connectivity test failed{detail_msg}",
-                    "Ensure VPN container network is reachable.",
-                )
-            )
-        elif proxied != direct:
-            results.append(
-                DiagnosticResult(
-                    "dns_leak",
-                    True,
-                    f"No DNS leak detected{detail_msg}",
-                    "",
-                )
-            )
-        else:
-            results.append(
-                DiagnosticResult(
-                    "dns_leak",
-                    False,
-                    f"Possible DNS leak detected{detail_msg}",
-                    "Check firewall and kill switch settings.",
-                )
-            )
-        return results
-
-    async def check_connectivity_async(self, port: int) -> list[DiagnosticResult]:
-        import asyncio
-
-        results: list[DiagnosticResult] = []
+        """Connectivity + DNS leak checks with informative messages."""
         proxies = {
             "http": f"http://localhost:{port}",
             "https": f"http://localhost:{port}",
         }
 
-        # Fetch both IPs concurrently for faster diagnostics
-        direct_task = asyncio.create_task(ip_utils.fetch_ip_async())
-        proxied_task = asyncio.create_task(ip_utils.fetch_ip_async(proxies=proxies))
+        try:
+            direct = ip_utils.fetch_ip()
+            proxied = ip_utils.fetch_ip(proxies=proxies)
 
-        direct, proxied = await asyncio.gather(direct_task, proxied_task)
-        details: list[str] = []
-        if direct:
-            details.append(f"direct={direct}")
-        if proxied:
-            details.append(f"proxied={proxied}")
-        detail_msg = f" ({', '.join(details)})" if details else ""
+            results: list[DiagnosticResult] = []
+            if not proxied:
+                msg = f"Connectivity test failed (direct={direct})"
+                results.append(
+                    DiagnosticResult(
+                        "connectivity",
+                        False,
+                        msg,
+                        "Ensure VPN container network is reachable.",
+                    )
+                )
+                return results
 
-        if not proxied:
+            msg = f"direct={direct} proxied={proxied}"
             results.append(
                 DiagnosticResult(
                     "connectivity",
-                    False,
-                    f"Connectivity test failed{detail_msg}",
-                    "Ensure VPN container network is reachable.",
-                )
-            )
-        elif proxied != direct:
-            results.append(
-                DiagnosticResult(
-                    "dns_leak",
-                    True,
-                    f"No DNS leak detected{detail_msg}",
+                    proxied is not None,
+                    msg,
                     "",
                 )
             )
-        else:
+
+            # DNS leak check passes when IPs differ
+            leak_ok = proxied != direct
             results.append(
                 DiagnosticResult(
                     "dns_leak",
-                    False,
-                    f"Possible DNS leak detected{detail_msg}",
-                    "Check firewall and kill switch settings.",
+                    leak_ok,
+                    msg,
+                    "Check firewall and kill switch settings." if not leak_ok else "",
                 )
             )
-        return results
+            return results
+        except Exception:
+            return [
+                DiagnosticResult(
+                    "connectivity",
+                    False,
+                    "Connectivity test failed",
+                    "Network error during testing.",
+                )
+            ]
 
     def analyze(
         self, log_lines: Iterable[str], port: int | None = None
     ) -> list[DiagnosticResult]:
+        """Analyze logs and optionally test connectivity."""
         results = self.analyze_logs(log_lines)
         if port:
             results.extend(self.check_connectivity(port))
         return results
 
-    async def analyze_async(
-        self, log_lines: Iterable[str], port: int | None = None
-    ) -> list[DiagnosticResult]:
-        results = self.analyze_logs(log_lines)
-        if port:
-            results.extend(await self.check_connectivity_async(port))
-        return results
-
     def health_score(self, results: Iterable[DiagnosticResult]) -> int:
-        """Return an aggregate health score for diagnostic results.
-
-        Starts at ``100`` and deducts points for each failing check. Persistent
-        issues count more heavily than transient ones. The score is clamped to a
-        0–100 range.
-        """
-
+        """Weighted score: start 100, -50 per persistent fail, -25 per non-persistent fail."""
         score = 100
-        for res in results:
-            if not res.passed:
-                score -= 50 if res.persistent else 25
-        return max(0, min(100, score))
+        for r in results:
+            if not r.passed:
+                score -= 50 if r.persistent else 25
+        return max(0, score)

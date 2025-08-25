@@ -8,7 +8,7 @@ from aiohttp import web
 # Ensure src package importable
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn.http_client import (
+from proxy2vpn.adapters.http_client import (
     HTTPClient,
     HTTPClientConfig,
     RetryPolicy,

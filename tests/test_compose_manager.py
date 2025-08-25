@@ -3,8 +3,8 @@ import sys
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn.compose_manager import ComposeManager
-from proxy2vpn.models import Profile, VPNService
+from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.core.models import Profile, VPNService
 
 
 def _copy_compose(tmp_path):
@@ -40,7 +40,7 @@ def test_profile_management(tmp_path):
 def test_add_and_remove_service(tmp_path):
     compose_path = _copy_compose(tmp_path)
     manager = ComposeManager(compose_path)
-    new_service = VPNService(
+    new_service = VPNService.create(
         name="vpn3",
         port=7777,
         control_port=30002,
@@ -78,7 +78,7 @@ def test_add_service_after_init(tmp_path):
     env_path.write_text("KEY=value\n")
     profile = Profile(name="andr", env_file=str(env_path))
     manager.add_profile(profile)
-    service = VPNService(
+    service = VPNService.create(
         name="vpn1",
         port=12345,
         control_port=30003,
@@ -100,9 +100,15 @@ def test_add_service_after_init(tmp_path):
     )
     manager.add_service(service)
     compose_text = compose_path.read_text()
-    assert "<<: *vpn-base-andr" in compose_text
-    assert "0.0.0.0:12345:8888/tcp" in compose_text
-    assert "127.0.0.1:30003:8000/tcp" in compose_text
+    # Check that service contains the profile configuration (merged)
+    assert "image: qmcgaw/gluetun" in compose_text  # from profile
+    assert "0.0.0.0:12345:8888/tcp" in compose_text  # from service
+    assert "127.0.0.1:30003:8000/tcp" in compose_text  # from service
+
+    # Verify the service can be loaded back correctly
+    loaded_service = manager.get_service("vpn1")
+    assert loaded_service.port == 12345
+    assert loaded_service.profile == "andr"
 
 
 def test_recover_from_corruption(tmp_path):

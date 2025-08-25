@@ -4,8 +4,8 @@ from textwrap import dedent
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn import compose_validator
-from proxy2vpn.compose_validator import validate_compose
+from proxy2vpn.adapters import compose_validator
+from proxy2vpn.adapters.compose_validator import validate_compose
 
 
 def _env(tmp_path: pathlib.Path) -> pathlib.Path:

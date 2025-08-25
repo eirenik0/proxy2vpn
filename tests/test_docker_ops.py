@@ -180,7 +180,7 @@ def test_create_vpn_container_merges_env(tmp_path):
         cap_add=[],
         devices=[],
     )
-    service = docker_ops.VPNService(
+    service = docker_ops.VPNService.create(
         name="vpn-test",
         port=12345,
         control_port=30000,
@@ -202,7 +202,7 @@ def test_recreate_vpn_container():
     profile = docker_ops.Profile(
         name="test", env_file="", image="alpine", cap_add=[], devices=[]
     )
-    service = docker_ops.VPNService(
+    service = docker_ops.VPNService.create(
         name="vpn-recreate",
         port=12346,
         control_port=30001,
@@ -221,7 +221,7 @@ def test_recreate_vpn_container():
 
 
 def test_start_all_vpn_containers_recreates(monkeypatch):
-    svc = docker_ops.VPNService(
+    svc = docker_ops.VPNService.create(
         name="svc",
         port=1,
         control_port=30002,
@@ -255,7 +255,7 @@ def test_start_all_vpn_containers_recreates(monkeypatch):
 
 
 def test_start_vpn_service_force_recreates(monkeypatch):
-    svc = docker_ops.VPNService(
+    svc = docker_ops.VPNService.create(
         name="svc",
         port=1,
         control_port=30002,
@@ -285,7 +285,6 @@ def test_start_vpn_service_force_recreates(monkeypatch):
     monkeypatch.setattr(docker_ops, "recreate_vpn_container", fake_recreate)
     monkeypatch.setattr(docker_ops, "create_vpn_container", should_not_be_called)
     monkeypatch.setattr(docker_ops, "start_container", should_not_be_called)
-    monkeypatch.setattr(docker_ops, "_retry", lambda func, **kw: func())
 
     docker_ops.start_vpn_service(svc, profile, force=True)
     assert calls == {"recreate": 1, "start": 1}
@@ -294,7 +293,7 @@ def test_start_vpn_service_force_recreates(monkeypatch):
 def test_start_vpn_service_creates_when_missing(monkeypatch):
     from docker.errors import NotFound
 
-    svc = docker_ops.VPNService(
+    svc = docker_ops.VPNService.create(
         name="svc",
         port=1,
         control_port=30002,
@@ -328,14 +327,13 @@ def test_start_vpn_service_creates_when_missing(monkeypatch):
     monkeypatch.setattr(docker_ops, "start_container", fake_start_container)
     monkeypatch.setattr(docker_ops, "create_vpn_container", fake_create)
     monkeypatch.setattr(docker_ops, "recreate_vpn_container", should_not_be_called)
-    monkeypatch.setattr(docker_ops, "_retry", lambda func, **kw: func())
 
     docker_ops.start_vpn_service(svc, profile, force=False)
     assert calls == {"start_container": 1, "create": 1, "start": 1}
 
 
 def test_start_vpn_service_starts_existing(monkeypatch):
-    svc = docker_ops.VPNService(
+    svc = docker_ops.VPNService.create(
         name="svc",
         port=1,
         control_port=30002,

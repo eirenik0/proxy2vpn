@@ -1,7 +1,7 @@
 import asyncio
 import pytest
 
-from proxy2vpn.http_client import (
+from proxy2vpn.adapters.http_client import (
     GluetunControlClient,
     HTTPClient,
     IPResponse,

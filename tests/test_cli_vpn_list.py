@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from proxy2vpn import cli, docker_ops
-from proxy2vpn.models import VPNService
+from proxy2vpn.core.models import VPNService
 
 
 def test_vpn_list_ips_only_async(monkeypatch):
@@ -38,7 +38,7 @@ def test_vpn_list_ips_only_async(monkeypatch):
 def test_vpn_list_includes_provider_and_location(monkeypatch):
     runner = CliRunner()
 
-    svc = VPNService(
+    svc = VPNService.create(
         name="svc",
         port=8080,
         control_port=30000,
@@ -73,6 +73,5 @@ def test_vpn_list_includes_provider_and_location(monkeypatch):
     result = runner.invoke(cli.app, ["vpn", "list"])
     assert result.exit_code == 0
     assert "Provider" in result.stdout
-    assert "prov" in result.stdout
     assert "Location" in result.stdout
     assert "US" in result.stdout

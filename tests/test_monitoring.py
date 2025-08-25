@@ -39,7 +39,7 @@ def test_monitor_vpn_health(tmp_path):
     profile = docker_ops.Profile(
         name="test", env_file=str(env_file), image="alpine", cap_add=[], devices=[]
     )
-    service = docker_ops.VPNService(
+    service = docker_ops.VPNService.create(
         name="vpn-test",
         port=12345,
         control_port=30000,

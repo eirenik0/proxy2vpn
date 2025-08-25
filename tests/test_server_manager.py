@@ -1,7 +1,7 @@
 import pytest
 import typer
 from proxy2vpn import server_manager
-from proxy2vpn.http_client import HTTPClientError
+from proxy2vpn.adapters.http_client import HTTPClientError
 
 
 def test_update_servers_ssl_error(tmp_path, monkeypatch):

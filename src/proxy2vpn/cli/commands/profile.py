@@ -116,7 +116,7 @@ def apply(
     }
     from ...core.models import VPNService
 
-    svc = VPNService(
+    svc = VPNService.create(
         name=service,
         port=port,
         control_port=control_port,

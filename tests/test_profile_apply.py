@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 import typer
 
-from proxy2vpn.compose_manager import ComposeManager
+from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn import cli
 
 

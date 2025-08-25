@@ -338,7 +338,7 @@ class FleetManager:
         else:
             env["SERVER_CITIES"] = service_plan.location
 
-        return VPNService(
+        return VPNService.create(
             name=service_plan.name,
             port=service_plan.port,
             control_port=service_plan.control_port,

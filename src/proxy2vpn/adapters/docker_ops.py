@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Iterator, Callable, Any
-import time
+from typing import Iterable, Iterator
 
 from .compose_manager import ComposeManager
 from ..core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
@@ -16,29 +15,11 @@ from . import ip_utils
 
 import docker
 from docker.models.containers import Container
-from docker.errors import DockerException
+from docker.errors import DockerException, NotFound
 
 DEFAULT_TIMEOUT = 60
-MAX_RETRIES = 3
 
 logger = get_logger(__name__)
-
-
-def _retry(
-    func: Callable[..., Any],
-    *args: Any,
-    retries: int = MAX_RETRIES,
-    backoff: float = 1.0,
-    exceptions: tuple[type[Exception], ...] = (Exception,),
-    **kwargs: Any,
-) -> Any:
-    for attempt in range(retries):
-        try:
-            return func(*args, **kwargs)
-        except exceptions:
-            if attempt == retries - 1:
-                raise
-            time.sleep(backoff * (2**attempt))
 
 
 def _client(timeout: int = DEFAULT_TIMEOUT) -> docker.DockerClient:
@@ -47,6 +28,24 @@ def _client(timeout: int = DEFAULT_TIMEOUT) -> docker.DockerClient:
         return docker.from_env(timeout=timeout)
     except DockerException as exc:  # pragma: no cover - connection errors
         raise RuntimeError(f"Docker unavailable: {exc}") from exc
+
+
+def _retry(
+    func, retries: int = 3, exceptions: tuple[type[Exception], ...] = (Exception,)
+):
+    """Call func with simple retry on given exceptions.
+
+    Retries up to ``retries`` times on listed ``exceptions`` and returns the result
+    of the first successful call. Re-raises the last exception if all attempts fail.
+    """
+    attempt = 0
+    while True:
+        try:
+            return func()
+        except exceptions:  # type: ignore[misc]
+            attempt += 1
+            if attempt > retries:
+                raise
 
 
 def create_container(
@@ -58,7 +57,7 @@ def create_container(
     """
     client = _client()
     try:
-        _retry(client.images.pull, image, exceptions=(DockerException,))
+        client.images.pull(image)
         container = client.containers.create(
             image, name=name, command=list(command) if command else None, detach=True
         )
@@ -96,63 +95,30 @@ def _load_env_file(path: str) -> dict[str, str]:
 
 
 def ensure_network(recreate: bool = False) -> None:
-    """Ensure the proxy2vpn Docker network exists.
-
-    Args:
-      recreate: If True and the network exists, remove and recreate it.
-    """
+    """Ensure the proxy2vpn Docker network exists."""
     client = _client()
     network_name = "proxy2vpn_network"
+
     networks = client.networks.list(names=[network_name])
-    if networks:
-        if not recreate:
-            return
+    if networks and not recreate:
+        return
+
+    if networks and recreate:
         network = networks[0]
         try:
-            # Disconnect all containers before removing the network
-            network.reload()  # Refresh network data to get current containers
-            connected_containers = list(network.containers)
-            if connected_containers:
-                logger.info(
-                    "disconnecting_containers_from_network",
-                    extra={
-                        "network_name": network_name,
-                        "container_count": len(connected_containers),
-                    },
-                )
-                for container in connected_containers:
-                    try:
-                        network.disconnect(container, force=True)
-                        logger.debug(
-                            "container_disconnected",
-                            extra={
-                                "network_name": network_name,
-                                "container_name": container.name,
-                            },
-                        )
-                    except DockerException as disconnect_exc:
-                        logger.warning(
-                            "container_disconnect_failed",
-                            extra={
-                                "network_name": network_name,
-                                "container_name": getattr(container, "name", "unknown"),
-                                "error": str(disconnect_exc),
-                            },
-                        )
-
-            # Now remove the network
+            network.reload()
+            # Force disconnect all containers
+            for container in network.containers:
+                try:
+                    network.disconnect(container, force=True)
+                except DockerException:
+                    pass  # Ignore disconnect failures
             network.remove()
-            logger.info(
-                "network_removed_successfully", extra={"network_name": network_name}
-            )
         except DockerException as exc:
-            logger.error(
-                "network_remove_failed",
-                extra={"network_name": network_name, "error": str(exc)},
-            )
             raise RuntimeError(
                 f"Failed to remove network {network_name}: {exc}"
             ) from exc
+
     client.networks.create(name=network_name, driver="bridge")
 
 
@@ -161,7 +127,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
 
     client = _client()
     try:
-        _retry(client.images.pull, profile.image, exceptions=(DockerException,))
+        client.images.pull(profile.image)
         env = _load_env_file(profile.env_file)
         env.update(service.environment)
         ensure_network()
@@ -234,29 +200,21 @@ def start_container(name: str) -> Container:
 
 
 def start_vpn_service(service: VPNService, profile: Profile, force: bool) -> Container:
-    """Ensure a VPN service container exists and is running.
+    """Ensure a VPN service container exists and is running."""
 
-    If ``force`` is True the container is recreated before being started.
-    Otherwise an attempt is made to start an existing container and a new
-    one is created only if it does not already exist.
-    """
-
-    from docker.errors import NotFound
+    if force:
+        container = recreate_vpn_container(service, profile)
+        container.start()
+        return container
 
     try:
-        if force:
-            container = recreate_vpn_container(service, profile)
-            _retry(container.start, exceptions=(DockerException,))
-            return container
-
-        try:
-            return start_container(service.name)
-        except NotFound:
-            container = create_vpn_container(service, profile)
-            _retry(container.start, exceptions=(DockerException,))
-            return container
-    except DockerException as exc:
-        raise RuntimeError(f"Failed to start container {service.name}: {exc}") from exc
+        return start_container(service.name)
+    except NotFound:
+        container = create_vpn_container(service, profile)
+        container.start()
+        return container
+    except DockerException:
+        raise
 
 
 def stop_container(name: str) -> Container:
@@ -552,65 +510,38 @@ async def get_container_ip_async(container: Container) -> str:
 
 
 async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str, str]]:
-    """Return proxy connection details for VPN containers.
-
-    Parameters
-    ----------
-    include_credentials:
-        Include authentication credentials in the result. When ``False``,
-        ``username`` and ``password`` fields are returned empty.
-
-    Returns
-    -------
-    list of dict
-        Each dict contains ``host``, ``port``, ``username``, ``password``,
-        ``location`` and ``status`` keys describing a VPN proxy.
-    """
-
+    """Return proxy connection details for VPN containers."""
     try:
         containers = get_vpn_containers(all=True)
     except RuntimeError:
         return []
 
-    # Fetch the host machine's public IP (without proxy) for all containers
-    # Since all containers run on the same host, we only need to fetch this once
     host_ip = await ip_utils.fetch_ip_async()
+    results = []
 
-    results: list[dict[str, str]] = []
     for container in containers:
-        env_list = (
-            container.attrs.get("Config", {}).get("Env", [])
-            if getattr(container, "attrs", None)
-            else []
-        )
-        env_vars = {
-            k: v for k, v in (var.split("=", 1) for var in env_list if "=" in var)
-        }
-        username = env_vars.get("HTTPPROXY_USER", "") if include_credentials else ""
-        password = env_vars.get("HTTPPROXY_PASSWORD", "") if include_credentials else ""
-        port = container.labels.get("vpn.port", "")
-        location = container.labels.get("vpn.location", "")
-        state = (
-            container.attrs.get("State", {})
-            if getattr(container, "attrs", None)
-            else {}
-        )
-        if container.status == "running":
-            status = "active"
-            # Use host machine's IP for running containers
-            host = host_ip if host_ip else ""
-        else:
-            status = "error" if state.get("ExitCode", 0) not in {0, None} else "stopped"
-            # Empty host for non-running containers
-            host = ""
+        # Extract environment variables simply
+        env_vars = {}
+        if hasattr(container, "attrs") and container.attrs:
+            for env_var in container.attrs.get("Config", {}).get("Env", []):
+                if "=" in env_var:
+                    key, value = env_var.split("=", 1)
+                    env_vars[key] = value
+
+        status = "active" if container.status == "running" else "stopped"
+        host = host_ip if container.status == "running" else ""
 
         results.append(
             {
                 "host": host,
-                "port": port,
-                "username": username,
-                "password": password,
-                "location": location,
+                "port": container.labels.get("vpn.port", ""),
+                "username": env_vars.get("HTTPPROXY_USER", "")
+                if include_credentials
+                else "",
+                "password": env_vars.get("HTTPPROXY_PASSWORD", "")
+                if include_credentials
+                else "",
+                "location": container.labels.get("vpn.location", ""),
                 "status": status,
             }
         )
@@ -645,12 +576,21 @@ async def test_vpn_connection_async(name: str) -> bool:
 
 def test_vpn_connection(name: str) -> bool:
     """Return ``True`` if the VPN proxy for NAME appears to work."""
-    import asyncio
+    client = _client()
+    try:
+        container = client.containers.get(name)
+    except DockerException:
+        return False
+
+    port = container.labels.get("vpn.port")
+    if not port or container.status != "running":
+        return False
 
     try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(test_vpn_connection_async(name))
-    raise RuntimeError(
-        "test_vpn_connection() cannot be called from an async context; use test_vpn_connection_async()."
-    )
+        proxies = _get_authenticated_proxy_url(container, port)
+        # Use sync IP fetching for simplicity
+        direct = ip_utils.fetch_ip()
+        proxied = ip_utils.fetch_ip(proxies=proxies)
+        return proxied not in {"", direct}
+    except Exception:
+        return False
