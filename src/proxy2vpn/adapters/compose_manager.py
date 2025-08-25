@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 import os
 import shutil
 
+import typer
 from filelock import FileLock
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
@@ -35,6 +36,10 @@ class ComposeManager:
         self.yaml = YAML()
         self.lock = FileLock(str(compose_path) + ".lock")
         self.data: CommentedMap = self._load()
+
+    def from_ctx(cls, ctx: typer.Context) -> Self:
+        compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+        return cls(compose_path=compose_file)
 
     def _load(self) -> CommentedMap:
         if not self.compose_path.exists():

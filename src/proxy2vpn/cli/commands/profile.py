@@ -30,8 +30,7 @@ def create(
             f"Environment file '{env_file}' not found",
             "Create the file before creating the profile",
         )
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
+    manager = ComposeManager.from_ctx(ctx)
     profile = Profile(name=name, env_file=str(env_file))
     manager.add_profile(profile)
     logger.info("profile_created", extra={"profile_name": name})

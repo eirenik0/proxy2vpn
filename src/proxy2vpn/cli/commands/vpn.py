@@ -26,7 +26,6 @@ from ...adapters.validators import sanitize_name, sanitize_path, validate_port
 from ...adapters.logging_utils import get_logger
 from ...adapters.cli_common import (
     validate_all_name_args,
-    get_compose_manager,
     validate_service_exists,
 )
 
@@ -36,7 +35,7 @@ logger = get_logger(__name__)
 
 def _service_control_base_url(ctx: typer.Context, name: str) -> str:
     # Delay compose file access until needed
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     svc = validate_service_exists(manager, name)
     return f"http://localhost:{svc.control_port}/v1"
 
@@ -78,7 +77,7 @@ def create(
 ):
     """Create a VPN service entry in the compose file."""
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     try:
         manager.get_profile(profile)
     except KeyError:
@@ -144,7 +143,7 @@ async def list_services(
 ):
     """List VPN services with their status and IP addresses."""
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     from ...adapters.docker_ops import (
         get_vpn_containers,
         get_container_ip_async,
@@ -161,7 +160,7 @@ async def list_services(
             console.print(f"{container.name}: {ip}")
         return
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
     analyzer = DiagnosticAnalyzer() if diagnose else None
@@ -238,7 +237,7 @@ def start(
 ):
     """Start one or all VPN containers."""
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     validate_all_name_args(all, name)
 
     if all:
@@ -288,7 +287,7 @@ def stop(
 ):
     """Stop one or all VPN containers."""
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     validate_all_name_args(all, name)
 
     if all:
@@ -336,7 +335,7 @@ def restart(
 ):
     """Restart one or all VPN containers."""
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     validate_all_name_args(all, name)
 
     if all:
@@ -462,7 +461,7 @@ def delete(
 ):
     """Delete one or all VPN services and remove their containers."""
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     validate_all_name_args(all, name)
 
     if all:
@@ -480,7 +479,7 @@ async def test(
 ):
     """Test that a VPN service proxy is working."""
 
-    manager = get_compose_manager(ctx)
+    manager = ComposeManager.from_ctx(ctx)
     validate_service_exists(manager, name)
 
     from ...adapters.docker_ops import test_vpn_connection_async

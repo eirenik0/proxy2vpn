@@ -28,7 +28,7 @@ def _cli_ctx(compose_path: pathlib.Path):
 def test_profile_apply(tmp_path):
     compose_path = _copy_compose(tmp_path)
     with _cli_ctx(compose_path) as ctx:
-        manager = ComposeManager(compose_path)
+        manager = ComposeManager.from_ctx(ctx)
         profiles = {p.name for p in manager.list_profiles()}
         assert "test" in profiles
         cli.profile_apply(ctx, "test", "vpn3", port=7777, control_port=0)
