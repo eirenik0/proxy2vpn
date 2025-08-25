@@ -10,6 +10,26 @@ from proxy2vpn import control_client
 BASE_URL = "http://localhost:8000"
 
 
+def test_get_status_with_base_path(monkeypatch):
+    called: dict[str, object] = {}
+
+    async def fake_request(
+        self, method, path, **kwargs
+    ):  # pragma: no cover - simple mock
+        called["method"] = method
+        called["path"] = path
+        return {"status": "ok"}
+
+    monkeypatch.setattr(control_client.GluetunControlClient, "request", fake_request)
+    result = asyncio.run(control_client.get_status(f"{BASE_URL}/v1"))
+    assert result == {"status": "ok"}
+    assert called["method"] == "GET"
+    assert (
+        called["path"]
+        == "/v1" + control_client.GluetunControlClient.ENDPOINTS["status"]
+    )
+
+
 def test_get_status_calls_correct_url(monkeypatch):
     called: dict[str, object] = {}
 

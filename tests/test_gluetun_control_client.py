@@ -13,6 +13,20 @@ from proxy2vpn.http_client import (
 BASE_URL = "http://localhost:8000"
 
 
+def test_status_with_base_path(monkeypatch):
+    called = {}
+
+    async def fake_get(self, path, **kwargs):  # pragma: no cover - simple mock
+        called["path"] = path
+        return {"status": "ok"}
+
+    monkeypatch.setattr(HTTPClient, "get", fake_get)
+    client = GluetunControlClient(f"{BASE_URL}/v1")
+    result = asyncio.run(client.status())
+    assert result == StatusResponse(status="ok")
+    assert called["path"] == "/v1" + GluetunControlClient.ENDPOINTS["status"]
+
+
 def test_status_calls_correct_path(monkeypatch):
     called = {}
 

@@ -210,6 +210,7 @@ class GluetunControlClient(HTTPClient):
             if not sep:
                 raise ValueError("GLUETUN_CONTROL_AUTH must be in 'user:pass' format")
             auth = (username, password)
+        self._base_path = parsed.path.rstrip("/")
         config = HTTPClientConfig(
             base_url=f"{parsed.scheme}://{parsed.netloc}",
             timeout=timeout,
@@ -218,20 +219,25 @@ class GluetunControlClient(HTTPClient):
         )
         super().__init__(config)
 
+    def _endpoint(self, endpoint: str) -> str:
+        return f"{self._base_path}{endpoint}"
+
     async def status(self) -> StatusResponse:
-        data = await self.get(self.ENDPOINTS["status"])
+        data = await self.get(self._endpoint(self.ENDPOINTS["status"]))
         return StatusResponse(**data)
 
     async def set_openvpn(self, enabled: bool) -> OpenVPNResponse:
         payload = {"status": enabled}
-        data = await self.post(self.ENDPOINTS["openvpn"], json=payload)
+        data = await self.post(self._endpoint(self.ENDPOINTS["openvpn"]), json=payload)
         return OpenVPNResponse(**data)
 
     async def public_ip(self) -> IPResponse:
-        data = await self.get(self.ENDPOINTS["ip"])
+        data = await self.get(self._endpoint(self.ENDPOINTS["ip"]))
         return IPResponse(**data)
 
     async def restart_tunnel(self) -> OpenVPNStatusResponse:
         payload = {"status": "restarted"}
-        data = await self.request("PUT", self.ENDPOINTS["openvpn_status"], json=payload)
+        data = await self.request(
+            "PUT", self._endpoint(self.ENDPOINTS["openvpn_status"]), json=payload
+        )
         return OpenVPNStatusResponse(**data)
