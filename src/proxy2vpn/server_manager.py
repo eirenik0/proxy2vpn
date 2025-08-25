@@ -107,12 +107,40 @@ class ServerManager:
         }
         return sorted(cities)
 
-    def validate_location(self, provider: str, location: str) -> bool:
-        """Return ``True`` if LOCATION exists for PROVIDER."""
+    def parse_location(
+        self, provider: str, location: str
+    ) -> tuple[str | None, str | None]:
+        """Split LOCATION into city and/or country components."""
 
         data = self.data or self.update_servers()
         prov = data.get(provider, {})
         servers = prov.get("servers", [])
+        loc = location.strip()
+        if "," in loc:
+            city, country = [part.strip() for part in loc.split(",", 1)]
+            return city, country
+        loc_l = loc.lower()
+        for srv in servers:
+            if srv.get("city", "").lower() == loc_l:
+                return loc, None
+            if srv.get("country", "").lower() == loc_l:
+                return None, loc
+        return loc, None
+
+    def validate_location(self, provider: str, location: str) -> bool:
+        """Return ``True`` if LOCATION exists for PROVIDER."""
+        data = self.data or self.update_servers()
+        prov = data.get(provider, {})
+        servers = prov.get("servers", [])
+        if "," in location:
+            city, country = [part.strip().lower() for part in location.split(",", 1)]
+            for srv in servers:
+                if (
+                    srv.get("city", "").lower() == city
+                    and srv.get("country", "").lower() == country
+                ):
+                    return True
+            return False
         loc = location.lower()
         for srv in servers:
             if (
