@@ -74,8 +74,16 @@ class DiagnosticAnalyzer:
             "http": f"http://localhost:{port}",
             "https": f"http://localhost:{port}",
         }
-        direct = ip_utils.fetch_ip()
-        proxied = ip_utils.fetch_ip(proxies=proxies)
+
+        # Handle both sync and async contexts
+        try:
+            direct = ip_utils.fetch_ip()
+            proxied = ip_utils.fetch_ip(proxies=proxies)
+        except RuntimeError as e:
+            if "async context" in str(e):
+                # Skip connectivity check in async context - will be handled by async version
+                return []
+            raise
         details: list[str] = []
         if direct:
             details.append(f"direct={direct}")

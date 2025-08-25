@@ -47,6 +47,9 @@ class DeploymentPlan:
     """Complete deployment plan for fleet"""
 
     provider: str
+    profile_config: dict[str, int] = field(
+        default_factory=dict
+    )  # Store original profile slots
     services: list[ServicePlan] = field(default_factory=list)
 
     @property
@@ -82,6 +85,7 @@ class DeploymentPlan:
         """Convert to dictionary for serialization"""
         return {
             "provider": self.provider,
+            "profile_config": self.profile_config,
             "services": [
                 {
                     "name": s.name,
@@ -100,7 +104,9 @@ class DeploymentPlan:
     @classmethod
     def from_dict(cls, data: dict) -> "DeploymentPlan":
         """Create from dictionary"""
-        plan = cls(provider=data["provider"])
+        plan = cls(
+            provider=data["provider"], profile_config=data.get("profile_config", {})
+        )
         for service_data in data["services"]:
             plan.services.append(ServicePlan(**service_data))
         return plan
@@ -131,7 +137,7 @@ class FleetManager:
 
     def plan_deployment(self, config: FleetConfig) -> DeploymentPlan:
         """Create deployment plan for cities across countries"""
-        plan = DeploymentPlan(provider=config.provider)
+        plan = DeploymentPlan(provider=config.provider, profile_config=config.profiles)
 
         defined_profiles = {p.name for p in self.compose_manager.list_profiles()}
         missing_profiles = set(config.profiles) - defined_profiles
@@ -546,17 +552,58 @@ class FleetManager:
         sanitized = sanitized.strip("-")
         return sanitized.lower()
 
+    def _get_stored_profile_config(self) -> dict[str, int] | None:
+        """Try to load original profile configuration from deployment plan file."""
+        try:
+            from ruamel.yaml import YAML
+            import os
+
+            # Look for deployment-plan.yaml in same directory as compose file
+            compose_dir = os.path.dirname(self.compose_manager.compose_path)
+            plan_file = os.path.join(compose_dir, "deployment-plan.yaml")
+
+            # Debug output to understand what's happening
+            # print(f"DEBUG: Looking for deployment plan at: {plan_file}")
+            # print(f"DEBUG: File exists: {os.path.exists(plan_file)}")
+
+            if os.path.exists(plan_file):
+                yaml = YAML()
+                with open(plan_file, "r") as f:
+                    plan_data = yaml.load(f)
+
+                if plan_data and "profile_config" in plan_data:
+                    # print(f"DEBUG: Found profile config: {plan_data['profile_config']}")
+                    return plan_data["profile_config"]
+                # else:
+                #     print(f"DEBUG: No profile_config in plan data: {plan_data}")
+        except Exception as e:
+            # print(f"DEBUG: Exception loading plan: {e}")
+            # If anything goes wrong, fall back to old behavior
+            logger.warning(f"Failed to load config: {e}")
+            pass
+
+        return None
+
     def _rebuild_profile_allocator(self) -> None:
         """Reconstruct allocator state from compose services."""
         services = self.compose_manager.list_services()
-        profile_counts: dict[str, int] = {}
 
-        for svc in services:
-            if svc.profile:
-                profile_counts[svc.profile] = profile_counts.get(svc.profile, 0) + 1
+        # Try to restore original profile configuration from deployment plan
+        original_config = self._get_stored_profile_config()
+
+        if original_config:
+            # Use stored profile configuration (maintains original slot counts)
+            profile_counts = original_config.copy()
+        else:
+            # Fallback: infer from current services (old behavior)
+            profile_counts = {}
+            for svc in services:
+                if svc.profile:
+                    profile_counts[svc.profile] = profile_counts.get(svc.profile, 0) + 1
 
         self.profile_allocator.setup_profiles(profile_counts)
 
+        # Allocate slots for existing services
         for svc in services:
             if svc.profile:
                 # allocate_slot updates used_slots and tracked services
