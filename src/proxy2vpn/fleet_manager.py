@@ -3,15 +3,13 @@
 import asyncio
 from dataclasses import dataclass, field
 
-from rich.console import Console
-
 from .compose_manager import ComposeManager
+from .display_utils import console
 from .docker_ops import ensure_network, remove_container, stop_container
 from .logging_utils import get_logger
 from .models import VPNService
 from .server_manager import ServerManager
 
-console = Console()
 logger = get_logger(__name__)
 
 

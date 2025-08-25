@@ -6,10 +6,9 @@ from pathlib import Path
 from typing import Iterable, Iterator, Callable, Any
 import time
 
-from rich.console import Console
-
 from .compose_manager import ComposeManager
 from .diagnostics import DiagnosticAnalyzer, DiagnosticResult
+from .display_utils import console
 from .models import Profile, VPNService
 from .logging_utils import get_logger
 from . import config, ip_utils
@@ -17,8 +16,6 @@ from . import config, ip_utils
 import docker
 from docker.models.containers import Container
 from docker.errors import DockerException
-
-console = Console()
 
 DEFAULT_TIMEOUT = 60
 MAX_RETRIES = 3

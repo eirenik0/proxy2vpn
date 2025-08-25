@@ -2,11 +2,8 @@
 
 from dataclasses import dataclass, field
 
-from rich.console import Console
-
+from .display_utils import console
 from .logging_utils import get_logger
-
-console = Console()
 
 logger = get_logger(__name__)
 

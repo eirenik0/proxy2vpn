@@ -5,14 +5,12 @@ import json
 
 import typer
 from ruamel.yaml import YAML
-from rich.console import Console
 from rich.table import Table
 
+from .display_utils import console
 from .fleet_manager import FleetConfig, FleetManager, DeploymentPlan
 from .http_client import HTTPClient, HTTPClientConfig
 from .server_monitor import ServerMonitor
-
-console = Console()
 
 
 def fleet_plan(

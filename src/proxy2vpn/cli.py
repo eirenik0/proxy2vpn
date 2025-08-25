@@ -9,14 +9,19 @@ import logging
 from dataclasses import asdict
 
 import typer
-from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress
 from .typer_ext import HelpfulTyper, run_async
 from docker.errors import APIError, NotFound
 
 from . import config
+from .cli_common import (
+    validate_all_name_args,
+    get_compose_manager,
+    validate_service_exists,
+)
 from .compose_manager import ComposeManager
+from .display_utils import console, format_success_message, format_bulk_success_message
 from .models import Profile, VPNService
 from .server_manager import ServerManager
 from .compose_validator import validate_compose
@@ -41,16 +46,10 @@ app.add_typer(fleet_app, name="fleet")
 
 logger = get_logger(__name__)
 
-console = Console()
-
 
 def _service_control_base_url(ctx: typer.Context, name: str) -> str:
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
-    try:
-        svc = manager.get_service(name)
-    except KeyError:
-        abort(f"Service '{name}' not found")
+    manager = get_compose_manager(ctx)
+    svc = validate_service_exists(manager, name)
 
     return f"http://localhost:{svc.control_port}/v1"
 
@@ -448,10 +447,9 @@ def vpn_start(
 ):
     """Start one or all VPN containers."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
-    if all and name is not None:
-        abort("Cannot specify NAME when using --all")
+    manager = get_compose_manager(ctx)
+    validate_all_name_args(all, name)
+
     if all:
         services = manager.list_services()
         _validate_service_locations(services, force)
@@ -459,18 +457,12 @@ def vpn_start(
 
         results = start_all_vpn_containers(manager)
         for svc_name in results:
-            console.print(f"[green]✓[/green] Recreated and started {svc_name}")
+            console.print(
+                format_bulk_success_message("Recreated and started", svc_name)
+            )
         return
 
-    if name is None:
-        abort("Specify a service NAME or use --all")
-    assert name is not None  # Type narrowing
-    svc = None
-    try:
-        svc = manager.get_service(name)
-    except KeyError:
-        abort(f"Service '{name}' not found")
-    assert svc is not None  # Type narrowing after successful assignment
+    svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 
     from .docker_ops import (
@@ -484,7 +476,7 @@ def vpn_start(
     try:
         recreate_vpn_container(svc, profile)
         start_container(name)
-        console.print(f"[green]✓[/green] Recreated and started '{name}'.")
+        console.print(format_success_message("Recreated and started", name))
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
         results = analyze_container_logs(name, analyzer=analyzer)
@@ -505,25 +497,18 @@ def vpn_stop(
 ):
     """Stop one or all VPN containers."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
-    if all and name is not None:
-        abort("Cannot specify NAME when using --all")
+    manager = get_compose_manager(ctx)
+    validate_all_name_args(all, name)
+
     if all:
         from .docker_ops import stop_all_vpn_containers
 
         results = stop_all_vpn_containers()
         for svc_name in results:
-            console.print(f"[green]✓[/green] Stopped and removed {svc_name}")
+            console.print(format_bulk_success_message("Stopped and removed", svc_name))
         return
 
-    if name is None:
-        abort("Specify a service NAME or use --all")
-    assert name is not None  # Type narrowing
-    try:
-        manager.get_service(name)  # Just validate the service exists
-    except KeyError:
-        abort(f"Service '{name}' not found")
+    validate_service_exists(manager, name)
 
     from .docker_ops import stop_container, remove_container, analyze_container_logs
     from .diagnostics import DiagnosticAnalyzer
@@ -531,7 +516,7 @@ def vpn_stop(
     try:
         stop_container(name)
         remove_container(name)
-        console.print(f"[green]✓[/green] Stopped and removed '{name}'.")
+        console.print(format_success_message("Stopped and removed", name))
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
         assert name is not None  # Type narrowing for error handling
@@ -556,10 +541,9 @@ def vpn_restart(
 ):
     """Restart one or all VPN containers."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
-    if all and name is not None:
-        abort("Cannot specify NAME when using --all")
+    manager = get_compose_manager(ctx)
+    validate_all_name_args(all, name)
+
     if all:
         services = manager.list_services()
         _validate_service_locations(services, force)
@@ -570,22 +554,16 @@ def vpn_restart(
             try:
                 recreate_vpn_container(svc, profile)
                 start_container(svc.name)
-                console.print(f"[green]✓[/green] Recreated and restarted {svc.name}")
+                console.print(
+                    format_bulk_success_message("Recreated and restarted", svc.name)
+                )
             except APIError as exc:
                 typer.echo(
                     f"Failed to restart '{svc.name}': {exc.explanation}", err=True
                 )
         return
 
-    if name is None:
-        abort("Specify a service NAME or use --all")
-    assert name is not None  # Type narrowing
-    svc = None
-    try:
-        svc = manager.get_service(name)
-    except KeyError:
-        abort(f"Service '{name}' not found")
-    assert svc is not None  # Type narrowing after successful assignment
+    svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 
     from .docker_ops import (
@@ -599,7 +577,7 @@ def vpn_restart(
     try:
         recreate_vpn_container(svc, profile)
         start_container(name)
-        console.print(f"[green]✓[/green] Recreated and restarted '{name}'.")
+        console.print(format_success_message("Recreated and restarted", name))
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
         assert name is not None  # Type narrowing for error handling
@@ -689,18 +667,12 @@ def vpn_delete(
 ):
     """Delete one or all VPN services and remove their containers."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
-
-    if all and name is not None:
-        abort("Cannot specify NAME when using --all")
+    manager = get_compose_manager(ctx)
+    validate_all_name_args(all, name)
 
     if all:
         _delete_all_services(manager, force)
         return
-
-    if name is None:
-        abort("Specify a service NAME or use --all")
 
     assert name is not None  # Type narrowing
     _delete_single_service(manager, name, force)
@@ -713,12 +685,8 @@ async def vpn_test(
 ):
     """Test that a VPN service proxy is working."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
-    try:
-        manager.get_service(name)
-    except KeyError:
-        abort(f"Service '{name}' not found")
+    manager = get_compose_manager(ctx)
+    validate_service_exists(manager, name)
 
     from .docker_ops import test_vpn_connection_async
 

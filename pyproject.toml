@@ -26,9 +26,6 @@ dependencies = [
     "psutil",
 ]
 
-[project.optional-dependencies]
-dev = ["towncrier", "pytest-xdist"]
-
 [tool.towncrier]
 package = "proxy2vpn"
 package_dir = "src"
@@ -71,4 +68,11 @@ exclude = [
     "**/__pycache__",
     "tests/",
     "venv/"
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "towncrier",
+    "pytest-xdist"
 ]
