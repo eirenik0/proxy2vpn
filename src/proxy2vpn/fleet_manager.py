@@ -319,7 +319,10 @@ class FleetManager:
         if service_plan.hostname:
             labels["vpn.hostname"] = service_plan.hostname
 
-        env = {"VPN_SERVICE_PROVIDER": service_plan.provider}
+        env = {
+            "VPN_SERVICE_PROVIDER": service_plan.provider,
+            "SERVER_COUNTRIES": service_plan.country,
+        }
         if service_plan.hostname:
             env["SERVER_HOSTNAMES"] = service_plan.hostname
         else:
