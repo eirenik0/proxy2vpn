@@ -52,6 +52,13 @@ class ComposeManager:
                         data = CommentedMap(data)
                 # basic validation: ensure YAML structure can be parsed
                 validate_compose(self.compose_path)
+                # Reapply anchors to profiles so they're preserved on save
+                for key, value in data.items():
+                    if key.startswith("x-vpn-base-") and isinstance(
+                        value, CommentedMap
+                    ):
+                        name = key[len("x-vpn-base-") :]
+                        value.yaml_set_anchor(f"vpn-base-{name}", always_dump=True)
                 return data
             except Exception:
                 if backup_path.exists():

@@ -107,3 +107,16 @@ def test_recover_from_corruption(tmp_path):
     compose_path.write_text("not: [valid")
     recovered = ComposeManager(compose_path)
     assert recovered.config["health_check_interval"] == "5"
+
+
+def test_multiple_profile_anchors(tmp_path):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    for name in ["a", "s", "v"]:
+        manager = ComposeManager(compose_path)
+        env = tmp_path / f"env.{name}"
+        env.write_text("KEY=value\n")
+        manager.add_profile(Profile(name=name, env_file=str(env)))
+    text = compose_path.read_text()
+    for name in ["a", "s", "v"]:
+        assert f"x-vpn-base-{name}: &vpn-base-{name}" in text
