@@ -7,6 +7,8 @@ from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.nodes import MappingNode, ScalarNode
 
+from .server_manager import ServerManager
+
 
 class ValidationError(Exception):
     """Raised when validation of a compose file fails."""
@@ -26,7 +28,9 @@ def _parse_yaml(path: Path):
     return data, node
 
 
-def validate_compose(path: Path) -> list[str]:
+def validate_compose(
+    path: Path, server_manager: ServerManager | None = None
+) -> list[str]:
     """Validate a docker compose file and return a list of errors."""
 
     errors: list[str] = []
@@ -34,6 +38,13 @@ def validate_compose(path: Path) -> list[str]:
         data, node = _parse_yaml(path)
     except Exception as exc:  # pragma: no cover - error path
         return [f"YAML syntax error: {exc}"]
+
+    if server_manager is None:
+        try:
+            server_manager = ServerManager()
+            server_manager.update_servers()
+        except Exception:  # pragma: no cover - best effort
+            server_manager = None
 
     # Top level keys
     for key in REQUIRED_TOP_LEVEL_KEYS:
@@ -109,6 +120,7 @@ def validate_compose(path: Path) -> list[str]:
             for label in LABEL_REQUIRED_FIELDS:
                 if label not in labels:
                     errors.append(f"Service '{svc_name}' missing label '{label}'")
+
             # port mappings and duplicates
             for p in svc_data.get("ports", []) or []:
                 try:
@@ -137,6 +149,37 @@ def validate_compose(path: Path) -> list[str]:
                     )
                 else:
                     ports_seen[host_port] = svc_name
+
+            if server_manager is not None:
+                env_dict: dict[str, str] = {}
+                env_entries = svc_data.get("environment", []) or []
+                if isinstance(env_entries, dict):
+                    env_dict = {str(k): str(v) for k, v in env_entries.items()}
+                else:
+                    for item in env_entries:
+                        if isinstance(item, str) and "=" in item:
+                            k, v = item.split("=", 1)
+                            env_dict[k] = v
+                provider = labels.get("vpn.provider") or env_dict.get(
+                    "VPN_SERVICE_PROVIDER"
+                )
+                city = env_dict.get("SERVER_CITIES")
+                country = env_dict.get("SERVER_COUNTRIES")
+                location = None
+                if city and country:
+                    location = f"{city},{country}"
+                elif city:
+                    location = city
+                elif country:
+                    location = country
+                if (
+                    location
+                    and provider
+                    and not server_manager.validate_location(provider, location)
+                ):
+                    errors.append(
+                        f"Service '{svc_name}' invalid location '{location}' for {provider}"
+                    )
 
     # Orphaned profiles
     for name in profiles:
