@@ -183,6 +183,7 @@ def test_create_vpn_container_merges_env(tmp_path):
     service = docker_ops.VPNService(
         name="vpn-test",
         port=12345,
+        control_port=30000,
         provider="",
         profile="test",
         location="",
@@ -204,6 +205,7 @@ def test_recreate_vpn_container():
     service = docker_ops.VPNService(
         name="vpn-recreate",
         port=12346,
+        control_port=30001,
         provider="",
         profile="test",
         location="",
@@ -222,6 +224,7 @@ def test_start_all_vpn_containers_recreates(monkeypatch):
     svc = docker_ops.VPNService(
         name="svc",
         port=1,
+        control_port=30002,
         provider="",
         profile="p",
         location="",

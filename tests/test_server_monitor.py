@@ -15,6 +15,7 @@ def test_check_service_health_uses_authenticated_proxy(monkeypatch):
     service = models.VPNService(
         name="vpn-test",
         port=8080,
+        control_port=30000,
         provider="",
         profile="",
         location="",

@@ -42,11 +42,12 @@ def test_monitor_vpn_health(tmp_path):
     service = docker_ops.VPNService(
         name="vpn-test",
         port=12345,
+        control_port=30000,
         provider="",
         profile="test",
         location="",
         environment={},
-        labels={"vpn.type": "vpn", "vpn.port": "12345"},
+        labels={"vpn.type": "vpn", "vpn.port": "12345", "vpn.control_port": "30000"},
     )
     docker_ops.create_vpn_container(service, profile)
     docker_ops.start_container(service.name)

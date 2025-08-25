@@ -23,6 +23,7 @@ class FleetConfig:
     countries: list[str]  # ["Germany", "France", "Netherlands"]
     profiles: dict[str, int]  # {"acc1": 2, "acc2": 8} - profile slots
     port_start: int = 20000
+    control_port_start: int = 30000
     naming_template: str = "{provider}-{country}-{city}"
     max_per_profile: int | None = None  # Limit services per profile
     unique_ips: bool = False  # Ensure unique city/IP combinations
@@ -37,6 +38,7 @@ class ServicePlan:
     location: str
     country: str
     port: int
+    control_port: int
     provider: str
     hostname: str | None = None
     ip: str | None = None
@@ -60,6 +62,7 @@ class DeploymentPlan:
         location: str,
         country: str,
         port: int,
+        control_port: int,
         provider: str,
         hostname: str | None = None,
         ip: str | None = None,
@@ -72,6 +75,7 @@ class DeploymentPlan:
                 location=location,
                 country=country,
                 port=port,
+                control_port=control_port,
                 provider=provider or self.provider,
                 hostname=hostname,
                 ip=ip,
@@ -92,6 +96,7 @@ class DeploymentPlan:
                     "provider": s.provider,
                     "hostname": s.hostname,
                     "ip": s.ip,
+                    "control_port": s.control_port,
                 }
                 for s in self.services
             ],
@@ -173,6 +178,7 @@ class FleetManager:
 
             self.profile_allocator.setup_profiles(config.profiles)
             current_port = config.port_start
+            current_control_port = config.control_port_start
 
             for country, city, hostname, ip in all_entries:
                 profile_slot = self.profile_allocator.get_next_available(
@@ -195,6 +201,7 @@ class FleetManager:
                     location=city,
                     country=country,
                     port=current_port,
+                    control_port=current_control_port,
                     provider=config.provider,
                     hostname=hostname,
                     ip=ip,
@@ -202,6 +209,7 @@ class FleetManager:
 
                 self.profile_allocator.allocate_slot(profile_slot.name, service_name)
                 current_port += 1
+                current_control_port += 1
 
             return plan
 
@@ -233,6 +241,7 @@ class FleetManager:
         self.profile_allocator.setup_profiles(config.profiles)
 
         current_port = config.port_start
+        current_control_port = config.control_port_start
 
         for country, city in all_cities:
             profile_slot = self.profile_allocator.get_next_available(config.profiles)
@@ -253,11 +262,13 @@ class FleetManager:
                 location=city,
                 country=country,
                 port=current_port,
+                control_port=current_control_port,
                 provider=config.provider,
             )
 
             self.profile_allocator.allocate_slot(profile_slot.name, service_name)
             current_port += 1
+            current_control_port += 1
 
         return plan
 
@@ -312,6 +323,7 @@ class FleetManager:
         labels = {
             "vpn.type": "vpn",
             "vpn.port": str(service_plan.port),
+            "vpn.control_port": str(service_plan.control_port),
             "vpn.provider": service_plan.provider,
             "vpn.profile": service_plan.profile,
             "vpn.location": service_plan.location,
@@ -331,6 +343,7 @@ class FleetManager:
         return VPNService(
             name=service_plan.name,
             port=service_plan.port,
+            control_port=service_plan.control_port,
             provider=service_plan.provider,
             profile=service_plan.profile,
             location=service_plan.location,

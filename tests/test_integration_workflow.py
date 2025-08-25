@@ -33,11 +33,17 @@ def test_end_to_end_workflow(tmp_path):
     service = VPNService(
         name="vpn1",
         port=12346,
+        control_port=30000,
         provider="",
         profile="test",
         location="",
         environment={},
-        labels={"vpn.type": "vpn", "vpn.port": "12346", "vpn.profile": "test"},
+        labels={
+            "vpn.type": "vpn",
+            "vpn.port": "12346",
+            "vpn.control_port": "30000",
+            "vpn.profile": "test",
+        },
     )
     manager.add_service(service)
     docker_ops.create_vpn_container(service, profile)

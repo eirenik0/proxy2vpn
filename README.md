@@ -69,7 +69,7 @@ uvx proxy2vpn --help
 
 ## HTTP Control Server
 
-Each VPN container exposes an HTTP control API on port `8000` internally. Control commands automatically use secure internal Docker networking to communicate with containers.
+Each VPN container exposes an HTTP control API on port `8000` which is mapped to a unique localhost-only port (starting at `30000`) on the host for secure access.
 
 ### Sample compose snippet
 

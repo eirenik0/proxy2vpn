@@ -12,6 +12,7 @@ from ruamel.yaml.mergevalue import MergeValue
 
 from .models import Profile, VPNService
 from .compose_validator import validate_compose
+from . import config
 
 # Minimal compose template used when initializing a new project
 INITIAL_COMPOSE_TEMPLATE = """\
@@ -193,6 +194,19 @@ class ComposeManager:
 
         port = start or 20000
         used = {svc.port for svc in self.list_services()}
+        while port in used:
+            port += 1
+        return port
+
+    def next_available_control_port(self, start: int = 0) -> int:
+        """Find the next available control port starting from START.
+
+        Control ports are kept in a separate range from proxy ports and are
+        bound to localhost for security.
+        """
+
+        port = start or config.DEFAULT_CONTROL_PORT_START
+        used = {svc.control_port for svc in self.list_services()}
         while port in used:
             port += 1
         return port
