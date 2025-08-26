@@ -101,6 +101,24 @@ proxy2vpn vpn list --diagnose
 
 **Docker Integration**: All containers use consistent labeling and networking, making them easy to integrate with existing Docker workflows and monitoring tools.
 
+### Control server authentication
+
+To enable authenticated access to the Gluetun control API, create an auth
+configuration file such as:
+
+```toml
+[[roles]]
+name = "qbittorrent"
+routes = ["GET /v1/openvpn/portforwarded"]
+auth = "basic"
+username = "myusername"
+password = "mypassword"
+```
+
+Bind mount this file to `/gluetun/auth/config.toml` (or set a custom path via
+the `HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH` environment variable) and restart
+the container for the configuration to take effect.
+
 ## Enterprise Fleet Management
 
 **The real power of Proxy2VPN**: Deploy and manage dozens of VPN endpoints across the globe like infrastructure, not individual connections.

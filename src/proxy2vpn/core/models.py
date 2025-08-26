@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from proxy2vpn.adapters.compose_utils import parse_env, iter_port_mappings
+from proxy2vpn.core import config
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -216,11 +217,14 @@ class VPNService(BaseModel):
                 labels["vpn.httpproxy_user"] = self.credentials.httpproxy_user
             if self.credentials.httpproxy_password:
                 labels["vpn.httpproxy_password"] = self.credentials.httpproxy_password
-
+        volumes = [
+            f"{config.CONTROL_AUTH_CONFIG_FILE}:/gluetun/auth/config.toml:ro",
+        ]
         return {
             "ports": ports,
             "environment": env_list,
             "labels": labels,
+            "volumes": volumes,
         }
 
 

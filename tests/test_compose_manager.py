@@ -4,6 +4,7 @@ import sys
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.core import config
 from proxy2vpn.core.models import Profile, VPNService
 
 
@@ -77,6 +78,10 @@ def test_add_and_remove_service(tmp_path):
     compose_text = compose_path.read_text()
     assert "vpn3:" in compose_text
     assert "<<: *vpn-base-test" in compose_text
+    assert (
+        f"{config.CONTROL_AUTH_CONFIG_FILE}:/gluetun/auth/config.toml:ro"
+        in compose_text
+    )
     manager.remove_service("vpn3")
     assert "vpn3" not in {s.name for s in manager.list_services()}
 
@@ -115,6 +120,10 @@ def test_add_service_after_init(tmp_path):
     assert "image: qmcgaw/gluetun" in compose_text  # from profile
     assert "0.0.0.0:12345:8888/tcp" in compose_text  # from service
     assert "127.0.0.1:30003:8000/tcp" in compose_text  # from service
+    assert (
+        f"{config.CONTROL_AUTH_CONFIG_FILE}:/gluetun/auth/config.toml:ro"
+        in compose_text
+    )
 
     # Verify the service can be loaded back correctly
     loaded_service = manager.get_service("vpn1")
