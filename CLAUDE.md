@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Proxy2VPN is a Python command-line interface for managing multiple VPN containers with Docker. It supports user profiles, health monitoring, batch operations, fleet management for bulk deployments, and dynamic server list fetching using the qmcgaw/gluetun Docker image.
+Proxy2VPN is a Python command-line interface for managing multiple VPN containers with Docker. It supports user profiles, built-in health analysis in listings, fleet management for bulk deployments, and dynamic server list fetching using the qmcgaw/gluetun Docker image.
 
 ## Development Commands
 
@@ -21,18 +21,18 @@ uv sync
 > ```
 
 ```bash
-# Run Python application
+# Run the CLI
 uv run proxy2vpn <command> [args]
 
 # Run tests
-pytest
+make test
 
-# Linting and formatting
+# Formatting and linting
 make fmt
 make lint
 
 # Development installation
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### Running the Application
@@ -41,11 +41,12 @@ pip install -e .
 uv run proxy2vpn <command> [args]
 
 # Common commands
-uv run proxy2vpn profile create myprofile profiles/myprofile.env
-proxy2vpn vpn create vpn1 myprofile --port 8888 --location "New York"
-uv run proxy2vpn profile apply myprofile vpn1 --port 8888
+uv run proxy2vpn profile create myprofile            # interactive env file creator
+# or add an existing env file
+uv run proxy2vpn profile add myprofile profiles/myprofile.env
+uv run proxy2vpn vpn create                         # interactive service creation
 uv run proxy2vpn vpn start vpn1
-uv run proxy2vpn vpn list --diagnose
+uv run proxy2vpn vpn list
 uv run proxy2vpn vpn start --all
 uv run proxy2vpn servers list-providers
 uv run proxy2vpn vpn test vpn1
@@ -85,30 +86,26 @@ Profile creation fails fast with clear error messages if any required fields are
 ## High-Level Architecture
 
 ### Application Organization
-The Python application (`src/proxy2vpn/`) is modular with these components:
-1. **cli.py**: Main CLI interface using Typer with command groups (profile, vpn, servers, system, fleet)
-2. **config.py**: Configuration constants and defaults (compose file paths, cache dir, default provider)
-3. **models.py**: Data models for VPNService and Profile with compose file serialization
-4. **compose_manager.py**: Docker Compose file management using ruamel.yaml for profiles and services
-5. **docker_ops.py**: Docker container operations using docker-py SDK
-6. **server_manager.py**: Gluetun server list fetching, caching, and location validation
-7. **compose_utils.py**: Docker Compose utilities
-8. **typer_ext.py**: Typer extensions for enhanced CLI functionality
-9. **diagnostics.py**: Container log analysis and health scoring system
-10. **fleet_manager.py**: Bulk VPN deployment orchestration across cities and profiles
-11. **fleet_commands.py**: Fleet management CLI commands with Rich UI components
-12. **profile_allocator.py**: Intelligent profile slot allocation with load balancing
-13. **server_monitor.py**: Server health monitoring and automatic rotation system
+The Python application (`src/proxy2vpn/`) is organized into CLI, adapters, and core layers:
+- `cli/main.py`: Typer application entry with command groups (`profile`, `vpn`, `servers`, `system`, `fleet`).
+- `cli/commands/`: Command group implementations, one module per group.
+- `adapters/compose_manager.py`: Docker Compose file management with ruamel.yaml and file locking.
+- `adapters/docker_ops.py`: Docker container lifecycle operations via docker SDK.
+- `adapters/server_manager.py`: Gluetun server list fetch/cache/validation.
+- `adapters/display_utils.py`, `adapters/validators.py`, `adapters/logging_utils.py`: UI, input validation, logging helpers.
+- `core/config.py`: Configuration constants, defaults, HTTP client settings, control API endpoints.
+- `core/models.py`: Pydantic models and compose (de)serialization for `Profile` and `VPNService`.
+- `core/services/diagnostics.py`: Diagnostic analyzer and health scoring used across commands.
 
 ### Docker Integration
 All VPN containers use the `qmcgaw/gluetun` image with:
 - Automatic network creation (proxy2vpn_network)
-- Consistent labeling (type=proxy2vpn)
+- Consistent labeling (e.g., `vpn.type=vpn`, provider/profile/location metadata)
 - Environment variable injection for VPN configuration
 - HTTP proxy authentication support
 
 ### Configuration System
-- **compose.yml**: Single source of truth for all state (services, profiles as YAML anchors)
+- **compose.yml**: Single source of truth for services and profiles (profiles defined as YAML anchors)
 - **profiles/*.env**: VPN settings (VPN_TYPE, OPENVPN_USER, OPENVPN_PASSWORD) referenced by profiles
 - **~/.cache/proxy2vpn/**: Server list cache with TTL management
 - **pyproject.toml**: Project configuration, dependencies, and towncrier settings
@@ -122,12 +119,11 @@ The application includes:
 - Container health monitoring with diagnostic log analysis
 - Automated troubleshooting recommendations for common VPN issues
 
-## Version Management
+## Version & Changelog Management
 
-The current version is tracked in `pyproject.toml`. When making changes:
-1. Update version in `pyproject.toml`
-2. Update CHANGELOG.md using towncrier
-3. Run `make all` to ensure everything passes
+- Version is tracked in `pyproject.toml`.
+- Add Towncrier fragments under `news/` (e.g., `123.feature.md`).
+- Preview with `make changelog-draft`; build with `make changelog VERSION=x.y.z`.
 
 ## Key Implementation Details
 
@@ -138,15 +134,17 @@ The current version is tracked in `pyproject.toml`. When making changes:
 - SSL certificate validation with bypass option for troubleshooting
 
 ### Key Dependencies
-Core dependencies managed in pyproject.toml:
-- **typer**: CLI framework with command groups and rich help
-- **docker**: Docker SDK for Python container operations
-- **ruamel.yaml**: YAML processing with anchor/merge support for compose files
-- **requests**: HTTP client for server list fetching and VPN testing
-- **towncrier**: Changelog management (dev dependency)
+Core dependencies (see `pyproject.toml`):
+- `typer`: CLI framework with command groups and rich help
+- `docker`: Docker SDK for Python container operations
+- `ruamel.yaml`: YAML processing with anchor/merge support for compose files
+- `aiohttp`: Async HTTP client used for control API, IP checks, and server lists
+- `pydantic`: Models and validation (profiles, services, HTTP config)
+- `rich`: Console formatting for tables and progress
+- `towncrier`: Changelog management (dev dependency)
 
 ### Server List Integration
-ServerManager class handles:
+ServerManager handles:
 - Fetching from gluetun's official servers.json on GitHub
 - Local caching in ~/.cache/proxy2vpn/ with 24-hour TTL
 - Location validation for providers, countries, and cities
@@ -222,10 +220,10 @@ Since the codanna-navigator agent starts fresh with each invocation, you MUST pa
 **Example Context Forwarding**:
 ```
 "CONTEXT FROM PREVIOUS ANALYSIS:
-- The VPNService class at src/proxy2vpn/models.py:25 handles container configuration
-- Main CLI logic is in src/proxy2vpn/cli.py with Typer command groups
-- You found Docker operations in src/proxy2vpn/docker_ops.py using docker-py SDK
-- ComposeManager at src/proxy2vpn/compose_manager.py handles YAML file management
+- The VPNService class at src/proxy2vpn/core/models.py handles container configuration
+- Main CLI entry is at src/proxy2vpn/cli/main.py with Typer command groups
+- Docker operations live in src/proxy2vpn/adapters/docker_ops.py (docker SDK)
+- ComposeManager at src/proxy2vpn/adapters/compose_manager.py handles YAML management
 - Profile management uses environment file references in profiles/*.env
 
 Now focus on: [specific targeted request based on above context]"
@@ -244,9 +242,9 @@ This context forwarding transforms vague searches into surgical strikes, allowin
 
 #### Pattern 1: CLI Command → Implementation → Docker Operations
 ```
-Hop 1: "Analyze CLI command structure in cli.py and identify command groups"
-Hop 2: "Trace specific command implementation through models.py and compose_manager.py"
-Hop 3: "Follow Docker operations in docker_ops.py and container lifecycle management"
+Hop 1: "Analyze CLI command structure in cli/main.py and identify command groups"
+Hop 2: "Trace a command through core/models.py and adapters/compose_manager.py"
+Hop 3: "Follow Docker operations in adapters/docker_ops.py and container lifecycle management"
 ```
 
 #### Pattern 2: Configuration Flow Analysis
@@ -259,7 +257,7 @@ Hop 3: "Trace container configuration to Docker API calls"
 #### Pattern 3: Error Handling and Diagnostics
 ```
 Hop 1: "Find error handling patterns across CLI and Docker operations"
-Hop 2: "Analyze diagnostic system in diagnostics.py"
+Hop 2: "Analyze diagnostic system in core/services/diagnostics.py"
 Hop 3: "Trace troubleshooting workflow and log analysis"
 ```
 
@@ -289,7 +287,7 @@ Hop 3: "Analyze top candidates with line numbers and implementation details"
 ### Agent Prompt Best Practices for Proxy2VPN
 
 1. **Always include TodoWrite instruction** for complex tasks
-2. **Reference key modules** when known: cli.py, docker_ops.py, compose_manager.py, models.py
+2. **Reference key modules** when known: cli/main.py, adapters/docker_ops.py, adapters/compose_manager.py, core/models.py
 3. **Specify output format**: Ask for line numbers, class/method names, Docker API patterns
 4. **Focus on integration points**: How CLI commands trigger Docker operations via models
 5. **Request examples** of Typer command patterns, Docker SDK usage, YAML anchor usage
@@ -304,12 +302,12 @@ Hop 3: "Analyze top candidates with line numbers and implementation details"
 "Analyze the proxy2vpn codebase to understand the health monitoring and diagnostic system.
 
 Step 1: Map Health Monitoring Components
-- Find diagnostic system entry points in cli.py
-- Locate health checking logic in docker_ops.py
-- Identify diagnostic data models in models.py
+- Find diagnostic system entry points in CLI command modules
+- Locate health checking logic in adapters/docker_ops.py
+- Identify diagnostic analyzer in core/services/diagnostics.py
 
 Step 2: Trace Monitoring Workflow
-- How does 'vpn list --diagnose' command work?
+- How does 'vpn list' compute health by default?
 - What Docker API calls are used for health checks?
 - How are container logs analyzed?
 
@@ -324,15 +322,15 @@ Provide line numbers and specific class/method names. Use TodoWrite to track pro
 **Second Hop - Deep Dive with Context**:
 ```
 "CONTEXT FROM PREVIOUS ANALYSIS:
-- Diagnostic entry point is at cli.py:vpn_list() command with --diagnose flag
-- Health checking logic found in docker_ops.py using Docker SDK
-- DiagnosticResult class in diagnostics.py handles log analysis
+- Diagnostic entry point is in cli/commands/vpn.py (list command)
+- Health checking logic found in adapters/docker_ops.py using Docker SDK
+- Diagnostic analyzer in core/services/diagnostics.py handles log analysis and scoring
 - Container status checking uses docker.containers.get() API
 
 Now analyze the specific diagnostic algorithms and scoring system:
 
 Step 1: Analyze Log Analysis Patterns
-- How does diagnostics.py parse container logs?
+- How does core/services/diagnostics.py parse container logs?
 - What specific error patterns does it look for?
 - How is the health score calculated?
 
