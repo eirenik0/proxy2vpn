@@ -99,11 +99,26 @@ class ComposeManager:
             VPNService.from_compose_service(name, svc) for name, svc in services.items()
         ]
 
+    def list_services_with_profiles(self) -> list[tuple[VPNService, Profile]]:
+        """Return list of ``(VPNService, Profile)`` pairs for all services."""
+        pairs: list[tuple[VPNService, Profile]] = []
+        services = self.list_services()
+        for svc in services:
+            profile = self.get_profile(svc.profile)
+            pairs.append((svc, profile))
+        return pairs
+
     def get_service(self, name: str) -> VPNService:
         services = self.data.get("services", {})
         if name not in services:
             raise KeyError(f"Service '{name}' not found")
         return VPNService.from_compose_service(name, services[name])
+
+    def get_service_with_profile(self, name: str) -> tuple[VPNService, Profile]:
+        """Return the service and its resolved profile."""
+        svc = self.get_service(name)
+        prof = self.get_profile(svc.profile)
+        return svc, prof
 
     def add_service(self, service: VPNService) -> None:
         services = self.data.setdefault("services", {})
