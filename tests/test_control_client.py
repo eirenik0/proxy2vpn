@@ -65,7 +65,7 @@ def test_get_public_ip_returns_ip(monkeypatch):
     client = GluetunControlClient(BASE_URL)
     monkeypatch.setattr(GluetunControlClient, "request", fake_request)
     ip = asyncio.run(client.public_ip())
-    assert ip == IPResponse("1.2.3.4")
+    assert ip == IPResponse(ip="1.2.3.4")
     assert called["path"] == GluetunControlClient.ENDPOINTS["ip"]
 
 
