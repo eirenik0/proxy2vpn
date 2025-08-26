@@ -238,6 +238,7 @@ class Profile(BaseModel):
     devices: list[str] = Field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
 
     _provider: str | None = PrivateAttr(default=None)
+    _vpn_type: str | None = PrivateAttr(default=None)
     _base_dir: Path | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(validate_assignment=True)
@@ -281,6 +282,14 @@ class Profile(BaseModel):
             )
         return self._provider
 
+    @property
+    def vpn_type(self) -> str:
+        """Get VPN type from the environment file, defaulting to openvpn."""
+
+        if self._vpn_type is None:
+            self._load_vpn_type_from_env()
+        return self._vpn_type or "openvpn"
+
     def validate_env_file(self) -> list[str]:
         """Validate all required fields in the profile's environment file.
 
@@ -292,6 +301,10 @@ class Profile(BaseModel):
 
         env_vars = _load_env_file(str(self._resolve_env_path()))
         errors: list[str] = []
+
+        vpn_type = env_vars.get("VPN_TYPE", "openvpn").strip().lower()
+        if vpn_type not in ("openvpn", "wireguard"):
+            errors.append("VPN_TYPE must be 'openvpn' or 'wireguard'")
 
         provider = env_vars.get("VPN_SERVICE_PROVIDER")
         if not provider:
@@ -306,11 +319,14 @@ class Profile(BaseModel):
                     "Run 'proxy2vpn servers list-providers' to see supported providers"
                 )
 
-        if not env_vars.get("OPENVPN_USER"):
-            errors.append("OPENVPN_USER is required (your VPN account username)")
+        if vpn_type == "openvpn":
+            if not env_vars.get("OPENVPN_USER"):
+                errors.append("OPENVPN_USER is required (your VPN account username)")
 
-        if not env_vars.get("OPENVPN_PASSWORD"):
-            errors.append("OPENVPN_PASSWORD is required (your VPN account password)")
+            if not env_vars.get("OPENVPN_PASSWORD"):
+                errors.append(
+                    "OPENVPN_PASSWORD is required (your VPN account password)"
+                )
 
         if env_vars.get("HTTPPROXY", "").lower() in ("on", "true", "1"):
             if not env_vars.get("HTTPPROXY_USER"):
@@ -327,6 +343,14 @@ class Profile(BaseModel):
 
         env_vars = _load_env_file(str(self._resolve_env_path()))
         self._provider = env_vars.get("VPN_SERVICE_PROVIDER")
+
+    def _load_vpn_type_from_env(self) -> None:
+        """Load VPN type information from the environment file."""
+
+        from proxy2vpn.adapters.docker_ops import _load_env_file
+
+        env_vars = _load_env_file(str(self._resolve_env_path()))
+        self._vpn_type = env_vars.get("VPN_TYPE", "openvpn")
 
     @classmethod
     def from_anchor(cls, name: str, data: dict) -> "Profile":

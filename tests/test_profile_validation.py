@@ -173,3 +173,29 @@ def test_profile_create_fails_with_nonexistent_env_file(tmp_path):
     with _cli_ctx(compose_path) as ctx:
         with pytest.raises(Exit):
             profile_add(ctx, "test-profile", env_file)
+
+
+def test_profile_create_wireguard_without_openvpn_credentials(tmp_path):
+    """Profile with VPN_TYPE=wireguard should not require OPENVPN credentials."""
+    compose_path = _create_test_compose(tmp_path)
+
+    env_file = tmp_path / "wireguard.env"
+    env_file.write_text("VPN_SERVICE_PROVIDER=expressvpn\nVPN_TYPE=wireguard\n")
+
+    with _cli_ctx(compose_path) as ctx:
+        try:
+            profile_add(ctx, "wireguard-profile", env_file)
+        except Exit:
+            pytest.fail("Wireguard profile should not require OPENVPN credentials")
+
+
+def test_profile_create_fails_with_invalid_vpn_type(tmp_path):
+    """Invalid VPN_TYPE values should fail validation."""
+    compose_path = _create_test_compose(tmp_path)
+
+    env_file = tmp_path / "badtype.env"
+    env_file.write_text("VPN_SERVICE_PROVIDER=expressvpn\nVPN_TYPE=bad\n")
+
+    with _cli_ctx(compose_path) as ctx:
+        with pytest.raises(Exit):
+            profile_add(ctx, "bad-profile", env_file)
