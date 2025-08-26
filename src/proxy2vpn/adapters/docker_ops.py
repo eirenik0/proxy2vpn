@@ -5,12 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Iterator
 
+from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
+from proxy2vpn.core.models import Profile, VPNService
+from proxy2vpn.core import config
 from .compose_manager import ComposeManager
-from ..core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from .display_utils import console
-from ..core.models import Profile, VPNService
 from .logging_utils import get_logger
-from ..core import config
 from . import ip_utils
 
 import docker

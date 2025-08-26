@@ -6,7 +6,8 @@ from types import SimpleNamespace
 # Ensure src package is importable
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn import cli, docker_ops, ip_utils
+from proxy2vpn.cli.main import app
+from proxy2vpn.adapters import docker_ops, ip_utils
 
 
 def test_vpn_export_proxies(monkeypatch, tmp_path):
@@ -31,7 +32,7 @@ def test_vpn_export_proxies(monkeypatch, tmp_path):
     monkeypatch.setattr(docker_ops, "get_vpn_containers", fake_get_vpn_containers)
 
     out = tmp_path / "proxies.csv"
-    result = runner.invoke(cli.app, ["vpn", "export-proxies", "--output", str(out)])
+    result = runner.invoke(app, ["vpn", "export-proxies", "--output", str(out)])
     assert result.exit_code == 0
     lines = out.read_text().splitlines()
     assert lines[0] == "host,port,username,password,location,status"
@@ -54,7 +55,7 @@ def test_vpn_export_proxies(monkeypatch, tmp_path):
 
     out_no = tmp_path / "proxies_no.csv"
     result2 = runner.invoke(
-        cli.app,
+        app,
         ["vpn", "export-proxies", "--output", str(out_no), "--no-auth"],
     )
     assert result2.exit_code == 0

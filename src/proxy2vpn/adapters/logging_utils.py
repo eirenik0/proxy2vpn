@@ -1,7 +1,5 @@
 """Structured logging utilities for proxy2vpn."""
 
-from __future__ import annotations
-
 import json
 import logging
 from pathlib import Path

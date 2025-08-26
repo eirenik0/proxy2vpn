@@ -10,31 +10,31 @@ from rich.table import Table
 from rich.progress import Progress
 from docker.errors import APIError, NotFound
 
-from ...core import config
-from ..typer_ext import HelpfulTyper, run_async
-from ...adapters.compose_manager import ComposeManager
-from ...adapters.display_utils import (
+from proxy2vpn.adapters.server_manager import ServerManager
+from proxy2vpn.common import abort
+from proxy2vpn.core import config
+from proxy2vpn.cli.typer_ext import HelpfulTyper, run_async
+from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.adapters.display_utils import (
     console,
     format_success_message,
     format_bulk_success_message,
 )
-from ...core.models import VPNService
-from ...adapters.server_manager import ServerManager
-from ...adapters.http_client import GluetunControlClient
-from ...adapters.utils import abort
-from ...adapters.validators import sanitize_name, sanitize_path, validate_port
-from ...adapters.logging_utils import get_logger
-from ...adapters.cli_common import (
+from proxy2vpn.core.models import VPNService
+from proxy2vpn.adapters.validators import (
     validate_all_name_args,
     validate_service_exists,
+    sanitize_name,
+    sanitize_path,
+    validate_port,
 )
+from proxy2vpn.adapters.logging_utils import get_logger
 
 app = HelpfulTyper(help="Manage VPN services")
 logger = get_logger(__name__)
 
 
 def _service_control_base_url(ctx: typer.Context, name: str) -> str:
-    # Delay compose file access until needed
     manager = ComposeManager.from_ctx(ctx)
     svc = validate_service_exists(manager, name)
     return f"http://localhost:{svc.control_port}/v1"
@@ -95,7 +95,10 @@ def create(
     env = {"VPN_SERVICE_PROVIDER": provider}
     location = location.strip()
     if location:
-        mgr = ServerManager()
+        # Import via adapters module so tests can monkeypatch ServerManager
+        from proxy2vpn.adapters import server_manager
+
+        mgr = server_manager.ServerManager()
         if not force and not mgr.validate_location(provider, location):
             abort(
                 f"Invalid location '{location}' for {provider}",
@@ -143,13 +146,17 @@ async def list_services(
 ):
     """List VPN services with their status and IP addresses."""
 
-    manager = ComposeManager.from_ctx(ctx)
-    from ...adapters.docker_ops import (
+    # Construct via adapters.compose_manager so tests can monkeypatch behavior
+    from proxy2vpn.adapters import compose_manager
+
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = compose_manager.ComposeManager(compose_file)
+    from proxy2vpn.adapters.docker_ops import (
         get_vpn_containers,
         get_container_ip_async,
         analyze_container_logs,
     )
-    from ...core.services.diagnostics import DiagnosticAnalyzer
+    from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     if ips_only:
         containers = get_vpn_containers(all=False)
@@ -160,7 +167,6 @@ async def list_services(
             console.print(f"{container.name}: {ip}")
         return
 
-    manager = ComposeManager.from_ctx(ctx)
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
     analyzer = DiagnosticAnalyzer() if diagnose else None
@@ -237,13 +243,17 @@ def start(
 ):
     """Start one or all VPN containers."""
 
-    manager = ComposeManager.from_ctx(ctx)
+    # Construct via adapters.compose_manager so tests can monkeypatch behavior
+    from proxy2vpn.adapters import compose_manager
+
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = compose_manager.ComposeManager(compose_file)
     validate_all_name_args(all, name)
 
     if all:
         services = manager.list_services()
         _validate_service_locations(services, force)
-        from ...adapters.docker_ops import start_all_vpn_containers
+        from proxy2vpn.adapters.docker_ops import start_all_vpn_containers
 
         results = start_all_vpn_containers(manager)
         for svc_name in results:
@@ -255,12 +265,12 @@ def start(
     svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 
-    from ...adapters.docker_ops import (
+    from proxy2vpn.adapters.docker_ops import (
         start_container,
         analyze_container_logs,
         recreate_vpn_container,
     )
-    from ...core.services.diagnostics import DiagnosticAnalyzer
+    from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     profile = manager.get_profile(svc.profile)
     try:
@@ -291,7 +301,7 @@ def stop(
     validate_all_name_args(all, name)
 
     if all:
-        from ...adapters.docker_ops import stop_all_vpn_containers
+        from proxy2vpn.adapters.docker_ops import stop_all_vpn_containers
 
         results = stop_all_vpn_containers()
         for svc_name in results:
@@ -300,12 +310,12 @@ def stop(
 
     validate_service_exists(manager, name)
 
-    from ...adapters.docker_ops import (
+    from proxy2vpn.adapters.docker_ops import (
         stop_container,
         remove_container,
         analyze_container_logs,
     )
-    from ...core.services.diagnostics import DiagnosticAnalyzer
+    from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     try:
         stop_container(name)
@@ -341,7 +351,10 @@ def restart(
     if all:
         services = manager.list_services()
         _validate_service_locations(services, force)
-        from ...adapters.docker_ops import recreate_vpn_container, start_container
+        from proxy2vpn.adapters.docker_ops import (
+            recreate_vpn_container,
+            start_container,
+        )
 
         for svc in services:
             profile = manager.get_profile(svc.profile)
@@ -360,12 +373,12 @@ def restart(
     svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 
-    from ...adapters.docker_ops import (
+    from proxy2vpn.adapters.docker_ops import (
         recreate_vpn_container,
         start_container,
         analyze_container_logs,
     )
-    from ...core.services.diagnostics import DiagnosticAnalyzer
+    from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     profile = manager.get_profile(svc.profile)
     try:
@@ -400,7 +413,7 @@ def logs(
     except KeyError:
         abort(f"Service '{name}' not found")
 
-    from ...adapters.docker_ops import container_logs
+    from proxy2vpn.adapters.docker_ops import container_logs
 
     try:
         for line in container_logs(name, lines=lines, follow=follow):
@@ -411,7 +424,7 @@ def logs(
 
 def _delete_service_containers(service_name: str):
     """Helper function to delete containers for a service."""
-    from ...adapters.docker_ops import remove_container, stop_container
+    from proxy2vpn.adapters.docker_ops import remove_container, stop_container
 
     try:
         stop_container(service_name)
@@ -482,7 +495,7 @@ async def test(
     manager = ComposeManager.from_ctx(ctx)
     validate_service_exists(manager, name)
 
-    from ...adapters.docker_ops import test_vpn_connection_async
+    from proxy2vpn.adapters.docker_ops import test_vpn_connection_async
 
     if await test_vpn_connection_async(name):
         console.print("[green]✓[/green] VPN connection is active.")
@@ -503,7 +516,7 @@ async def export_proxies(
 ):
     """Export running VPN proxies to a CSV file."""
 
-    from ...adapters.docker_ops import collect_proxy_info
+    from proxy2vpn.adapters.docker_ops import collect_proxy_info
 
     proxies = await collect_proxy_info(include_credentials=not no_auth)
 
@@ -536,7 +549,10 @@ async def status(
     """Show control server status for SERVICE."""
 
     base_url = _service_control_base_url(ctx, service)
-    async with GluetunControlClient(base_url) as client:
+    # Import via adapters module so tests can monkeypatch the client
+    from proxy2vpn.adapters import http_client
+
+    async with http_client.GluetunControlClient(base_url) as client:
         data = await client.status()
     console.print_json(data=asdict(data))
 
@@ -550,7 +566,10 @@ async def public_ip(
     """Show public IP reported by the control API for SERVICE."""
 
     base_url = _service_control_base_url(ctx, service)
-    async with GluetunControlClient(base_url) as client:
+    # Import via adapters module so tests can monkeypatch the client
+    from proxy2vpn.adapters import http_client
+
+    async with http_client.GluetunControlClient(base_url) as client:
         ip = await client.public_ip()
     console.print(ip.ip)
 
@@ -564,6 +583,9 @@ async def restart_tunnel(
     """Restart the VPN tunnel for SERVICE via the control API."""
 
     base_url = _service_control_base_url(ctx, service)
-    async with GluetunControlClient(base_url) as client:
+    # Import via adapters module so tests can monkeypatch the client
+    from proxy2vpn.adapters import http_client
+
+    async with http_client.GluetunControlClient(base_url) as client:
         await client.restart_tunnel()
     console.print("[green]\u2713[/green] Tunnel restart requested.")

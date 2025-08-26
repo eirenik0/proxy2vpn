@@ -1,7 +1,5 @@
 """Validation utilities for docker-compose files used by proxy2vpn."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from ruamel.yaml import YAML

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..adapters.validators import sanitize_name, sanitize_path, validate_port
+from proxy2vpn.adapters.validators import sanitize_name, sanitize_path, validate_port
 
 
 @dataclass
@@ -138,26 +138,24 @@ class VPNService:
                     k, v = item.split("=", 1)
                     env_dict[k] = v
 
-                labels = dict(service_def.get("labels", {}))
+        labels = dict(service_def.get("labels", {}))
 
-                # Create container and config components
-                container = VPNContainer(
-                    name=name, proxy_port=host_port, control_port=control_host_port
-                )
+        # Create container and config components
+        container = VPNContainer(
+            name=name, proxy_port=host_port, control_port=control_host_port
+        )
 
-                config = VPNConfig(
-                    provider=labels.get(
-                        "vpn.provider", env_dict.get("VPN_SERVICE_PROVIDER", "")
-                    ),
-                    profile=labels.get("vpn.profile", ""),
-                    location=labels.get(
-                        "vpn.location", env_dict.get("SERVER_CITIES", "")
-                    ),
-                    environment=env_dict,
-                    labels=labels,
-                )
+        config = VPNConfig(
+            provider=labels.get(
+                "vpn.provider", env_dict.get("VPN_SERVICE_PROVIDER", "")
+            ),
+            profile=labels.get("vpn.profile", ""),
+            location=labels.get("vpn.location", env_dict.get("SERVER_CITIES", "")),
+            environment=env_dict,
+            labels=labels,
+        )
 
-                return cls(container=container, config=config)
+        return cls(container=container, config=config)
 
     def to_compose_service(self) -> dict:
         env_list = [f"{k}={v}" for k, v in self.config.environment.items()]

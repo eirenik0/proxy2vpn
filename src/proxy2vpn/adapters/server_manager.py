@@ -8,9 +8,14 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from ..core import config
-from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError, RetryPolicy
-from .utils import abort
+from proxy2vpn.common import abort
+from proxy2vpn.core import config
+from .http_client import (
+    HTTPClient,
+    HTTPClientConfig,
+    HTTPClientError,
+    RetryPolicy,
+)
 
 
 class ServerManager:

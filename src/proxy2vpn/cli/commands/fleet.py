@@ -1,7 +1,7 @@
 """Fleet management CLI commands."""
 
 import typer
-from ..typer_ext import HelpfulTyper
+from proxy2vpn.cli.typer_ext import HelpfulTyper
 
 app = HelpfulTyper(help="Manage VPN fleets across multiple cities")
 
@@ -23,7 +23,7 @@ def plan(
     ),
 ):
     """Plan bulk VPN deployment across cities"""
-    from ...adapters.fleet_commands import fleet_plan
+    from proxy2vpn.adapters.fleet_commands import fleet_plan
 
     fleet_plan(
         ctx,
@@ -55,7 +55,7 @@ def deploy(
     ),
 ):
     """Deploy VPN fleet from plan file"""
-    from ...adapters.fleet_commands import fleet_deploy
+    from proxy2vpn.adapters.fleet_commands import fleet_deploy
 
     fleet_deploy(ctx, plan_file, parallel, validate_first, dry_run, force)
 
@@ -68,7 +68,7 @@ def status(
     show_health: bool = typer.Option(False, help="Include health checks"),
 ):
     """Show current fleet status and profile allocation"""
-    from ...adapters.fleet_commands import fleet_status
+    from proxy2vpn.adapters.fleet_commands import fleet_status
 
     fleet_status(ctx, format, show_allocation, show_health)
 
@@ -82,7 +82,7 @@ def rotate(
     dry_run: bool = typer.Option(False, help="Show rotation plan only"),
 ):
     """Rotate VPN servers for better availability"""
-    from ...adapters.fleet_commands import fleet_rotate
+    from proxy2vpn.adapters.fleet_commands import fleet_rotate
 
     fleet_rotate(ctx, country, provider, criteria, dry_run)
 
@@ -96,6 +96,6 @@ def scale(
     profile: str = typer.Option(None, help="Add services to specific profile"),
 ):
     """Scale VPN fleet up or down"""
-    from ...adapters.fleet_commands import fleet_scale
+    from proxy2vpn.adapters.fleet_commands import fleet_scale
 
     fleet_scale(ctx, action, countries, factor, profile)

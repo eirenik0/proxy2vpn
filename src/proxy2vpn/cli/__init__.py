@@ -1,5 +1,6 @@
 # CLI package - handles command-line interface and user interactions
+from proxy2vpn.cli.main import app
 
-from .main import app
-
-__all__ = ["app"]
+__all__ = [
+    "app",
+]

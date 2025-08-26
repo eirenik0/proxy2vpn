@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from ...adapters import ip_utils
+from proxy2vpn.adapters import ip_utils
 
 
 @dataclass

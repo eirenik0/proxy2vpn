@@ -1,7 +1,8 @@
 import pathlib
 from typer.testing import CliRunner
 
-from proxy2vpn import cli
+from proxy2vpn.cli.main import app
+from proxy2vpn.adapters import server_manager
 from proxy2vpn.adapters.compose_manager import ComposeManager
 
 
@@ -31,10 +32,10 @@ def test_vpn_create_location_validation(tmp_path, monkeypatch):
                 return location, None
             return None, location
 
-    monkeypatch.setattr(cli, "ServerManager", lambda: DummyServerManager())
+    monkeypatch.setattr(server_manager, "ServerManager", lambda: DummyServerManager())
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "--compose-file",
             str(compose_path),
@@ -64,10 +65,10 @@ def test_vpn_create_location_validation(tmp_path, monkeypatch):
         def parse_location(self, provider, location):
             return location, None
 
-    monkeypatch.setattr(cli, "ServerManager", lambda: FailingServerManager())
+    monkeypatch.setattr(server_manager, "ServerManager", lambda: FailingServerManager())
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "--compose-file",
             str(compose_path),
@@ -86,7 +87,7 @@ def test_vpn_create_location_validation(tmp_path, monkeypatch):
     assert result.exit_code != 0
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "--compose-file",
             str(compose_path),
@@ -117,15 +118,15 @@ def test_vpn_start_requires_valid_location(tmp_path, monkeypatch):
         def parse_location(self, provider, location):
             return location, None
 
-    monkeypatch.setattr(cli, "ServerManager", lambda: DummyServerManager())
-    from proxy2vpn import docker_ops
+    monkeypatch.setattr(server_manager, "ServerManager", lambda: DummyServerManager())
+    from proxy2vpn.adapters import docker_ops
 
     monkeypatch.setattr(docker_ops, "recreate_vpn_container", lambda *a, **k: None)
     monkeypatch.setattr(docker_ops, "start_container", lambda *a, **k: None)
     monkeypatch.setattr(docker_ops, "analyze_container_logs", lambda *a, **k: [])
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "--compose-file",
             str(compose_path),
@@ -137,7 +138,7 @@ def test_vpn_start_requires_valid_location(tmp_path, monkeypatch):
     assert result.exit_code != 0
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "--compose-file",
             str(compose_path),

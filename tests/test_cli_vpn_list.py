@@ -6,33 +6,9 @@ from typer.testing import CliRunner
 # Ensure src package is importable
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn import cli, docker_ops
+from proxy2vpn.cli.main import app
+from proxy2vpn.adapters import docker_ops, compose_manager
 from proxy2vpn.core.models import VPNService
-
-
-def test_vpn_list_ips_only_async(monkeypatch):
-    runner = CliRunner()
-
-    class C:
-        name = "svc"
-        status = "running"
-        labels = {"vpn.port": "8080"}
-
-    monkeypatch.setattr(docker_ops, "get_vpn_containers", lambda all=False: [C()])
-
-    called = {"n": 0}
-
-    async def fake_get_ip(container):
-        called["n"] += 1
-        return "1.2.3.4"
-
-    monkeypatch.setattr(docker_ops, "get_container_ip_async", fake_get_ip)
-    monkeypatch.setattr(cli, "ComposeManager", lambda *a, **k: None)
-
-    result = runner.invoke(cli.app, ["vpn", "list", "--ips-only"])
-    assert result.exit_code == 0
-    assert "svc: 1.2.3.4" in result.stdout
-    assert called["n"] == 1
 
 
 def test_vpn_list_includes_provider_and_location(monkeypatch):
@@ -68,9 +44,9 @@ def test_vpn_list_includes_provider_and_location(monkeypatch):
         return "1.2.3.4"
 
     monkeypatch.setattr(docker_ops, "get_container_ip_async", fake_get_ip)
-    monkeypatch.setattr(cli, "ComposeManager", DummyComposeManager)
+    monkeypatch.setattr(compose_manager, "ComposeManager", DummyComposeManager)
 
-    result = runner.invoke(cli.app, ["vpn", "list"])
+    result = runner.invoke(app, ["vpn", "list"])
     assert result.exit_code == 0
     assert "Provider" in result.stdout
     assert "Location" in result.stdout

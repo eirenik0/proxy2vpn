@@ -1,9 +1,9 @@
 """Server management CLI commands."""
 
 import typer
-from ..typer_ext import HelpfulTyper, run_async
-from ...adapters.server_manager import ServerManager
-from ...adapters.display_utils import console
+from proxy2vpn.cli.typer_ext import HelpfulTyper, run_async
+from proxy2vpn.adapters.server_manager import ServerManager
+from proxy2vpn.adapters.display_utils import console
 
 app = HelpfulTyper(help="Manage cached server lists")
 

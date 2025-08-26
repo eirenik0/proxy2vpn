@@ -4,14 +4,14 @@ from pathlib import Path
 import typer
 from rich.table import Table
 
-from ...core import config
-from ..typer_ext import HelpfulTyper
-from ...adapters.compose_manager import ComposeManager
-from ...adapters.display_utils import console
-from ...core.models import Profile
-from ...adapters.utils import abort
-from ...adapters.validators import sanitize_name, sanitize_path
-from ...adapters.logging_utils import get_logger
+from proxy2vpn.core import config
+from proxy2vpn.cli.typer_ext import HelpfulTyper
+from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.adapters.display_utils import console
+from proxy2vpn.core.models import Profile
+from proxy2vpn.common import abort
+from proxy2vpn.adapters.validators import sanitize_name, sanitize_path
+from proxy2vpn.adapters.logging_utils import get_logger
 
 app = HelpfulTyper(help="Manage VPN profiles and apply them to services")
 logger = get_logger(__name__)
@@ -113,7 +113,7 @@ def apply(
         "vpn.profile": profile,
         "vpn.location": "",
     }
-    from ...core.models import VPNService
+    from proxy2vpn.core.models import VPNService
 
     svc = VPNService.create(
         name=service,

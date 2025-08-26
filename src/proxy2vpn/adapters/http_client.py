@@ -1,7 +1,5 @@
 """Asynchronous HTTP client utilities for proxy2vpn."""
 
-from __future__ import annotations
-
 import asyncio
 import os
 import time
@@ -11,7 +9,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from ..core.config import (
+from proxy2vpn.core.config import (
     CONTROL_API_ENDPOINTS,
     DEFAULT_TIMEOUT,
     MAX_RETRIES,

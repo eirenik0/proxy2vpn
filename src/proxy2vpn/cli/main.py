@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 import typer
 
-from ..core import config
+from proxy2vpn.core import config
+from proxy2vpn.adapters.validators import sanitize_path
+from proxy2vpn.adapters.logging_utils import configure_logging
 from .typer_ext import HelpfulTyper
 from .commands import profile, vpn, servers, system, fleet
-from ..adapters.validators import sanitize_path
-from ..adapters.logging_utils import configure_logging
 
 app = HelpfulTyper(help="proxy2vpn command line interface")
 
@@ -47,7 +47,7 @@ def main(
         log_file = log_file.expanduser().resolve()
     configure_logging(log_file=log_file)
     if version:
-        from .. import __version__
+        from proxy2vpn import __version__
 
         typer.echo(__version__)
         raise typer.Exit()

@@ -1,17 +1,15 @@
-from __future__ import annotations
+import os
+import shutil
+import typer
 
 from pathlib import Path
 from typing import Any, Self
-import os
-import shutil
-
-import typer
 from filelock import FileLock
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
-from ..core.models import Profile, VPNService
-from ..core import config
+from proxy2vpn.core.models import Profile, VPNService
+from proxy2vpn.core import config
 from .compose_validator import validate_compose
 
 
@@ -37,6 +35,7 @@ class ComposeManager:
         self.lock = FileLock(str(compose_path) + ".lock")
         self.data: CommentedMap = self._load()
 
+    @classmethod
     def from_ctx(cls, ctx: typer.Context) -> Self:
         compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
         return cls(compose_path=compose_file)

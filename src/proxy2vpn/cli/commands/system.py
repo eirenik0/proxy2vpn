@@ -6,15 +6,15 @@ from pathlib import Path
 
 import typer
 
-from ...core import config
-from ..typer_ext import HelpfulTyper, run_async
-from ...adapters.compose_manager import ComposeManager
-from ...adapters.compose_validator import validate_compose
-from ...adapters.server_manager import ServerManager
-from ...adapters.display_utils import console
-from ...adapters.utils import abort
-from ...adapters.validators import sanitize_name
-from ...adapters.logging_utils import get_logger, set_log_level
+from proxy2vpn.core import config
+from proxy2vpn.cli.typer_ext import HelpfulTyper, run_async
+from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.adapters.compose_validator import validate_compose
+from proxy2vpn.adapters.server_manager import ServerManager
+from proxy2vpn.adapters.display_utils import console
+from proxy2vpn.common import abort
+from proxy2vpn.adapters.validators import sanitize_name
+from proxy2vpn.adapters.logging_utils import get_logger, set_log_level
 
 app = HelpfulTyper(help="System level operations")
 logger = get_logger(__name__)
@@ -81,13 +81,13 @@ def diagnose(
         set_log_level(logging.DEBUG)
         logger.debug("diagnostic_started", extra={"verbose": True, "lines": lines})
 
-    from ...adapters.docker_ops import (
+    from proxy2vpn.adapters.docker_ops import (
         get_problematic_containers,
         get_vpn_containers,
         get_container_diagnostics,
         analyze_container_logs,
     )
-    from ...core.services.diagnostics import DiagnosticAnalyzer
+    from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     analyzer = DiagnosticAnalyzer()
     if name and all_containers:
