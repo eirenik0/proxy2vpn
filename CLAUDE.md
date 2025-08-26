@@ -62,7 +62,7 @@ uv run proxy2vpn fleet rotate --dry-run
 Profile environment files (e.g., profiles/myprofile.env) have comprehensive validation:
 ```bash
 # Required fields (validated during profile creation)
-VPN_PROVIDER=expressvpn
+VPN_SERVICE_PROVIDER=expressvpn
 OPENVPN_USER=your_vpn_username
 OPENVPN_PASSWORD=your_vpn_password
 
@@ -73,7 +73,7 @@ HTTPPROXY_PASSWORD=your_proxy_password
 ```
 
 **Validation Rules**:
-- `VPN_PROVIDER` - Required, must match supported gluetun provider
+- `VPN_SERVICE_PROVIDER` - Required, must match supported gluetun provider
 - `OPENVPN_USER` - Required, your VPN account username
 - `OPENVPN_PASSWORD` - Required, your VPN account password  
 - `HTTPPROXY_USER/PASSWORD` - Required only if `HTTPPROXY=on`

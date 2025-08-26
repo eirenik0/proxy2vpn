@@ -51,7 +51,7 @@ def test_profile_create_with_valid_env_file(tmp_path):
     # Create valid profile env file
     env_file = tmp_path / "valid_profile.env"
     env_file.write_text(
-        "VPN_PROVIDER=expressvpn\n"
+        "VPN_SERVICE_PROVIDER=expressvpn\n"
         "OPENVPN_USER=test_user\n"
         "OPENVPN_PASSWORD=test_pass\n"
         "HTTPPROXY=on\n"
@@ -68,15 +68,15 @@ def test_profile_create_with_valid_env_file(tmp_path):
             pytest.fail("Profile creation should not fail with valid env file")
 
 
-def test_profile_create_fails_with_missing_vpn_provider(tmp_path):
-    """Test profile creation fails with missing VPN_PROVIDER."""
+def test_profile_create_fails_with_missing_vpn_service_provider(tmp_path):
+    """Test profile creation fails with missing VPN_SERVICE_PROVIDER."""
     compose_path = _create_test_compose(tmp_path)
 
-    # Create invalid profile env file (missing VPN_PROVIDER)
+    # Create invalid profile env file (missing VPN_SERVICE_PROVIDER)
     env_file = tmp_path / "invalid_profile.env"
     env_file.write_text(
         "OPENVPN_USER=test_user\nOPENVPN_PASSWORD=test_pass\n"
-        # Missing VPN_PROVIDER
+        # Missing VPN_SERVICE_PROVIDER
     )
 
     # Test profile creation should fail
@@ -91,7 +91,7 @@ def test_profile_create_fails_with_missing_openvpn_credentials(tmp_path):
 
     # Create invalid profile env file (missing OPENVPN_USER and OPENVPN_PASSWORD)
     env_file = tmp_path / "invalid_profile.env"
-    env_file.write_text("VPN_PROVIDER=nordvpn\n")
+    env_file.write_text("VPN_SERVICE_PROVIDER=nordvpn\n")
 
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
@@ -106,7 +106,7 @@ def test_profile_create_fails_with_httpproxy_enabled_missing_credentials(tmp_pat
     # Create invalid profile env file (HTTPPROXY enabled but missing credentials)
     env_file = tmp_path / "invalid_profile.env"
     env_file.write_text(
-        "VPN_PROVIDER=protonvpn\n"
+        "VPN_SERVICE_PROVIDER=protonvpn\n"
         "OPENVPN_USER=test_user\n"
         "OPENVPN_PASSWORD=test_pass\n"
         "HTTPPROXY=on\n"
@@ -126,7 +126,7 @@ def test_profile_create_succeeds_without_httpproxy(tmp_path):
     # Create minimal valid profile env file
     env_file = tmp_path / "minimal_profile.env"
     env_file.write_text(
-        "VPN_PROVIDER=surfshark\nOPENVPN_USER=test_user\nOPENVPN_PASSWORD=test_pass\n"
+        "VPN_SERVICE_PROVIDER=surfshark\nOPENVPN_USER=test_user\nOPENVPN_PASSWORD=test_pass\n"
         # No HTTPPROXY configuration - should be valid
     )
 
@@ -146,7 +146,7 @@ def test_profile_create_with_httpproxy_disabled_succeeds(tmp_path):
     # Create profile with HTTP proxy explicitly disabled
     env_file = tmp_path / "no_proxy_profile.env"
     env_file.write_text(
-        "VPN_PROVIDER=mullvad\n"
+        "VPN_SERVICE_PROVIDER=mullvad\n"
         "OPENVPN_USER=test_user\n"
         "OPENVPN_PASSWORD=test_pass\n"
         "HTTPPROXY=off\n"

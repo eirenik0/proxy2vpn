@@ -264,7 +264,7 @@ class Profile(BaseModel):
     def provider(self) -> str:
         """Get VPN provider from the environment file.
 
-        Raises ValueError if VPN_PROVIDER is not specified in the profile's env file.
+        Raises ValueError if VPN_SERVICE_PROVIDER is not specified in the profile's env file.
         """
 
         if self._provider is None:
@@ -272,8 +272,8 @@ class Profile(BaseModel):
 
         if not self._provider:
             raise ValueError(
-                f"Profile '{self.name}' is missing VPN_PROVIDER in {self.env_file}. "
-                "Add 'VPN_PROVIDER=expressvpn' (or nordvpn, protonvpn, etc.) to the env file."
+                f"Profile '{self.name}' is missing VPN_SERVICE_PROVIDER in {self.env_file}. "
+                "Add 'VPN_SERVICE_PROVIDER=expressvpn' (or nordvpn, protonvpn, etc.) to the env file."
             )
         return self._provider
 
@@ -289,16 +289,16 @@ class Profile(BaseModel):
         env_vars = _load_env_file(str(self._resolve_env_path()))
         errors: list[str] = []
 
-        provider = env_vars.get("VPN_PROVIDER")
+        provider = env_vars.get("VPN_SERVICE_PROVIDER")
         if not provider:
             errors.append(
-                "VPN_PROVIDER is required (e.g., 'expressvpn', 'nordvpn', 'protonvpn')"
+                "VPN_SERVICE_PROVIDER is required (e.g., 'expressvpn', 'nordvpn', 'protonvpn')"
             )
         else:
             supported = server_manager.ServerManager().list_providers()
             if provider.strip().lower() not in supported:
                 errors.append(
-                    f"Unsupported VPN_PROVIDER '{provider}'. "
+                    f"Unsupported VPN_SERVICE_PROVIDER '{provider}'. "
                     "Run 'proxy2vpn servers list-providers' to see supported providers"
                 )
 
@@ -322,7 +322,7 @@ class Profile(BaseModel):
         from proxy2vpn.adapters.docker_ops import _load_env_file
 
         env_vars = _load_env_file(str(self._resolve_env_path()))
-        self._provider = env_vars.get("VPN_PROVIDER")
+        self._provider = env_vars.get("VPN_SERVICE_PROVIDER")
 
     @classmethod
     def from_anchor(cls, name: str, data: dict) -> "Profile":

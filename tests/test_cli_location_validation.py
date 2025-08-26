@@ -9,7 +9,7 @@ from proxy2vpn.adapters.compose_manager import ComposeManager
 def _copy_compose(tmp_path: pathlib.Path) -> pathlib.Path:
     src = pathlib.Path(__file__).parent / "test_compose.yml"
     env_path = tmp_path / "env.test"
-    env_path.write_text("VPN_PROVIDER=prov\nKEY=value\n")
+    env_path.write_text("VPN_SERVICE_PROVIDER=prov\nKEY=value\n")
     dest = tmp_path / "compose.yml"
     text = src.read_text().replace("env.test", str(env_path))
     dest.write_text(text)

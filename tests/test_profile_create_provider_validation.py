@@ -57,6 +57,6 @@ def test_profile_create_accepts_supported_provider(tmp_path, monkeypatch):
         env_file = pathlib.Path("profiles/test.env")
         assert env_file.exists()
         content = env_file.read_text()
-        assert "VPN_PROVIDER=prov" in content
+        assert "VPN_SERVICE_PROVIDER=prov" in content
         assert "OPENVPN_USER=user" in content
         assert "OPENVPN_PASSWORD=pass" in content
