@@ -7,6 +7,9 @@ from proxy2vpn.adapters.http_client import (
     IPResponse,
     OpenVPNResponse,
     OpenVPNStatusResponse,
+    DNSStatusResponse,
+    UpdaterStatusResponse,
+    PortForwardResponse,
     StatusResponse,
 )
 
@@ -75,6 +78,48 @@ def test_restart_tunnel_puts_status(monkeypatch):
     assert called["method"] == "PUT"
     assert called["path"] == GluetunControlClient.ENDPOINTS["openvpn_status"]
     assert called["json"] == {"status": "restarted"}
+
+
+def test_dns_status_calls_correct_path(monkeypatch):
+    called = {}
+
+    async def fake_get(self, path, **kwargs):  # pragma: no cover - simple mock
+        called["path"] = path
+        return {"status": "running"}
+
+    monkeypatch.setattr(HTTPClient, "get", fake_get)
+    client = GluetunControlClient(BASE_URL)
+    result = asyncio.run(client.dns_status())
+    assert result == DNSStatusResponse(status="running")
+    assert called["path"] == GluetunControlClient.ENDPOINTS["dns_status"]
+
+
+def test_updater_status_calls_correct_path(monkeypatch):
+    called = {}
+
+    async def fake_get(self, path, **kwargs):  # pragma: no cover - simple mock
+        called["path"] = path
+        return {"status": "completed"}
+
+    monkeypatch.setattr(HTTPClient, "get", fake_get)
+    client = GluetunControlClient(BASE_URL)
+    result = asyncio.run(client.updater_status())
+    assert result == UpdaterStatusResponse(status="completed")
+    assert called["path"] == GluetunControlClient.ENDPOINTS["updater_status"]
+
+
+def test_port_forwarded_calls_correct_path(monkeypatch):
+    called = {}
+
+    async def fake_get(self, path, **kwargs):  # pragma: no cover - simple mock
+        called["path"] = path
+        return {"port": 9999}
+
+    monkeypatch.setattr(HTTPClient, "get", fake_get)
+    client = GluetunControlClient(BASE_URL)
+    result = asyncio.run(client.port_forwarded())
+    assert result == PortForwardResponse(port=9999)
+    assert called["path"] == GluetunControlClient.ENDPOINTS["port_forward"]
 
 
 def test_auth_from_env(monkeypatch):

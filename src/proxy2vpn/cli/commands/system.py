@@ -127,6 +127,12 @@ def diagnose(
 
         assert container.name is not None  # Type narrowing after null check
         results = analyze_container_logs(container.name, lines=lines, analyzer=analyzer)
+        ports = container.attrs.get("NetworkSettings", {}).get("Ports", {})
+        port_info = ports.get("8000/tcp")
+        if port_info and port_info[0].get("HostPort"):
+            control_port = port_info[0].get("HostPort")
+            base_url = f"http://localhost:{control_port}/v1"
+            results.extend(analyzer.control_api_checks(base_url))
         logger.debug(
             "log_analysis_complete",
             extra={"container_name": container.name, "issues_found": len(results)},

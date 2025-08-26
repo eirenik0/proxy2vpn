@@ -26,6 +26,16 @@ class _Restart:
     status: str
 
 
+@dataclass
+class _SimpleStatus:
+    status: str
+
+
+@dataclass
+class _Port:
+    port: int
+
+
 class DummyClient:
     def __init__(self, base_url):
         self.base_url = base_url
@@ -44,6 +54,15 @@ class DummyClient:
 
     async def restart_tunnel(self):
         return _Restart(status="restarted")
+
+    async def dns_status(self):
+        return _SimpleStatus(status="running")
+
+    async def updater_status(self):
+        return _SimpleStatus(status="completed")
+
+    async def port_forwarded(self):
+        return _Port(port=1234)
 
 
 def test_vpn_status_uses_localhost(monkeypatch):
@@ -94,6 +113,66 @@ def test_vpn_restart_tunnel_uses_localhost(monkeypatch):
     result = runner.invoke(
         app,
         ["--compose-file", str(COMPOSE_FILE), "vpn", "restart-tunnel", "testvpn1"],
+    )
+    assert result.exit_code == 0
+    assert called["base_url"] == "http://localhost:30000/v1"
+
+
+def test_vpn_dns_status_uses_localhost(monkeypatch):
+    runner = CliRunner()
+    called = {}
+
+    def fake_client(base_url):
+        called["base_url"] = base_url
+        return DummyClient(base_url)
+
+    monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
+
+    result = runner.invoke(
+        app,
+        ["--compose-file", str(COMPOSE_FILE), "vpn", "dns-status", "testvpn1"],
+    )
+    assert result.exit_code == 0
+    assert called["base_url"] == "http://localhost:30000/v1"
+
+
+def test_vpn_updater_status_uses_localhost(monkeypatch):
+    runner = CliRunner()
+    called = {}
+
+    def fake_client(base_url):
+        called["base_url"] = base_url
+        return DummyClient(base_url)
+
+    monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
+
+    result = runner.invoke(
+        app,
+        ["--compose-file", str(COMPOSE_FILE), "vpn", "updater-status", "testvpn1"],
+    )
+    assert result.exit_code == 0
+    assert called["base_url"] == "http://localhost:30000/v1"
+
+
+def test_vpn_port_forwarded_uses_localhost(monkeypatch):
+    runner = CliRunner()
+    called = {}
+
+    def fake_client(base_url):
+        called["base_url"] = base_url
+        return DummyClient(base_url)
+
+    monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
+
+    result = runner.invoke(
+        app,
+        [
+            "--compose-file",
+            str(COMPOSE_FILE),
+            "vpn",
+            "port-forwarded",
+            "testvpn1",
+        ],
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
