@@ -188,11 +188,26 @@ class Profile:
     image: str = "qmcgaw/gluetun"
     cap_add: list[str] = field(default_factory=lambda: ["NET_ADMIN"])
     devices: list[str] = field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
+    _provider: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.name = sanitize_name(self.name)
         # Store resolved path but keep as string for YAML serialization
         self.env_file = str(sanitize_path(Path(self.env_file)))
+
+    @property
+    def provider(self) -> str | None:
+        """Get VPN provider from the environment file, if specified."""
+        if self._provider is None:
+            self._load_provider_from_env()
+        return self._provider
+
+    def _load_provider_from_env(self) -> None:
+        """Load provider information from the environment file."""
+        from proxy2vpn.adapters.docker_ops import _load_env_file
+
+        env_vars = _load_env_file(self.env_file)
+        self._provider = env_vars.get("VPN_PROVIDER")
 
     @classmethod
     def from_anchor(cls, name: str, data: dict) -> "Profile":

@@ -17,9 +17,9 @@ logger = get_logger(__name__)
 class FleetConfig:
     """Configuration for bulk VPN fleet deployment"""
 
-    provider: str
     countries: list[str]  # ["Germany", "France", "Netherlands"]
     profiles: dict[str, int]  # {"acc1": 2, "acc2": 8} - profile slots
+    provider: str | None = None  # Optional single provider (legacy support)
     port_start: int = 20000
     control_port_start: int = 30000
     naming_template: str = "{provider}-{country}-{city}"
@@ -46,8 +46,13 @@ class ServicePlan:
 class DeploymentPlan:
     """Complete deployment plan for fleet"""
 
-    provider: str
     services: list[ServicePlan] = field(default_factory=list)
+    provider: str | None = None  # Optional for backward compatibility
+
+    @property
+    def providers(self) -> set[str]:
+        """Get all providers used in this deployment plan."""
+        return {s.provider for s in self.services if s.provider}
 
     @property
     def service_names(self) -> list[str]:
@@ -74,7 +79,7 @@ class DeploymentPlan:
                 country=country,
                 port=port,
                 control_port=control_port,
-                provider=provider or self.provider,
+                provider=provider,
                 hostname=hostname,
                 ip=ip,
             )
@@ -83,7 +88,8 @@ class DeploymentPlan:
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
         return {
-            "provider": self.provider,
+            "provider": self.provider,  # Keep for backward compatibility
+            "providers": list(self.providers),  # New field with all providers
             "services": [
                 {
                     "name": s.name,
@@ -103,7 +109,7 @@ class DeploymentPlan:
     @classmethod
     def from_dict(cls, data: dict) -> "DeploymentPlan":
         """Create from dictionary"""
-        plan = cls(provider=data["provider"])
+        plan = cls(provider=data.get("provider"))
         for service_data in data["services"]:
             plan.services.append(ServicePlan(**service_data))
         return plan
@@ -133,122 +139,113 @@ class FleetManager:
         self.profile_allocator = ProfileAllocator()
 
     def plan_deployment(self, config: FleetConfig) -> DeploymentPlan:
-        """Create deployment plan for cities across countries"""
+        """Create deployment plan with multi-provider orchestration based on profile providers."""
         plan = DeploymentPlan(provider=config.provider)
 
-        defined_profiles = {p.name for p in self.compose_manager.list_profiles()}
-        missing_profiles = set(config.profiles) - defined_profiles
+        # Load all profiles and validate they exist
+        available_profiles = {p.name: p for p in self.compose_manager.list_profiles()}
+        missing_profiles = set(config.profiles.keys()) - set(available_profiles.keys())
         if missing_profiles:
             raise ValueError(f"Unknown profiles: {', '.join(sorted(missing_profiles))}")
 
-        if config.unique_ips:
-            data = self.server_manager.data or self.server_manager.update_servers()
-            prov = data.get(config.provider, {})
-            servers = prov.get("servers", [])
-            all_entries: list[tuple[str, str, str, str]] = []
-            used_ips: set[str] = set()
-            used_cities: set[str] = set()
-            for srv in servers:
-                country = srv.get("country")
-                city = srv.get("city")
-                if country not in config.countries or not city:
-                    continue
-                ips = srv.get("ips") or []
-                ip = next((ip for ip in ips if "." in ip), None)
-                if not ip or ip in used_ips or city in used_cities:
-                    continue
-                hostname = srv.get("hostname", "")
-                used_ips.add(ip)
-                used_cities.add(city)
-                all_entries.append((country, city, hostname, ip))
+        # Group profiles by provider for orchestration
+        profile_providers: dict[str, list[str]] = {}
+        for profile_name in config.profiles.keys():
+            profile = available_profiles[profile_name]
+            provider = profile.provider or config.provider
+            if not provider:
+                from proxy2vpn.core import config as app_config
 
-            console.print(
-                f"[blue]📍 Total: {len(all_entries)} unique city/IP pairs across {len(config.countries)} countries[/blue]"
-            )
-
-            total_slots = sum(config.profiles.values())
-            if len(all_entries) > total_slots:
+                provider = app_config.DEFAULT_PROVIDER
                 console.print(
-                    f"[yellow]⚠ Warning: {len(all_entries)} city/IP pairs but only {total_slots} profile slots[/yellow]"
-                )
-                console.print(f"[yellow]  Using first {total_slots} entries[/yellow]")
-                all_entries = all_entries[:total_slots]
-
-            self.profile_allocator.setup_profiles(config.profiles)
-            current_port = config.port_start
-            current_control_port = config.control_port_start
-
-            for country, city, hostname, ip in all_entries:
-                profile_slot = self.profile_allocator.get_next_available(
-                    config.profiles
-                )
-                if not profile_slot:
-                    console.print("[red]❌ No more profile slots available[/red]")
-                    break
-
-                service_name = config.naming_template.format(
-                    provider=config.provider,
-                    country=country.lower().replace(" ", "-"),
-                    city=city.lower().replace(" ", "-"),
-                )
-                service_name = self._sanitize_service_name(service_name)
-
-                plan.add_service(
-                    name=service_name,
-                    profile=profile_slot.name,
-                    location=city,
-                    country=country,
-                    port=current_port,
-                    control_port=current_control_port,
-                    provider=config.provider,
-                    hostname=hostname,
-                    ip=ip,
+                    f"[yellow]⚠ Profile '{profile_name}' has no VPN_PROVIDER, using default: {provider}[/yellow]"
                 )
 
-                self.profile_allocator.allocate_slot(profile_slot.name, service_name)
-                current_port += 1
-                current_control_port += 1
-
-            return plan
-
-        # Existing behaviour without unique IPs
-        all_cities = []
-        for country in config.countries:
-            try:
-                cities = self.server_manager.list_cities(config.provider, country)
-                all_cities.extend([(country, city) for city in cities])
-                console.print(
-                    f"[green]✓[/green] Found {len(cities)} cities in {country}"
-                )
-            except Exception as e:
-                console.print(f"[red]❌[/red] Error getting cities for {country}: {e}")
-                continue
+            if provider not in profile_providers:
+                profile_providers[provider] = []
+            profile_providers[provider].append(profile_name)
 
         console.print(
-            f"[blue]📍 Total: {len(all_cities)} cities across {len(config.countries)} countries[/blue]"
+            f"[blue]📋 Multi-provider deployment across {len(profile_providers)} providers[/blue]"
         )
-
-        total_slots = sum(config.profiles.values())
-        if len(all_cities) > total_slots:
+        for provider, profiles in profile_providers.items():
+            total_slots = sum(config.profiles[p] for p in profiles)
             console.print(
-                f"[yellow]⚠ Warning: {len(all_cities)} cities but only {total_slots} profile slots[/yellow]"
+                f"[blue]  • {provider}: {len(profiles)} profiles, {total_slots} total slots[/blue]"
             )
-            console.print(f"[yellow]  Using first {total_slots} cities[/yellow]")
-            all_cities = all_cities[:total_slots]
 
-        self.profile_allocator.setup_profiles(config.profiles)
-
+        # Plan services for each provider
         current_port = config.port_start
         current_control_port = config.control_port_start
+        self.profile_allocator.setup_profiles(config.profiles)
+
+        for provider, profile_names in profile_providers.items():
+            provider_slots = {p: config.profiles[p] for p in profile_names}
+            current_port = self._plan_provider_services(
+                plan,
+                provider,
+                config.countries,
+                provider_slots,
+                current_port,
+                current_control_port,
+                config,
+            )
+            # Space out control ports per provider
+            current_control_port = current_port + 100
+
+        return plan
+
+    def _plan_provider_services(
+        self,
+        plan: DeploymentPlan,
+        provider: str,
+        countries: list[str],
+        profiles: dict[str, int],
+        start_port: int,
+        start_control_port: int,
+        config: FleetConfig,
+    ) -> int:
+        """Plan services for a specific provider."""
+        console.print(
+            f"[green]🌍 Planning {provider} services across {len(countries)} countries[/green]"
+        )
+
+        # Get cities for this provider
+        all_cities = []
+        for country in countries:
+            try:
+                cities = self.server_manager.list_cities(provider, country)
+                all_cities.extend([(country, city) for city in cities])
+                console.print(
+                    f"[green]✓[/green] {provider}: Found {len(cities)} cities in {country}"
+                )
+            except Exception as e:
+                console.print(
+                    f"[red]❌[/red] {provider}: Error getting cities for {country}: {e}"
+                )
+                continue
+
+        total_slots = sum(profiles.values())
+        if len(all_cities) > total_slots:
+            console.print(
+                f"[yellow]⚠ {provider}: {len(all_cities)} cities but only {total_slots} profile slots, using first {total_slots}[/yellow]"
+            )
+            all_cities = all_cities[:total_slots]
+
+        current_port = start_port
+        current_control_port = start_control_port
 
         for country, city in all_cities:
-            profile_slot = self.profile_allocator.get_next_available(config.profiles)
+            # Get next available slot from this provider's profiles
+            profile_slot = self.profile_allocator.get_next_available(profiles)
             if not profile_slot:
-                console.print("[red]❌ No more profile slots available[/red]")
+                console.print(
+                    f"[red]❌ {provider}: No more profile slots available[/red]"
+                )
                 break
 
             service_name = config.naming_template.format(
-                provider=config.provider,
+                provider=provider,
                 country=country.lower().replace(" ", "-"),
                 city=city.lower().replace(" ", "-"),
             )
@@ -261,14 +258,17 @@ class FleetManager:
                 country=country,
                 port=current_port,
                 control_port=current_control_port,
-                provider=config.provider,
+                provider=provider,
             )
 
             self.profile_allocator.allocate_slot(profile_slot.name, service_name)
             current_port += 1
             current_control_port += 1
 
-        return plan
+        console.print(
+            f"[green]✓ {provider}: Planned {len([s for s in plan.services if s.provider == provider])} services[/green]"
+        )
+        return current_port
 
     def _validate_service_locations(
         self, services: list[ServicePlan]
