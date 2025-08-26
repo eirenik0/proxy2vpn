@@ -69,8 +69,14 @@ HTTPPROXY_PASSWORD=proxy_pass
 EOF
 
 # 3. Register the profile and create a VPN service
-proxy2vpn profile create production profiles/production.env
-proxy2vpn vpn create london-proxy production --port 8888 --location "United Kingdom"
+# Option A: Add the env file you just created
+proxy2vpn profile add production profiles/production.env
+
+# Option B: Create the env file interactively (no manual file needed)
+# proxy2vpn profile create production
+
+# Create a VPN service interactively (choose name/profile/ports when prompted)
+proxy2vpn vpn create
 
 # 4. Start and test your VPN
 proxy2vpn vpn start london-proxy
@@ -81,6 +87,79 @@ curl --proxy http://proxy_user:proxy_pass@localhost:8888 https://httpbin.org/ip
 ```
 
 **That's it!** Your VPN container is running and you have an authenticated HTTP proxy endpoint.
+
+## Quickstarts by Use Case (USA)
+
+These short flows cover common US-focused setups. Location names must be valid for your provider (use `proxy2vpn servers list-cities <provider> "United States"` to explore).
+
+### Single US Proxy (Local Dev)
+
+```bash
+# 1) Create a profile
+proxy2vpn profile create us-dev
+
+# 2) Create a service interactively (choose profile, ports, and location)
+proxy2vpn vpn create
+# Suggested answers:
+# - Service name: us-nyc
+# - Profile: us-dev
+# - Host port: 8888 (or 0 for auto)
+# - Control port: 0 (auto)
+# - Location: "New York, United States"
+
+# 3) Start and test
+proxy2vpn vpn start us-nyc
+proxy2vpn vpn public-ip us-nyc
+curl --proxy http://user:pass@localhost:8888 https://httpbin.org/ip
+```
+
+### East/West Geo Testing (US)
+
+```bash
+# Create two services interactively
+proxy2vpn vpn create
+# - Service name: us-east
+# - Profile: us-dev
+# - Host port: 20001 (or auto)
+# - Control port: 0 (auto)
+# - Location: "New York, United States"
+
+proxy2vpn vpn create
+# - Service name: us-west
+# - Profile: us-dev
+# - Host port: 20002 (or auto)
+# - Control port: 0 (auto)
+# - Location: "Los Angeles, United States"
+
+# Start and compare
+proxy2vpn vpn start --all
+proxy2vpn vpn list
+```
+
+### US Scraping Fleet (Multiple Endpoints)
+
+```bash
+# Plan a small fleet in the US (10 endpoints using a single profile)
+proxy2vpn fleet plan --countries "United States" --profiles "us-dev:10" --unique-ips
+
+# Deploy in parallel and check status
+proxy2vpn fleet deploy --parallel
+proxy2vpn fleet status --show-allocation
+```
+
+### CI: Ephemeral US Proxies
+
+```bash
+# Generate a reproducible plan file for CI
+proxy2vpn fleet plan --countries "United States" --profiles "ci:3" --output ci-us-fleet.yml
+
+# Validate or dry-run during pipeline
+proxy2vpn fleet deploy --plan-file ci-us-fleet.yml --dry-run
+
+# Deploy only when needed, then tear down
+proxy2vpn fleet deploy --plan-file ci-us-fleet.yml --parallel --validate-first
+proxy2vpn fleet scale down --factor 0
+```
 
 ## Container Management & Monitoring
 
@@ -97,7 +176,7 @@ proxy2vpn vpn restart-tunnel london-proxy
 
 # Bulk operations across all services
 proxy2vpn vpn start --all
-proxy2vpn vpn list --diagnose
+proxy2vpn vpn list
 ```
 
 **Docker Integration**: All containers use consistent labeling and networking, making them easy to integrate with existing Docker workflows and monitoring tools.
@@ -261,21 +340,26 @@ proxy2vpn vpn create dev-proxy dev-account --port 8888 --location "Netherlands"
 - `proxy2vpn system diagnose [--lines N] [--all] [--verbose] [--json]`
 
 ### Profiles
-- `proxy2vpn profile create NAME ENV_FILE`
+- `proxy2vpn profile create NAME` (interactive env file creator)
+- `proxy2vpn profile add NAME ENV_FILE`
 - `proxy2vpn profile list`
 - `proxy2vpn profile remove NAME`
 - `proxy2vpn profile delete NAME`
 - `proxy2vpn profile apply PROFILE SERVICE [--port PORT]`
 
 ### VPN services
-- `proxy2vpn vpn create NAME PROFILE [--port PORT] [--location LOCATION]`
-- `proxy2vpn vpn list [--diagnose] [--ips-only]`
+- `proxy2vpn vpn create` (interactive)
+- `proxy2vpn vpn list`
 - `proxy2vpn vpn start [NAME | --all]`
 - `proxy2vpn vpn stop [NAME | --all]`
 - `proxy2vpn vpn restart [NAME | --all]`
 - `proxy2vpn vpn logs NAME [--lines N] [--follow]`
 - `proxy2vpn vpn delete [NAME | --all]`
 - `proxy2vpn vpn test NAME`
+
+Notes:
+- `vpn list` now includes health analysis by default; `--diagnose` and `--ips-only` options were removed.
+- Provider is inferred from the selected profile during `vpn create`.
 
 ### Server database
 - `proxy2vpn servers update`
@@ -320,6 +404,12 @@ make changelog-draft
 # Build the changelog (maintainers)
 make changelog VERSION=x.y.z
 ```
+
+Recent highlights (see CHANGELOG.md for details):
+- Interactive `vpn create` flow replaces argument-based creation.
+- Profile lifecycle split: `profile remove` (from compose) and `profile delete` (delete env file).
+- Control server auth config created during `system init` and mounted automatically.
+- Default health analysis in `vpn list`; removed `--diagnose`/`--ips-only` flags.
 
 ---
 

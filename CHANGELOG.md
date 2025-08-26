@@ -8,6 +8,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.15.0]
+
+### Bug fixes
+
+- vpn export-proxies now exports only services defined in the project compose file (no extra containers) and adds a new `provider` column to the CSV output. (#156)
+- incorrect `tunnel-restart` on older gluetun versions (#157)
+- Fix misleading "Missing required arguments" message
+
+  - The CLI no longer misreports unrelated runtime errors as "Missing required arguments".
+  - This prevents masking real errors (e.g., network or auth issues) when running commands like `vpn public-ip` with a SERVICE argument.
+
+  (#159)
+- Compose generation robustness improvements
+
+  - Place profile definitions before services in generated compose files to ensure valid anchors and references.
+  - Avoid duplicate profile anchors when generating profiles.
+  - Allow `fleet deploy -f` to overwrite compose services as expected.
+
+  (#166)
+- Control API schema compatibility
+
+  - Accept `public_ip` as an alternative to `ip` and normalize internally for `vpn public-ip`.
+  - Accept `outcome` as an alternative to `status` for OpenVPN status and normalize internally.
+
+  (#167)
+
+### Features
+
+- Add multiprovider support for `fleet plan` based on profile vpn provider (#1)
+- Validate profile env fields (#2)
+- Use Pydantic models for configuration validation. (#4)
+- Replace `create` with `add` command. Add interactive `create` command. (#6)
+- validate VPN provider during interactive profile creation (#7)
+- Validate VPN_PROVIDER against available server list during profile environment validation. (#8)
+- Integrated Gluetun control server checks into diagnostics. Added CLI commands for DNS status, updater status, and port forwarding. (#10)
+- Mount control server auth config in compose (#152)
+- Rename `profile delete` to `profile remove` and introduce `profile delete` to remove profile environment files. (#153)
+- Create 'control-server-auth.toml' only during `system init`. (#154)
+- Add support for optional `VPN_TYPE` in profile environment files with validation for `openvpn` or `wireguard` (default `openvpn`). (#155)
+- Interactive VPN service creation replaces argument-based `vpn create` command. 
+  `proxy2vpn vpn create` now prompts for service name, profile and ports interactively. (#162)
+- Add interactive profile selection when creating VPN services with `vpn create`. (#163)
+- Make diagnostic health analysis default in VPN list command by removing --diagnose and --ips-only options (#164)
+
+### Miscellaneous
+
+- refactor: Centralize compose env/port parsing and harden Pydantic models at API boundaries to reduce special cases and avoid breaking on upstream field drift. (#5)
+- Change VPN_PROVIDER to VPN_SERVICE_PROVIDER in profile (#11)
+- Speedup health check (#165)
+
+### Removals
+
+- Drop the deprecated --provider flag from `fleet plan`; providers now come solely from profile env files. (#3)
+- Remove `--provider` option from `vpn create`; provider is now inferred from the profile. (#9)
+
+
 ## [0.13.0]
 
 ### Bug fixes
