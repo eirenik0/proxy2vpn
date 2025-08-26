@@ -3,8 +3,8 @@
 import asyncio
 import random
 import time
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .display_utils import console
 from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError
@@ -14,8 +14,7 @@ from proxy2vpn.core.models import VPNService
 logger = get_logger(__name__)
 
 
-@dataclass
-class ServerAvailability:
+class ServerAvailability(BaseModel):
     """Server availability status"""
 
     location: str
@@ -25,9 +24,17 @@ class ServerAvailability:
     response_time: float | None = None
     error_message: str | None = None
 
+    model_config = ConfigDict(validate_assignment=True)
 
-@dataclass
-class RotationRecord:
+    @field_validator("response_time")
+    @classmethod
+    def _non_negative_response_time(cls, v: float | None) -> float | None:
+        if v is not None and v < 0:
+            raise ValueError("response_time must be >= 0")
+        return v
+
+
+class RotationRecord(BaseModel):
     """Record of server rotation"""
 
     timestamp: datetime
@@ -36,9 +43,10 @@ class RotationRecord:
     new_location: str
     reason: str
 
+    model_config = ConfigDict(validate_assignment=True)
 
-@dataclass
-class ServiceRotation:
+
+class ServiceRotation(BaseModel):
     """Single service rotation plan"""
 
     service_name: str
@@ -46,12 +54,15 @@ class ServiceRotation:
     new_location: str
     reason: str
 
+    model_config = ConfigDict(validate_assignment=True)
 
-@dataclass
-class RotationPlan:
+
+class RotationPlan(BaseModel):
     """Complete rotation plan"""
 
-    rotations: list[ServiceRotation] = field(default_factory=list)
+    rotations: list[ServiceRotation] = Field(default_factory=list)
+
+    model_config = ConfigDict(validate_assignment=True)
 
     def add_rotation(
         self, service_name: str, old_location: str, new_location: str, reason: str
@@ -67,14 +78,15 @@ class RotationPlan:
         )
 
 
-@dataclass
-class RotationResult:
+class RotationResult(BaseModel):
     """Result of rotation operation"""
 
     rotated: int
     failed: int
     services: list[str]
     dry_run: bool = False
+
+    model_config = ConfigDict(validate_assignment=True)
 
 
 class ServerMonitor:

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Iterable
+from pydantic import BaseModel, ConfigDict
 
 from proxy2vpn.adapters import ip_utils
 
 
-@dataclass
-class DiagnosticResult:
+class DiagnosticResult(BaseModel):
     """Result of running a diagnostic check."""
 
     check: str
@@ -17,6 +16,8 @@ class DiagnosticResult:
     message: str
     recommendation: str
     persistent: bool = False
+
+    model_config = ConfigDict(validate_assignment=True)
 
 
 class DiagnosticAnalyzer:
@@ -34,10 +35,10 @@ class DiagnosticAnalyzer:
             persistent = sum("auth_failed" in line.lower() for line in lines) >= 2
             return [
                 DiagnosticResult(
-                    "auth_failure",
-                    False,
-                    "Authentication failure detected",
-                    "Verify credentials and provider configuration.",
+                    check="auth_failure",
+                    passed=False,
+                    message="Authentication failure detected",
+                    recommendation="Verify credentials and provider configuration.",
                     persistent=persistent,
                 )
             ]
@@ -45,24 +46,31 @@ class DiagnosticAnalyzer:
         if "tls" in log_text or "certificate" in log_text or "ssl" in log_text:
             return [
                 DiagnosticResult(
-                    "tls_error",
-                    False,
-                    "TLS or certificate issue detected",
-                    "Check certificates and TLS settings.",
+                    check="tls_error",
+                    passed=False,
+                    message="TLS or certificate issue detected",
+                    recommendation="Check certificates and TLS settings.",
                 )
             ]
 
         if "dns" in log_text and "fail" in log_text:
             return [
                 DiagnosticResult(
-                    "dns_error",
-                    False,
-                    "DNS resolution failure detected",
-                    "Verify DNS settings or server availability.",
+                    check="dns_error",
+                    passed=False,
+                    message="DNS resolution failure detected",
+                    recommendation="Verify DNS settings or server availability.",
                 )
             ]
 
-        return [DiagnosticResult("logs", True, "No critical log errors", "")]
+        return [
+            DiagnosticResult(
+                check="logs",
+                passed=True,
+                message="No critical log errors",
+                recommendation="",
+            )
+        ]
 
     def check_connectivity(self, port: int) -> list[DiagnosticResult]:
         """Connectivity + DNS leak checks with informative messages."""
@@ -80,10 +88,10 @@ class DiagnosticAnalyzer:
                 msg = f"Connectivity test failed (direct={direct})"
                 results.append(
                     DiagnosticResult(
-                        "connectivity",
-                        False,
-                        msg,
-                        "Ensure VPN container network is reachable.",
+                        check="connectivity",
+                        passed=False,
+                        message=msg,
+                        recommendation="Ensure VPN container network is reachable.",
                     )
                 )
                 return results
@@ -91,10 +99,10 @@ class DiagnosticAnalyzer:
             msg = f"direct={direct} proxied={proxied}"
             results.append(
                 DiagnosticResult(
-                    "connectivity",
-                    proxied is not None,
-                    msg,
-                    "",
+                    check="connectivity",
+                    passed=proxied is not None,
+                    message=msg,
+                    recommendation="",
                 )
             )
 
@@ -102,20 +110,22 @@ class DiagnosticAnalyzer:
             leak_ok = proxied != direct
             results.append(
                 DiagnosticResult(
-                    "dns_leak",
-                    leak_ok,
-                    msg,
-                    "Check firewall and kill switch settings." if not leak_ok else "",
+                    check="dns_leak",
+                    passed=leak_ok,
+                    message=msg,
+                    recommendation="Check firewall and kill switch settings."
+                    if not leak_ok
+                    else "",
                 )
             )
             return results
         except Exception:
             return [
                 DiagnosticResult(
-                    "connectivity",
-                    False,
-                    "Connectivity test failed",
-                    "Network error during testing.",
+                    check="connectivity",
+                    passed=False,
+                    message="Connectivity test failed",
+                    recommendation="Network error during testing.",
                 )
             ]
 
