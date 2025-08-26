@@ -211,32 +211,66 @@ class FleetManager:
             f"[green]🌍 Planning {provider} services across {len(countries)} countries[/green]"
         )
 
-        # Get cities for this provider
-        all_cities = []
-        for country in countries:
-            try:
-                cities = self.server_manager.list_cities(provider, country)
-                all_cities.extend([(country, city) for city in cities])
-                console.print(
-                    f"[green]✓[/green] {provider}: Found {len(cities)} cities in {country}"
-                )
-            except Exception as e:
-                console.print(
-                    f"[red]❌[/red] {provider}: Error getting cities for {country}: {e}"
-                )
-                continue
-
         total_slots = sum(profiles.values())
-        if len(all_cities) > total_slots:
+
+        # Handle unique_ips mode with server data
+        if config.unique_ips:
+            data = self.server_manager.data or self.server_manager.update_servers()
+            prov = data.get(provider, {})
+            servers = prov.get("servers", [])
+            all_entries: list[
+                tuple[str, str, str, str]
+            ] = []  # country, city, hostname, ip
+            used_ips: set[str] = set()
+            used_cities: set[str] = set()
+
+            for srv in servers:
+                country = srv.get("country")
+                city = srv.get("city")
+                if country not in countries or not city:
+                    continue
+                ips = srv.get("ips") or []
+                ip = next((ip for ip in ips if "." in ip), None)
+                if not ip or ip in used_ips or city in used_cities:
+                    continue
+                hostname = srv.get("hostname", "")
+                used_ips.add(ip)
+                used_cities.add(city)
+                all_entries.append((country, city, hostname, ip))
+
+            if len(all_entries) > total_slots:
+                all_entries = all_entries[:total_slots]
+
             console.print(
-                f"[yellow]⚠ {provider}: {len(all_cities)} cities but only {total_slots} profile slots, using first {total_slots}[/yellow]"
+                f"[blue]📍 {provider}: {len(all_entries)} unique city/IP pairs[/blue]"
             )
-            all_cities = all_cities[:total_slots]
+
+        else:
+            # Regular mode - just get cities
+            all_entries = []
+            for country in countries:
+                try:
+                    cities = self.server_manager.list_cities(provider, country)
+                    all_entries.extend([(country, city, "", "") for city in cities])
+                    console.print(
+                        f"[green]✓[/green] {provider}: Found {len(cities)} cities in {country}"
+                    )
+                except Exception as e:
+                    console.print(
+                        f"[red]❌[/red] {provider}: Error getting cities for {country}: {e}"
+                    )
+                    continue
+
+            if len(all_entries) > total_slots:
+                console.print(
+                    f"[yellow]⚠ {provider}: {len(all_entries)} cities but only {total_slots} profile slots, using first {total_slots}[/yellow]"
+                )
+                all_entries = all_entries[:total_slots]
 
         current_port = start_port
         current_control_port = start_control_port
 
-        for country, city in all_cities:
+        for country, city, hostname, ip in all_entries:
             # Get next available slot from this provider's profiles
             profile_slot = self.profile_allocator.get_next_available(profiles)
             if not profile_slot:
@@ -260,6 +294,8 @@ class FleetManager:
                 port=current_port,
                 control_port=current_control_port,
                 provider=provider,
+                hostname=hostname if hostname else None,
+                ip=ip if ip else None,
             )
 
             self.profile_allocator.allocate_slot(profile_slot.name, service_name)
