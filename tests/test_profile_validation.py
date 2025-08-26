@@ -8,7 +8,7 @@ from click.exceptions import Exit
 
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.cli.main import app
-from proxy2vpn.cli.commands.profile import create as profile_create
+from proxy2vpn.cli.commands.profile import add as profile_add
 
 
 def _create_test_compose(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -45,7 +45,7 @@ def test_profile_create_with_valid_env_file(tmp_path):
     # Test profile creation should succeed
     with _cli_ctx(compose_path) as ctx:
         try:
-            profile_create(ctx, "test-profile", env_file)
+            profile_add(ctx, "test-profile", env_file)
             # Should not raise any exception
         except Exit:
             pytest.fail("Profile creation should not fail with valid env file")
@@ -65,7 +65,7 @@ def test_profile_create_fails_with_missing_vpn_provider(tmp_path):
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
         with pytest.raises(Exit):
-            profile_create(ctx, "test-profile", env_file)
+            profile_add(ctx, "test-profile", env_file)
 
 
 def test_profile_create_fails_with_missing_openvpn_credentials(tmp_path):
@@ -79,7 +79,7 @@ def test_profile_create_fails_with_missing_openvpn_credentials(tmp_path):
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
         with pytest.raises(Exit):
-            profile_create(ctx, "test-profile", env_file)
+            profile_add(ctx, "test-profile", env_file)
 
 
 def test_profile_create_fails_with_httpproxy_enabled_missing_credentials(tmp_path):
@@ -99,7 +99,7 @@ def test_profile_create_fails_with_httpproxy_enabled_missing_credentials(tmp_pat
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
         with pytest.raises(Exit):
-            profile_create(ctx, "test-profile", env_file)
+            profile_add(ctx, "test-profile", env_file)
 
 
 def test_profile_create_succeeds_without_httpproxy(tmp_path):
@@ -116,7 +116,7 @@ def test_profile_create_succeeds_without_httpproxy(tmp_path):
     # Test profile creation should succeed
     with _cli_ctx(compose_path) as ctx:
         try:
-            profile_create(ctx, "minimal-profile", env_file)
+            profile_add(ctx, "minimal-profile", env_file)
             # Should not raise any exception
         except Exit:
             pytest.fail("Profile creation should not fail with minimal valid env file")
@@ -139,7 +139,7 @@ def test_profile_create_with_httpproxy_disabled_succeeds(tmp_path):
     # Test profile creation should succeed
     with _cli_ctx(compose_path) as ctx:
         try:
-            profile_create(ctx, "no-proxy-profile", env_file)
+            profile_add(ctx, "no-proxy-profile", env_file)
             # Should not raise any exception
         except Exit:
             pytest.fail("Profile creation should not fail when HTTPPROXY=off")
@@ -155,4 +155,4 @@ def test_profile_create_fails_with_nonexistent_env_file(tmp_path):
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
         with pytest.raises(Exit):
-            profile_create(ctx, "test-profile", env_file)
+            profile_add(ctx, "test-profile", env_file)
