@@ -69,7 +69,6 @@ def create(
         callback=validate_port,
         help="Control port; 0 for auto",
     ),
-    provider: str = typer.Option(config.DEFAULT_PROVIDER),
     location: str = typer.Option("", help="Optional location, e.g. city"),
     force: bool = typer.Option(
         False, "--force", "-f", help="Ignore location validation"
@@ -79,12 +78,15 @@ def create(
 
     manager = ComposeManager.from_ctx(ctx)
     try:
-        manager.get_profile(profile)
+        prof = manager.get_profile(profile)
+        provider = prof.provider
     except KeyError:
         abort(
             f"Profile '{profile}' not found",
             "Create it with 'proxy2vpn profile create'",
         )
+    except ValueError as exc:
+        abort(str(exc))
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
     if control_port == 0:

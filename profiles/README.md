@@ -21,5 +21,5 @@ OPENVPN_PASSWORD=password
 
 2. Use the profile when creating services:
    ```bash
-   proxy2vpn vpn create vpn1 myprofile --port 8888 --provider protonvpn
+   proxy2vpn vpn create vpn1 myprofile --port 8888
    ```
