@@ -88,6 +88,79 @@ curl --proxy http://proxy_user:proxy_pass@localhost:8888 https://httpbin.org/ip
 
 **That's it!** Your VPN container is running and you have an authenticated HTTP proxy endpoint.
 
+## Quickstarts by Use Case (USA)
+
+These short flows cover common US-focused setups. Location names must be valid for your provider (use `proxy2vpn servers list-cities <provider> "United States"` to explore).
+
+### Single US Proxy (Local Dev)
+
+```bash
+# 1) Create a profile
+proxy2vpn profile create us-dev
+
+# 2) Create a service interactively (choose profile, ports, and location)
+proxy2vpn vpn create
+# Suggested answers:
+# - Service name: us-nyc
+# - Profile: us-dev
+# - Host port: 8888 (or 0 for auto)
+# - Control port: 0 (auto)
+# - Location: "New York, United States"
+
+# 3) Start and test
+proxy2vpn vpn start us-nyc
+proxy2vpn vpn public-ip us-nyc
+curl --proxy http://user:pass@localhost:8888 https://httpbin.org/ip
+```
+
+### East/West Geo Testing (US)
+
+```bash
+# Create two services interactively
+proxy2vpn vpn create
+# - Service name: us-east
+# - Profile: us-dev
+# - Host port: 20001 (or auto)
+# - Control port: 0 (auto)
+# - Location: "New York, United States"
+
+proxy2vpn vpn create
+# - Service name: us-west
+# - Profile: us-dev
+# - Host port: 20002 (or auto)
+# - Control port: 0 (auto)
+# - Location: "Los Angeles, United States"
+
+# Start and compare
+proxy2vpn vpn start --all
+proxy2vpn vpn list
+```
+
+### US Scraping Fleet (Multiple Endpoints)
+
+```bash
+# Plan a small fleet in the US (10 endpoints using a single profile)
+proxy2vpn fleet plan --countries "United States" --profiles "us-dev:10" --unique-ips
+
+# Deploy in parallel and check status
+proxy2vpn fleet deploy --parallel
+proxy2vpn fleet status --show-allocation
+```
+
+### CI: Ephemeral US Proxies
+
+```bash
+# Generate a reproducible plan file for CI
+proxy2vpn fleet plan --countries "United States" --profiles "ci:3" --output ci-us-fleet.yml
+
+# Validate or dry-run during pipeline
+proxy2vpn fleet deploy --plan-file ci-us-fleet.yml --dry-run
+
+# Deploy only when needed, then tear down
+proxy2vpn fleet deploy --plan-file ci-us-fleet.yml --parallel --validate-first
+proxy2vpn fleet scale down --factor 0
+```
+
 ## Container Management & Monitoring
 
 Each VPN container exposes both HTTP proxy endpoints and control APIs for programmatic management:
