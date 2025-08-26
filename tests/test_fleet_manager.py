@@ -10,6 +10,7 @@ from proxy2vpn.adapters.fleet_manager import (
 )
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.core.models import Profile, VPNService
+from proxy2vpn.adapters import server_manager
 
 
 @pytest.fixture
@@ -562,8 +563,15 @@ def test_profile_validation_during_fleet_planning(tmp_path):
         fleet_manager.plan_deployment(config)
 
 
-def test_profile_comprehensive_validation(tmp_path):
+def test_profile_comprehensive_validation(tmp_path, monkeypatch):
     """Test comprehensive profile validation covers all required fields."""
+
+    class DummyServerManager:
+        def list_providers(self):
+            return ["expressvpn", "nordvpn", "protonvpn"]
+
+    monkeypatch.setattr(server_manager, "ServerManager", lambda: DummyServerManager())
+
     # Test missing VPN_PROVIDER
     missing_provider_env = tmp_path / "missing_provider.env"
     missing_provider_env.write_text("OPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n")
@@ -596,6 +604,16 @@ def test_profile_comprehensive_validation(tmp_path):
     assert any(
         "HTTPPROXY_PASSWORD is required when HTTPPROXY=on" in error for error in errors
     )
+
+    # Test invalid VPN provider
+    invalid_provider_env = tmp_path / "invalid_provider.env"
+    invalid_provider_env.write_text(
+        "VPN_PROVIDER=invalidvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+
+    profile = Profile(name="test", env_file=str(invalid_provider_env))
+    errors = profile.validate_env_file()
+    assert any("Unsupported VPN_PROVIDER" in error for error in errors)
 
     # Test valid profile passes validation
     valid_env = tmp_path / "valid.env"

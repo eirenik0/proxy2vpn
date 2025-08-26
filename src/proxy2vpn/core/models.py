@@ -284,14 +284,23 @@ class Profile(BaseModel):
         """
 
         from proxy2vpn.adapters.docker_ops import _load_env_file
+        from proxy2vpn.adapters import server_manager
 
         env_vars = _load_env_file(str(self._resolve_env_path()))
         errors: list[str] = []
 
-        if not env_vars.get("VPN_PROVIDER"):
+        provider = env_vars.get("VPN_PROVIDER")
+        if not provider:
             errors.append(
                 "VPN_PROVIDER is required (e.g., 'expressvpn', 'nordvpn', 'protonvpn')"
             )
+        else:
+            supported = server_manager.ServerManager().list_providers()
+            if provider.strip().lower() not in supported:
+                errors.append(
+                    f"Unsupported VPN_PROVIDER '{provider}'. "
+                    "Run 'proxy2vpn servers list-providers' to see supported providers"
+                )
 
         if not env_vars.get("OPENVPN_USER"):
             errors.append("OPENVPN_USER is required (your VPN account username)")
