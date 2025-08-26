@@ -347,7 +347,7 @@ class HelpfulTyper(typer.Typer):
             examples = [
                 f"{command_path} create myprofile --env-file /path/to/.env",
                 f"{command_path} list",
-                f"{command_path} delete myprofile",
+                f"{command_path} remove myprofile",
                 f"{command_path} apply myprofile myservice",
             ]
         elif "servers" in command_path:

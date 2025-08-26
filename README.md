@@ -260,6 +260,7 @@ proxy2vpn vpn create dev-proxy dev-account --port 8888 --location "Netherlands"
 ### Profiles
 - `proxy2vpn profile create NAME ENV_FILE`
 - `proxy2vpn profile list`
+- `proxy2vpn profile remove NAME`
 - `proxy2vpn profile delete NAME`
 - `proxy2vpn profile apply PROFILE SERVICE [--port PORT]`
 

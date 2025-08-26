@@ -157,13 +157,13 @@ def list_profiles(ctx: typer.Context):
     console.print(table)
 
 
-@app.command("delete")
-def delete(
+@app.command("remove")
+def remove(
     ctx: typer.Context,
     name: str = typer.Argument(..., callback=sanitize_name),
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt"),
 ):
-    """Delete a profile by NAME."""
+    """Remove a profile from the compose file."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     manager = ComposeManager(compose_file)
@@ -172,9 +172,29 @@ def delete(
     except KeyError:
         abort(f"Profile '{name}' not found")
     if not force:
-        typer.confirm(f"Delete profile '{name}'?", abort=True)
+        typer.confirm(f"Remove profile '{name}'?", abort=True)
     manager.remove_profile(name)
-    console.print(f"[green]✓[/green] Profile '{name}' deleted.")
+    console.print(f"[green]✓[/green] Profile '{name}' removed from compose.")
+
+
+@app.command("delete")
+def delete(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., callback=sanitize_name),
+    force: bool = typer.Option(False, "--force", "-f", help="Do not prompt"),
+):
+    """Delete a profile's environment file."""
+
+    env_file_path = Path("profiles") / f"{name}.env"
+    if not env_file_path.exists():
+        abort(f"Environment file '{env_file_path}' not found")
+    if not force:
+        typer.confirm(
+            f"Delete environment file '{env_file_path}'?",
+            abort=True,
+        )
+    env_file_path.unlink()
+    console.print(f"[green]✓[/green] Environment file '{env_file_path}' deleted.")
 
 
 @app.command("apply")
