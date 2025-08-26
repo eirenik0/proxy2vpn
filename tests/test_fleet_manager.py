@@ -457,19 +457,19 @@ def test_multi_provider_fleet_planning(tmp_path):
     # Create profile env files with different providers
     expressvpn_env = tmp_path / "expressvpn.env"
     expressvpn_env.write_text(
-        "VPN_PROVIDER=expressvpn\n"
+        "VPN_SERVICE_PROVIDER=expressvpn\n"
         "OPENVPN_USER=express_user\n"
         "OPENVPN_PASSWORD=express_pass\n"
     )
 
     nordvpn_env = tmp_path / "nordvpn.env"
     nordvpn_env.write_text(
-        "VPN_PROVIDER=nordvpn\nOPENVPN_USER=nord_user\nOPENVPN_PASSWORD=nord_pass\n"
+        "VPN_SERVICE_PROVIDER=nordvpn\nOPENVPN_USER=nord_user\nOPENVPN_PASSWORD=nord_pass\n"
     )
 
     protonvpn_env = tmp_path / "protonvpn.env"
     protonvpn_env.write_text(
-        "VPN_PROVIDER=protonvpn\n"
+        "VPN_SERVICE_PROVIDER=protonvpn\n"
         "OPENVPN_USER=proton_user\n"
         "OPENVPN_PASSWORD=proton_pass\n"
     )
@@ -530,22 +530,22 @@ def test_multi_provider_fleet_planning(tmp_path):
 
 
 def test_profile_validation_during_fleet_planning(tmp_path):
-    """Test that fleet planning fails fast when profiles have missing VPN_PROVIDER."""
+    """Test that fleet planning fails fast when profiles have missing VPN_SERVICE_PROVIDER."""
     compose_path = tmp_path / "compose.yml"
     ComposeManager.create_initial_compose(compose_path, force=True)
     manager = ComposeManager(compose_path)
 
-    # Create invalid profile (missing VPN_PROVIDER)
+    # Create invalid profile (missing VPN_SERVICE_PROVIDER)
     invalid_env = tmp_path / "invalid.env"
     invalid_env.write_text(
         "OPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
-        # Missing VPN_PROVIDER
+        # Missing VPN_SERVICE_PROVIDER
     )
 
     # Create valid profile
     valid_env = tmp_path / "valid.env"
     valid_env.write_text(
-        "VPN_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
     )
 
     manager.add_profile(Profile(name="invalid-profile", env_file=str(invalid_env)))
@@ -559,7 +559,9 @@ def test_profile_validation_during_fleet_planning(tmp_path):
         profiles={"invalid-profile": 1, "valid-profile": 1},
     )
 
-    with pytest.raises(ValueError, match="Fleet planning failed.*missing VPN_PROVIDER"):
+    with pytest.raises(
+        ValueError, match="Fleet planning failed.*missing VPN_SERVICE_PROVIDER"
+    ):
         fleet_manager.plan_deployment(config)
 
 
@@ -572,17 +574,17 @@ def test_profile_comprehensive_validation(tmp_path, monkeypatch):
 
     monkeypatch.setattr(server_manager, "ServerManager", lambda: DummyServerManager())
 
-    # Test missing VPN_PROVIDER
+    # Test missing VPN_SERVICE_PROVIDER
     missing_provider_env = tmp_path / "missing_provider.env"
     missing_provider_env.write_text("OPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n")
 
     profile = Profile(name="test", env_file=str(missing_provider_env))
     errors = profile.validate_env_file()
-    assert any("VPN_PROVIDER is required" in error for error in errors)
+    assert any("VPN_SERVICE_PROVIDER is required" in error for error in errors)
 
     # Test missing OPENVPN credentials
     missing_creds_env = tmp_path / "missing_creds.env"
-    missing_creds_env.write_text("VPN_PROVIDER=expressvpn\n")
+    missing_creds_env.write_text("VPN_SERVICE_PROVIDER=expressvpn\n")
 
     profile = Profile(name="test", env_file=str(missing_creds_env))
     errors = profile.validate_env_file()
@@ -592,7 +594,7 @@ def test_profile_comprehensive_validation(tmp_path, monkeypatch):
     # Test HTTP proxy validation when enabled
     missing_proxy_creds_env = tmp_path / "missing_proxy_creds.env"
     missing_proxy_creds_env.write_text(
-        "VPN_PROVIDER=nordvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\nHTTPPROXY=on\n"
+        "VPN_SERVICE_PROVIDER=nordvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\nHTTPPROXY=on\n"
         # Missing HTTPPROXY_USER and HTTPPROXY_PASSWORD
     )
 
@@ -608,17 +610,17 @@ def test_profile_comprehensive_validation(tmp_path, monkeypatch):
     # Test invalid VPN provider
     invalid_provider_env = tmp_path / "invalid_provider.env"
     invalid_provider_env.write_text(
-        "VPN_PROVIDER=invalidvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+        "VPN_SERVICE_PROVIDER=invalidvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
     )
 
     profile = Profile(name="test", env_file=str(invalid_provider_env))
     errors = profile.validate_env_file()
-    assert any("Unsupported VPN_PROVIDER" in error for error in errors)
+    assert any("Unsupported VPN_SERVICE_PROVIDER" in error for error in errors)
 
     # Test valid profile passes validation
     valid_env = tmp_path / "valid.env"
     valid_env.write_text(
-        "VPN_PROVIDER=protonvpn\n"
+        "VPN_SERVICE_PROVIDER=protonvpn\n"
         "OPENVPN_USER=user\n"
         "OPENVPN_PASSWORD=pass\n"
         "HTTPPROXY=on\n"
@@ -632,20 +634,22 @@ def test_profile_comprehensive_validation(tmp_path, monkeypatch):
 
 
 def test_profile_provider_property_validation(tmp_path):
-    """Test that Profile.provider property raises clear errors for missing VPN_PROVIDER."""
-    # Test missing VPN_PROVIDER raises ValueError
+    """Test that Profile.provider property raises clear errors for missing VPN_SERVICE_PROVIDER."""
+    # Test missing VPN_SERVICE_PROVIDER raises ValueError
     missing_env = tmp_path / "missing.env"
     missing_env.write_text("OPENVPN_USER=user\n")
 
     profile = Profile(name="test", env_file=str(missing_env))
 
-    with pytest.raises(ValueError, match="Profile 'test' is missing VPN_PROVIDER"):
+    with pytest.raises(
+        ValueError, match="Profile 'test' is missing VPN_SERVICE_PROVIDER"
+    ):
         _ = profile.provider
 
     # Test valid provider returns correctly
     valid_env = tmp_path / "valid.env"
     valid_env.write_text(
-        "VPN_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
     )
 
     profile = Profile(name="test", env_file=str(valid_env))

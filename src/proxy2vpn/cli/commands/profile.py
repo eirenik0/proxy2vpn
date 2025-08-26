@@ -67,7 +67,7 @@ def create(
 
     # Create the environment file
     env_content = [
-        f"VPN_PROVIDER={provider}",
+        f"VPN_SERVICE_PROVIDER={provider}",
         f"OPENVPN_USER={username}",
         f"OPENVPN_PASSWORD={password}",
     ]
@@ -119,7 +119,7 @@ def add(
         for error in validation_errors:
             console.print(f"[red]  • {error}[/red]")
         console.print("\n[yellow]💡 Example valid profile:[/yellow]")
-        console.print("[green]VPN_PROVIDER=expressvpn[/green]")
+        console.print("[green]VPN_SERVICE_PROVIDER=expressvpn[/green]")
         console.print("[green]OPENVPN_USER=your_username[/green]")
         console.print("[green]OPENVPN_PASSWORD=your_password[/green]")
         console.print("[green]HTTPPROXY=on[/green]")

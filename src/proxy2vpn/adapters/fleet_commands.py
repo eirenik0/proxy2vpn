@@ -46,7 +46,7 @@ def fleet_plan(
     console.print(f"[blue]📊 Profile allocation: {profiles}[/blue]")
 
     console.print(
-        "[green]🔧 Multi-provider mode: using VPN_PROVIDER from profile env files[/green]"
+        "[green]🔧 Multi-provider mode: using VPN_SERVICE_PROVIDER from profile env files[/green]"
     )
 
     # Create fleet configuration
