@@ -12,6 +12,7 @@ from proxy2vpn.core.models import Profile, ServiceCredentials
 from proxy2vpn.common import abort
 from proxy2vpn.adapters.validators import sanitize_name, sanitize_path
 from proxy2vpn.adapters.logging_utils import get_logger
+from proxy2vpn.adapters import server_manager
 
 app = HelpfulTyper(help="Manage VPN profiles and apply them to services")
 logger = get_logger(__name__)
@@ -36,7 +37,19 @@ def create(
     console.print("[yellow]💡 Enter the required VPN credentials:[/yellow]")
 
     # Required fields
-    provider = typer.prompt("VPN Provider (e.g., expressvpn, nordvpn, protonvpn)")
+    provider = (
+        typer.prompt("VPN Provider (e.g., expressvpn, nordvpn, protonvpn)")
+        .strip()
+        .lower()
+    )
+
+    supported = server_manager.ServerManager().list_providers()
+    if provider not in supported:
+        abort(
+            f"Unsupported provider '{provider}'",
+            "Run 'proxy2vpn servers list-providers' to see supported providers",
+        )
+
     username = typer.prompt("VPN Username")
     password = typer.prompt("VPN Password", hide_input=True)
 
