@@ -25,7 +25,7 @@ class FleetConfig(BaseModel):
     max_per_profile: int | None = None
     unique_ips: bool = False
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     @field_validator("port_start", "control_port_start")
     @classmethod
@@ -56,7 +56,7 @@ class ServicePlan(BaseModel):
     hostname: str | None = None
     ip: str | None = None
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     @field_validator("port", "control_port")
     @classmethod
@@ -72,7 +72,7 @@ class DeploymentPlan(BaseModel):
     services: list[ServicePlan] = Field(default_factory=list)
     provider: str | None = None  # Optional for backward compatibility
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     @property
     def providers(self) -> set[str]:
@@ -148,7 +148,7 @@ class DeploymentResult(BaseModel):
     services: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
 class FleetManager:

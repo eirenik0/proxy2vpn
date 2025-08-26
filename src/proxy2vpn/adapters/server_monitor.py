@@ -24,7 +24,7 @@ class ServerAvailability(BaseModel):
     response_time: float | None = None
     error_message: str | None = None
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     @field_validator("response_time")
     @classmethod
@@ -43,7 +43,7 @@ class RotationRecord(BaseModel):
     new_location: str
     reason: str
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
 class ServiceRotation(BaseModel):
@@ -54,7 +54,7 @@ class ServiceRotation(BaseModel):
     new_location: str
     reason: str
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
 class RotationPlan(BaseModel):
@@ -62,7 +62,7 @@ class RotationPlan(BaseModel):
 
     rotations: list[ServiceRotation] = Field(default_factory=list)
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     def add_rotation(
         self, service_name: str, old_location: str, new_location: str, reason: str
@@ -86,7 +86,7 @@ class RotationResult(BaseModel):
     services: list[str]
     dry_run: bool = False
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
 class ServerMonitor:

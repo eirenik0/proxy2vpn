@@ -30,7 +30,7 @@ class RetryPolicy(BaseModel):
     attempts: int = MAX_RETRIES
     backoff: float = 0.5
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     @field_validator("attempts")
     @classmethod
@@ -56,7 +56,7 @@ class HTTPClientConfig(BaseModel):
     auth: tuple[str, str] | None = None
     retry: RetryPolicy = Field(default_factory=RetryPolicy)
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     @field_validator("timeout")
     @classmethod
@@ -190,24 +190,28 @@ class StatusResponse(BaseModel):
     """Response payload for the ``/status`` endpoint."""
 
     status: str
+    model_config = ConfigDict(extra="ignore")
 
 
 class OpenVPNResponse(BaseModel):
     """Response payload for the ``/openvpn`` endpoint."""
 
     status: bool
+    model_config = ConfigDict(extra="ignore")
 
 
 class IPResponse(BaseModel):
     """Response payload for the ``/ip`` endpoint."""
 
     ip: str
+    model_config = ConfigDict(extra="ignore")
 
 
 class OpenVPNStatusResponse(BaseModel):
     """Response payload for the ``/openvpn/status`` endpoint."""
 
     status: str
+    model_config = ConfigDict(extra="ignore")
 
 
 class GluetunControlClient(HTTPClient):

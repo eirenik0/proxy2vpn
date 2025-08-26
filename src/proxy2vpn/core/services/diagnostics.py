@@ -17,7 +17,7 @@ class DiagnosticResult(BaseModel):
     recommendation: str
     persistent: bool = False
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
 class DiagnosticAnalyzer:
