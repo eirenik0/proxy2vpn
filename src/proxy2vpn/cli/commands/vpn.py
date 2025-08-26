@@ -1,7 +1,7 @@
 """VPN service management CLI commands."""
 
 import asyncio
-from dataclasses import asdict
+import dataclasses
 from pathlib import Path
 import csv
 
@@ -554,7 +554,17 @@ async def status(
 
     async with http_client.GluetunControlClient(base_url) as client:
         data = await client.status()
-    console.print_json(data=asdict(data))
+
+    def _to_dict(obj):
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump()  # Pydantic v2 models
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        if isinstance(obj, dict):
+            return obj
+        return {"value": str(obj)}
+
+    console.print_json(data=_to_dict(data))
 
 
 @app.command("public-ip")

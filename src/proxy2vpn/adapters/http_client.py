@@ -3,11 +3,11 @@
 import asyncio
 import os
 import time
-from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Self
 from urllib.parse import urlparse
 
 import aiohttp
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from proxy2vpn.core.config import (
     CONTROL_API_ENDPOINTS,
@@ -16,7 +16,6 @@ from proxy2vpn.core.config import (
     VERIFY_SSL,
 )
 from .logging_utils import get_logger
-from typing import Self
 
 logger = get_logger(__name__)
 
@@ -25,23 +24,46 @@ class HTTPClientError(RuntimeError):
     """Raised when an HTTP request fails."""
 
 
-@dataclass(slots=True)
-class RetryPolicy:
+class RetryPolicy(BaseModel):
     """Configuration for request retries."""
 
     attempts: int = MAX_RETRIES
     backoff: float = 0.5
 
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
-@dataclass(slots=True)
-class HTTPClientConfig:
+    @field_validator("attempts")
+    @classmethod
+    def _attempts_non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("attempts must be >= 0")
+        return v
+
+    @field_validator("backoff")
+    @classmethod
+    def _backoff_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("backoff must be >= 0")
+        return v
+
+
+class HTTPClientConfig(BaseModel):
     """Settings for :class:`HTTPClient`."""
 
     base_url: str
     timeout: float = DEFAULT_TIMEOUT
     verify_ssl: bool = VERIFY_SSL
     auth: tuple[str, str] | None = None
-    retry: RetryPolicy = field(default_factory=RetryPolicy)
+    retry: RetryPolicy = Field(default_factory=RetryPolicy)
+
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("timeout must be > 0")
+        return v
 
 
 class HTTPClient:
@@ -164,32 +186,32 @@ class HTTPClient:
         return await self.request_text("GET", path, **kwargs)
 
 
-@dataclass(slots=True)
-class StatusResponse:
+class StatusResponse(BaseModel):
     """Response payload for the ``/status`` endpoint."""
 
     status: str
+    model_config = ConfigDict(extra="ignore")
 
 
-@dataclass(slots=True)
-class OpenVPNResponse:
+class OpenVPNResponse(BaseModel):
     """Response payload for the ``/openvpn`` endpoint."""
 
     status: bool
+    model_config = ConfigDict(extra="ignore")
 
 
-@dataclass(slots=True)
-class IPResponse:
+class IPResponse(BaseModel):
     """Response payload for the ``/ip`` endpoint."""
 
     ip: str
+    model_config = ConfigDict(extra="ignore")
 
 
-@dataclass(slots=True)
-class OpenVPNStatusResponse:
+class OpenVPNStatusResponse(BaseModel):
     """Response payload for the ``/openvpn/status`` endpoint."""
 
     status: str
+    model_config = ConfigDict(extra="ignore")
 
 
 class GluetunControlClient(HTTPClient):

@@ -1,7 +1,8 @@
 """Fleet management for bulk VPN deployments across cities and profiles."""
 
 import asyncio
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .compose_manager import ComposeManager
 from .display_utils import console
@@ -13,21 +14,36 @@ from .server_manager import ServerManager
 logger = get_logger(__name__)
 
 
-@dataclass
-class FleetConfig:
+class FleetConfig(BaseModel):
     """Configuration for bulk VPN fleet deployment"""
 
-    countries: list[str]  # ["Germany", "France", "Netherlands"]
-    profiles: dict[str, int]  # {"acc1": 2, "acc2": 8} - profile slots
+    countries: list[str]
+    profiles: dict[str, int]
     port_start: int = 20000
     control_port_start: int = 30000
     naming_template: str = "{provider}-{country}-{city}"
-    max_per_profile: int | None = None  # Limit services per profile
-    unique_ips: bool = False  # Ensure unique city/IP combinations
+    max_per_profile: int | None = None
+    unique_ips: bool = False
+
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
+
+    @field_validator("port_start", "control_port_start")
+    @classmethod
+    def _validate_port(cls, v: int) -> int:
+        if not 0 <= v <= 65535:
+            raise ValueError("port must be between 0 and 65535")
+        return v
+
+    @field_validator("profiles")
+    @classmethod
+    def _validate_profiles(cls, v: dict[str, int]) -> dict[str, int]:
+        for name, slots in v.items():
+            if slots < 0:
+                raise ValueError(f"profile '{name}' must have non-negative slots")
+        return v
 
 
-@dataclass
-class ServicePlan:
+class ServicePlan(BaseModel):
     """Plan for a single VPN service deployment"""
 
     name: str
@@ -40,13 +56,23 @@ class ServicePlan:
     hostname: str | None = None
     ip: str | None = None
 
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
-@dataclass
-class DeploymentPlan:
+    @field_validator("port", "control_port")
+    @classmethod
+    def _validate_service_ports(cls, v: int) -> int:
+        if not 0 <= v <= 65535:
+            raise ValueError("port must be between 0 and 65535")
+        return v
+
+
+class DeploymentPlan(BaseModel):
     """Complete deployment plan for fleet"""
 
-    services: list[ServicePlan] = field(default_factory=list)
+    services: list[ServicePlan] = Field(default_factory=list)
     provider: str | None = None  # Optional for backward compatibility
+
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
     @property
     def providers(self) -> set[str]:
@@ -87,8 +113,8 @@ class DeploymentPlan:
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
         return {
-            "provider": self.provider,  # Keep for backward compatibility
-            "providers": list(self.providers),  # New field with all providers
+            "provider": self.provider,
+            "providers": list(self.providers),
             "services": [
                 {
                     "name": s.name,
@@ -109,19 +135,20 @@ class DeploymentPlan:
     def from_dict(cls, data: dict) -> "DeploymentPlan":
         """Create from dictionary"""
         plan = cls(provider=data.get("provider"))
-        for service_data in data["services"]:
+        for service_data in data.get("services", []) or []:
             plan.services.append(ServicePlan(**service_data))
         return plan
 
 
-@dataclass
-class DeploymentResult:
+class DeploymentResult(BaseModel):
     """Result of fleet deployment"""
 
     deployed: int
     failed: int
-    services: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    services: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
 class FleetManager:

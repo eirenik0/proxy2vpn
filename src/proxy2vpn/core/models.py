@@ -1,27 +1,41 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
 from pathlib import Path
 
-from proxy2vpn.adapters.validators import sanitize_name, sanitize_path, validate_port
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from proxy2vpn.adapters.compose_utils import parse_env, iter_port_mappings
 
 
-@dataclass
-class VPNContainer:
+_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class VPNContainer(BaseModel):
     """Container configuration for VPN service."""
 
     name: str
     proxy_port: int
     control_port: int
 
-    def __post_init__(self) -> None:
-        self.name = sanitize_name(self.name)
-        self.proxy_port = validate_port(self.proxy_port)
-        self.control_port = validate_port(self.control_port)
+    model_config = ConfigDict(validate_assignment=True)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not _NAME_RE.match(value):
+            raise ValueError("Use alphanumeric characters, '-' or '_' only")
+        return value
+
+    @field_validator("proxy_port", "control_port")
+    @classmethod
+    def _validate_port(cls, value: int) -> int:
+        if not 0 <= value <= 65535:
+            raise ValueError("Port must be between 0 and 65535")
+        return value
 
 
-@dataclass
-class VPNConfig:
+class VPNConfig(BaseModel):
     """VPN-specific configuration."""
 
     provider: str
@@ -31,12 +45,13 @@ class VPNConfig:
     labels: dict[str, str]
 
 
-@dataclass
-class VPNService:
+class VPNService(BaseModel):
     """Complete VPN service combining container and configuration."""
 
     container: VPNContainer
     config: VPNConfig
+
+    model_config = ConfigDict(validate_assignment=True)
 
     @property
     def name(self) -> str:
@@ -83,6 +98,7 @@ class VPNService:
         labels: dict[str, str],
     ) -> "VPNService":
         """Backward compatible constructor for tests."""
+
         container = VPNContainer(name=name, proxy_port=port, control_port=control_port)
         config = VPNConfig(
             provider=provider,
@@ -98,53 +114,20 @@ class VPNService:
         host_port = 0
         control_host_port = 0
 
-        def _parse_port_mapping(p: object) -> tuple[int | None, int | None]:
-            """Return (container_port, host_port) if parseable, else (None, None)."""
-            try:
-                if isinstance(p, dict):
-                    # Compose long syntax: {target: 8888, published: 12345, protocol: tcp}
-                    target = p.get("target")
-                    published = p.get("published") or p.get("host_port")
-                    if target is not None and published is not None:
-                        return int(target), int(published)
-                    return None, None
-                # Treat everything else as string-like
-                s = str(p)
-                parts = s.split(":")
-                cont_raw = parts[-1]
-                cont_port = int(cont_raw.split("/")[0])
-                if len(parts) == 2:
-                    host = int(parts[0])
-                else:
-                    host = int(parts[-2])
-                return cont_port, host
-            except Exception:
-                return None, None
-
-        for p in service_def.get("ports", []) or []:
-            cont, host = _parse_port_mapping(p)
-            if cont == 8888 and host is not None:
+        for host, cont in iter_port_mappings(service_def.get("ports", []) or []):
+            if cont == 8888:
                 host_port = host
-            elif cont == 8000 and host is not None:
+            elif cont == 8000:
                 control_host_port = host
-        # Parse environment variables (list or mapping)
-        env_dict: dict[str, str] = {}
+
         env_entries = service_def.get("environment", []) or []
-        if isinstance(env_entries, dict):
-            env_dict = {str(k): str(v) for k, v in env_entries.items()}
-        else:
-            for item in env_entries:
-                if isinstance(item, str) and "=" in item:
-                    k, v = item.split("=", 1)
-                    env_dict[k] = v
+        env_dict: dict[str, str] = parse_env(env_entries)
 
         labels = dict(service_def.get("labels", {}))
 
-        # Create container and config components
         container = VPNContainer(
             name=name, proxy_port=host_port, control_port=control_host_port
         )
-
         config = VPNConfig(
             provider=labels.get(
                 "vpn.provider", env_dict.get("VPN_SERVICE_PROVIDER", "")
@@ -154,7 +137,6 @@ class VPNService:
             environment=env_dict,
             labels=labels,
         )
-
         return cls(container=container, config=config)
 
     def to_compose_service(self) -> dict:
@@ -173,27 +155,41 @@ class VPNService:
         }
 
 
-@dataclass
-class Profile:
-    """Representation of a VPN profile stored as a YAML anchor.
-
-    The profile contains the base configuration used by VPN services.  In
-    the compose file profiles are stored under a key of the form
-    ``x-vpn-base-<name>`` with an anchor ``&vpn-base-<name>``.  Services can
-    then merge the profile using ``<<: *vpn-base-<name>``.
-    """
+class Profile(BaseModel):
+    """Representation of a VPN profile stored as a YAML anchor."""
 
     name: str
     env_file: str
     image: str = "qmcgaw/gluetun"
-    cap_add: list[str] = field(default_factory=lambda: ["NET_ADMIN"])
-    devices: list[str] = field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
-    _provider: str | None = field(default=None, init=False, repr=False)
+    cap_add: list[str] = Field(default_factory=lambda: ["NET_ADMIN"])
+    devices: list[str] = Field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
 
-    def __post_init__(self) -> None:
-        self.name = sanitize_name(self.name)
-        # Store resolved path but keep as string for YAML serialization
-        self.env_file = str(sanitize_path(Path(self.env_file)))
+    _provider: str | None = PrivateAttr(default=None)
+    _base_dir: Path | None = PrivateAttr(default=None)
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not _NAME_RE.match(value):
+            raise ValueError("Use alphanumeric characters, '-' or '_' only")
+        return value
+
+    @field_validator("env_file")
+    @classmethod
+    def _validate_env_file(cls, value: str) -> str:
+        # Keep the original user-provided path for YAML portability.
+        # Resolution is handled at runtime relative to the compose file dir.
+        return str(value)
+
+    def _resolve_env_path(self) -> Path:
+        """Resolve env_file path relative to the compose base dir if available."""
+        p = Path(self.env_file)
+        if not p.is_absolute() and self._base_dir is not None:
+            return (self._base_dir / p).expanduser().resolve()
+        return p.expanduser().resolve()
 
     @property
     def provider(self) -> str:
@@ -201,13 +197,14 @@ class Profile:
 
         Raises ValueError if VPN_PROVIDER is not specified in the profile's env file.
         """
+
         if self._provider is None:
             self._load_provider_from_env()
 
         if not self._provider:
             raise ValueError(
                 f"Profile '{self.name}' is missing VPN_PROVIDER in {self.env_file}. "
-                f"Add 'VPN_PROVIDER=expressvpn' (or nordvpn, protonvpn, etc.) to the env file."
+                "Add 'VPN_PROVIDER=expressvpn' (or nordvpn, protonvpn, etc.) to the env file."
             )
         return self._provider
 
@@ -216,12 +213,12 @@ class Profile:
 
         Returns list of missing/invalid fields. Empty list means valid.
         """
+
         from proxy2vpn.adapters.docker_ops import _load_env_file
 
-        env_vars = _load_env_file(self.env_file)
-        errors = []
+        env_vars = _load_env_file(str(self._resolve_env_path()))
+        errors: list[str] = []
 
-        # Required fields
         if not env_vars.get("VPN_PROVIDER"):
             errors.append(
                 "VPN_PROVIDER is required (e.g., 'expressvpn', 'nordvpn', 'protonvpn')"
@@ -233,7 +230,6 @@ class Profile:
         if not env_vars.get("OPENVPN_PASSWORD"):
             errors.append("OPENVPN_PASSWORD is required (your VPN account password)")
 
-        # HTTP proxy validation (optional but if enabled, needs credentials)
         if env_vars.get("HTTPPROXY", "").lower() in ("on", "true", "1"):
             if not env_vars.get("HTTPPROXY_USER"):
                 errors.append("HTTPPROXY_USER is required when HTTPPROXY=on")
@@ -244,9 +240,10 @@ class Profile:
 
     def _load_provider_from_env(self) -> None:
         """Load provider information from the environment file."""
+
         from proxy2vpn.adapters.docker_ops import _load_env_file
 
-        env_vars = _load_env_file(self.env_file)
+        env_vars = _load_env_file(str(self._resolve_env_path()))
         self._provider = env_vars.get("VPN_PROVIDER")
 
     @classmethod

@@ -53,8 +53,14 @@ def test_connectivity_failure_includes_direct_ip(monkeypatch):
 def test_health_score():
     analyzer = diagnostics.DiagnosticAnalyzer()
     results = [
-        diagnostics.DiagnosticResult("ok", True, "", ""),
-        diagnostics.DiagnosticResult("warn", False, "", "", persistent=False),
-        diagnostics.DiagnosticResult("error", False, "", "", persistent=True),
+        diagnostics.DiagnosticResult(
+            check="ok", passed=True, message="", recommendation=""
+        ),
+        diagnostics.DiagnosticResult(
+            check="warn", passed=False, message="", recommendation="", persistent=False
+        ),
+        diagnostics.DiagnosticResult(
+            check="error", passed=False, message="", recommendation="", persistent=True
+        ),
     ]
     assert analyzer.health_score(results) == 25
