@@ -37,7 +37,7 @@ async def _fetch_ip(client: HTTPClient, url: str, proxy: str | None) -> str:
         ip = _parse_ip(text)
         if ip:
             return ip
-    except HTTPClientError:
+    except (HTTPClientError, asyncio.TimeoutError):
         # Don't hide proxy connection failures - let caller handle them
         return ""
     return ""

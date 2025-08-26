@@ -395,7 +395,11 @@ def get_container_diagnostics(container: Container) -> dict:
 
 
 def analyze_container_logs(
-    name: str, lines: int = 100, analyzer: DiagnosticAnalyzer | None = None
+    name: str,
+    lines: int = 100,
+    analyzer: DiagnosticAnalyzer | None = None,
+    timeout: int = 5,
+    direct_ip: str | None = None,
 ) -> list[DiagnosticResult]:
     """Analyze container logs and return diagnostic results."""
     client = _client()
@@ -418,7 +422,12 @@ def analyze_container_logs(
                 proxy_password = env_var.split("=", 1)[1]
 
         return analyzer.analyze(
-            logs, port=port, proxy_user=proxy_user, proxy_password=proxy_password
+            logs,
+            port=port,
+            proxy_user=proxy_user,
+            proxy_password=proxy_password,
+            timeout=timeout,
+            direct_ip=direct_ip,
         )
     except DockerException as exc:
         raise RuntimeError(f"Failed to analyze logs for {name}: {exc}") from exc

@@ -24,41 +24,49 @@ class DiagnosticAnalyzer:
     """Simple VPN health checks on container logs and connectivity."""
 
     def analyze_logs(self, log_lines: Iterable[str]) -> list[DiagnosticResult]:
-        """Simple log analysis - detect common errors and persistence."""
+        """Recent log analysis - focus on latest logs to avoid outdated issues."""
         lines = [str(line) for line in log_lines]
-        log_text = " ".join(lines).lower()
 
-        # Authentication failures, detect repeated occurrences as persistent
-        if ("auth" in log_text and "fail" in log_text) or any(
-            "auth_failed" in line.lower() for line in lines
+        # Only analyze most recent logs (first 10 lines of recent logs)
+        recent_lines = lines[:10] if len(lines) > 10 else lines
+        recent_text = " ".join(recent_lines).lower()
+
+        # Authentication failures in recent logs only
+        recent_auth_failures = sum(
+            "auth_failed" in line.lower() for line in recent_lines
+        )
+        if recent_auth_failures > 0 or (
+            "auth" in recent_text and "fail" in recent_text
         ):
-            persistent = sum("auth_failed" in line.lower() for line in lines) >= 2
+            persistent = recent_auth_failures >= 2
             return [
                 DiagnosticResult(
                     check="auth_failure",
                     passed=False,
-                    message="Authentication failure detected",
+                    message="Recent authentication failure detected",
                     recommendation="Verify credentials and provider configuration.",
                     persistent=persistent,
                 )
             ]
 
-        if "tls" in log_text or "certificate" in log_text or "ssl" in log_text:
+        # TLS issues in recent logs
+        if "tls" in recent_text or "certificate" in recent_text or "ssl" in recent_text:
             return [
                 DiagnosticResult(
                     check="tls_error",
                     passed=False,
-                    message="TLS or certificate issue detected",
+                    message="Recent TLS or certificate issue detected",
                     recommendation="Check certificates and TLS settings.",
                 )
             ]
 
-        if "dns" in log_text and "fail" in log_text:
+        # DNS issues in recent logs
+        if "dns" in recent_text and "fail" in recent_text:
             return [
                 DiagnosticResult(
                     check="dns_error",
                     passed=False,
-                    message="DNS resolution failure detected",
+                    message="Recent DNS resolution failure detected",
                     recommendation="Verify DNS settings or server availability.",
                 )
             ]
@@ -77,6 +85,8 @@ class DiagnosticAnalyzer:
         port: int,
         proxy_user: str | None = None,
         proxy_password: str | None = None,
+        timeout: int = 5,
+        direct_ip: str | None = None,
     ) -> list[DiagnosticResult]:
         """Connectivity + DNS leak checks with HTTP proxy authentication support."""
         # Build proxy URL with authentication if provided
@@ -91,8 +101,12 @@ class DiagnosticAnalyzer:
         }
 
         try:
-            # Test direct connection first
-            direct = ip_utils.fetch_ip()
+            # Use pre-fetched direct IP if provided, otherwise fetch it
+            if direct_ip:
+                direct = direct_ip
+            else:
+                direct = ip_utils.fetch_ip(timeout=timeout)
+
             if not direct:
                 return [
                     DiagnosticResult(
@@ -104,7 +118,7 @@ class DiagnosticAnalyzer:
                 ]
 
             # Test proxy connection - this is the critical test
-            proxied = ip_utils.fetch_ip(proxies=proxies)
+            proxied = ip_utils.fetch_ip(proxies=proxies, timeout=timeout)
 
             # If proxy connection fails, container is broken
             if not proxied:
@@ -239,11 +253,17 @@ class DiagnosticAnalyzer:
         port: int | None = None,
         proxy_user: str | None = None,
         proxy_password: str | None = None,
+        timeout: int = 5,
+        direct_ip: str | None = None,
     ) -> list[DiagnosticResult]:
         """Analyze logs and optionally test connectivity."""
         results = self.analyze_logs(log_lines)
         if port:
-            results.extend(self.check_connectivity(port, proxy_user, proxy_password))
+            results.extend(
+                self.check_connectivity(
+                    port, proxy_user, proxy_password, timeout, direct_ip
+                )
+            )
         return results
 
     def health_score(self, results: Iterable[DiagnosticResult]) -> int:

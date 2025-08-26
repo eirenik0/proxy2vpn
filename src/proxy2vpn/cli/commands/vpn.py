@@ -219,22 +219,34 @@ async def list_services(
     # Get all running containers for IP resolution
     running = {name: c for name, c in containers.items() if c.status == "running"}
 
+    # Fetch direct IP once for all containers (optimization)
+    from proxy2vpn.adapters import ip_utils
+
+    direct_ip = None
+    try:
+        direct_ip = ip_utils.fetch_ip(timeout=5)
+    except Exception:
+        pass  # Will be handled per-container if needed
+
     # Create async functions for concurrent execution
     async def get_container_health(container_name: str) -> int:
         """Async wrapper to run diagnostic analysis in thread pool"""
-        import asyncio
 
         loop = asyncio.get_event_loop()
         # Run the sync function in a thread pool to avoid blocking
         results = await loop.run_in_executor(
-            None, analyze_container_logs, container_name, 100, analyzer
+            None, analyze_container_logs, container_name, 20, analyzer, 5, direct_ip
         )
         return analyzer.health_score(results)
 
-    # Get IPs for running containers
-    ip_tasks = [get_container_ip_async(container) for container in running.values()]
+    # Create IP and health tasks
+    ip_tasks = []
+    ip_containers = []
+    for container in running.values():
+        if container.name:
+            ip_tasks.append(get_container_ip_async(container))
+            ip_containers.append(container.name)
 
-    # Get health scores for running containers
     health_tasks = []
     running_services = []
     for svc in services:
@@ -243,35 +255,66 @@ async def list_services(
             health_tasks.append(get_container_health(container.name))
             running_services.append(svc.name)
 
-    # Execute all async operations concurrently
+    # Execute all async operations with incremental progress tracking
     with Progress() as progress:
-        task = progress.add_task("[cyan]Analyzing health", total=1)
+        total_tasks = len(ip_tasks) + len(health_tasks)
+        task_progress = progress.add_task("[cyan]Analyzing health", total=total_tasks)
 
-        # Wait for all operations to complete
-        if ip_tasks:
-            ips = await asyncio.gather(*ip_tasks, return_exceptions=True)
-        else:
-            ips = []
+        # Create all tasks for concurrent execution with progress tracking
+        all_tasks = []
+        task_mapping = {}
 
-        if health_tasks:
-            health_scores = await asyncio.gather(*health_tasks, return_exceptions=True)
-        else:
-            health_scores = []
+        # Add IP tasks
+        for i, coro in enumerate(ip_tasks):
+            task = asyncio.create_task(coro)
+            all_tasks.append(task)
+            task_mapping[task] = ("ip", i)
 
-        progress.advance(task)
+        # Add health tasks
+        for i, coro in enumerate(health_tasks):
+            task = asyncio.create_task(coro)
+            all_tasks.append(task)
+            task_mapping[task] = ("health", i)
 
-    # Create lookup maps
-    ip_map = {}
-    if ips:
-        for container, ip in zip(running.values(), ips):
-            if not isinstance(ip, Exception):
-                ip_map[container.name] = ip
+        # Initialize result arrays
+        ip_results = [None] * len(ip_tasks)
+        health_results = [None] * len(health_tasks)
 
-    health_map = {}
-    if health_scores:
-        for service_name, score in zip(running_services, health_scores):
-            if not isinstance(score, Exception):
-                health_map[service_name] = score
+        # Process tasks concurrently as they complete
+        pending = set(all_tasks)
+        while pending:
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
+
+            for completed_task in done:
+                try:
+                    result = completed_task.result()
+                except Exception as exc:
+                    result = exc
+                task_type, index = task_mapping[completed_task]
+
+                if task_type == "ip":
+                    ip_results[index] = result
+                else:
+                    health_results[index] = result
+
+                progress.advance(task_progress, 1)
+
+        # Create result maps
+        ip_map = {}
+        for container_name, result in zip(ip_containers, ip_results):
+            if result is None or isinstance(result, Exception):
+                continue
+            ip_map[container_name] = result
+
+        health_map = {}
+        for service_name, result in zip(running_services, health_results):
+            if result is None or isinstance(result, Exception):
+                continue
+            health_map[service_name] = result
+
+    # Result maps created above
 
     # Build table
     table = Table(show_header=True, header_style="bold cyan")

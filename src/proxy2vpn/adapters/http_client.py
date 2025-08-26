@@ -122,7 +122,7 @@ class HTTPClient:
                         },
                     )
                     return data
-            except aiohttp.ClientError as exc:
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 elapsed = time.perf_counter() - start
                 logger.warning(
                     "http_request_error",
@@ -160,7 +160,7 @@ class HTTPClient:
                         },
                     )
                     return text
-            except aiohttp.ClientError as exc:
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 elapsed = time.perf_counter() - start
                 logger.warning(
                     "http_request_error",
