@@ -9,6 +9,7 @@ from click.exceptions import Exit
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.cli.main import app
 from proxy2vpn.cli.commands.profile import add as profile_add
+from proxy2vpn.adapters import server_manager
 
 
 def _create_test_compose(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -25,6 +26,22 @@ def _cli_ctx(compose_path: pathlib.Path):
     ctx = typer.Context(command, obj={"compose_file": compose_path})
     with ctx:
         yield ctx
+
+
+class DummyServerManager:
+    def list_providers(self):
+        return [
+            "expressvpn",
+            "nordvpn",
+            "protonvpn",
+            "surfshark",
+            "mullvad",
+        ]
+
+
+@pytest.fixture(autouse=True)
+def _patch_server_manager(monkeypatch):
+    monkeypatch.setattr(server_manager, "ServerManager", lambda: DummyServerManager())
 
 
 def test_profile_create_with_valid_env_file(tmp_path):
