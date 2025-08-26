@@ -50,8 +50,18 @@ def create(
             "Run 'proxy2vpn servers list-providers' to see supported providers",
         )
 
-    username = typer.prompt("VPN Username")
-    password = typer.prompt("VPN Password", hide_input=True)
+    vpn_type = typer.prompt("VPN type", default="openvpn").strip().lower()
+    if vpn_type not in ("openvpn", "wireguard"):
+        abort(
+            f"Unsupported VPN type '{vpn_type}'",
+            "Use 'openvpn' or 'wireguard'",
+        )
+
+    username = ""
+    password = ""
+    if vpn_type == "openvpn":
+        username = typer.prompt("VPN Username")
+        password = typer.prompt("VPN Password", hide_input=True)
 
     # Optional HTTP proxy
     enable_proxy = typer.confirm("Enable HTTP proxy?", default=False)
@@ -66,11 +76,14 @@ def create(
     env_file_path.parent.mkdir(exist_ok=True)
 
     # Create the environment file
-    env_content = [
-        f"VPN_SERVICE_PROVIDER={provider}",
-        f"OPENVPN_USER={username}",
-        f"OPENVPN_PASSWORD={password}",
-    ]
+    env_content = [f"VPN_TYPE={vpn_type}", f"VPN_SERVICE_PROVIDER={provider}"]
+    if vpn_type == "openvpn":
+        env_content.extend(
+            [
+                f"OPENVPN_USER={username}",
+                f"OPENVPN_PASSWORD={password}",
+            ]
+        )
 
     if enable_proxy:
         env_content.extend(
@@ -119,6 +132,7 @@ def add(
         for error in validation_errors:
             console.print(f"[red]  • {error}[/red]")
         console.print("\n[yellow]💡 Example valid profile:[/yellow]")
+        console.print("[green]VPN_TYPE=openvpn[/green]")
         console.print("[green]VPN_SERVICE_PROVIDER=expressvpn[/green]")
         console.print("[green]OPENVPN_USER=your_username[/green]")
         console.print("[green]OPENVPN_PASSWORD=your_password[/green]")

@@ -59,6 +59,7 @@ proxy2vpn system init
 # 2. Create your first profile with VPN credentials (all fields required)
 mkdir -p profiles
 cat <<'EOF' > profiles/production.env
+VPN_TYPE=openvpn
 VPN_SERVICE_PROVIDER=protonvpn
 OPENVPN_USER=your_protonvpn_username
 OPENVPN_PASSWORD=your_protonvpn_password
@@ -130,6 +131,7 @@ the container for the configuration to take effect.
 ```bash
 # Create profiles with provider information
 cat <<'EOF' > profiles/expressvpn-main.env
+VPN_TYPE=openvpn
 VPN_SERVICE_PROVIDER=expressvpn
 OPENVPN_USER=your_expressvpn_username
 OPENVPN_PASSWORD=your_expressvpn_password
@@ -139,6 +141,7 @@ HTTPPROXY_PASSWORD=proxy_pass
 EOF
 
 cat <<'EOF' > profiles/nordvpn-backup.env
+VPN_TYPE=openvpn
 VPN_SERVICE_PROVIDER=nordvpn
 OPENVPN_USER=your_nordvpn_username
 OPENVPN_PASSWORD=your_nordvpn_password

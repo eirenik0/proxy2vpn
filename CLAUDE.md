@@ -62,6 +62,7 @@ uv run proxy2vpn fleet rotate --dry-run
 Profile environment files (e.g., profiles/myprofile.env) have comprehensive validation:
 ```bash
 # Required fields (validated during profile creation)
+VPN_TYPE=openvpn
 VPN_SERVICE_PROVIDER=expressvpn
 OPENVPN_USER=your_vpn_username
 OPENVPN_PASSWORD=your_vpn_password
@@ -74,8 +75,9 @@ HTTPPROXY_PASSWORD=your_proxy_password
 
 **Validation Rules**:
 - `VPN_SERVICE_PROVIDER` - Required, must match supported gluetun provider
-- `OPENVPN_USER` - Required, your VPN account username
-- `OPENVPN_PASSWORD` - Required, your VPN account password  
+- `VPN_TYPE` - Optional, `openvpn` (default) or `wireguard`
+- `OPENVPN_USER` - Required when `VPN_TYPE=openvpn`
+- `OPENVPN_PASSWORD` - Required when `VPN_TYPE=openvpn`
 - `HTTPPROXY_USER/PASSWORD` - Required only if `HTTPPROXY=on`
 
 Profile creation fails fast with clear error messages if any required fields are missing.
@@ -107,7 +109,7 @@ All VPN containers use the `qmcgaw/gluetun` image with:
 
 ### Configuration System
 - **compose.yml**: Single source of truth for all state (services, profiles as YAML anchors)
-- **profiles/*.env**: VPN credentials (OPENVPN_USER, OPENVPN_PASSWORD) referenced by profiles
+- **profiles/*.env**: VPN settings (VPN_TYPE, OPENVPN_USER, OPENVPN_PASSWORD) referenced by profiles
 - **~/.cache/proxy2vpn/**: Server list cache with TTL management
 - **pyproject.toml**: Project configuration, dependencies, and towncrier settings
 

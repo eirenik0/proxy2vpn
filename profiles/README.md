@@ -8,9 +8,13 @@ registered with the CLI so it can be referenced when creating VPN services.
 Each profile file uses simple `KEY=value` pairs, for example:
 
 ```
+VPN_TYPE=openvpn
+VPN_SERVICE_PROVIDER=expressvpn
 OPENVPN_USER=username
 OPENVPN_PASSWORD=password
 ```
+
+`VPN_TYPE` may be `openvpn` or `wireguard` and defaults to `openvpn` if omitted.
 
 ## Usage
 
