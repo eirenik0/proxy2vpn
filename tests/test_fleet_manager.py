@@ -26,8 +26,17 @@ def test_plan_deployment_basic_allocation(fleet_manager, monkeypatch):
 
     monkeypatch.setattr(fleet_manager.server_manager, "list_cities", fake_list_cities)
 
+    profiles = [
+        Profile(name="acc1", env_file="env.acc1"),
+        Profile(name="acc2", env_file="env.acc2"),
+    ]
+    for p in profiles:
+        p._provider = "prov"
+    monkeypatch.setattr(
+        fleet_manager.compose_manager, "list_profiles", lambda: profiles
+    )
+
     config = FleetConfig(
-        provider="prov",
         countries=["A", "B"],
         profiles={"acc1": 1, "acc2": 1},
         port_start=30000,
@@ -56,8 +65,13 @@ def test_plan_deployment_sanitizes_and_limits(fleet_manager, monkeypatch):
 
     monkeypatch.setattr(fleet_manager.server_manager, "list_cities", fake_list_cities)
 
+    profile = Profile(name="acc1", env_file="env.acc1")
+    profile._provider = "prov"
+    monkeypatch.setattr(
+        fleet_manager.compose_manager, "list_profiles", lambda: [profile]
+    )
+
     config = FleetConfig(
-        provider="prov",
         countries=["United States"],
         profiles={"acc1": 1},
         port_start=21000,
@@ -72,7 +86,7 @@ def test_plan_deployment_sanitizes_and_limits(fleet_manager, monkeypatch):
     assert service.port == 21000
 
 
-def test_plan_deployment_unique_ips(fleet_manager):
+def test_plan_deployment_unique_ips(fleet_manager, monkeypatch):
     fleet_manager.server_manager.data = {
         "version": 1,
         "protonvpn": {
@@ -104,8 +118,13 @@ def test_plan_deployment_unique_ips(fleet_manager):
             ]
         },
     }
+    profile = Profile(name="acc1", env_file="env.acc1")
+    profile._provider = "protonvpn"
+    monkeypatch.setattr(
+        fleet_manager.compose_manager, "list_profiles", lambda: [profile]
+    )
+
     config = FleetConfig(
-        provider="protonvpn",
         countries=["A", "B"],
         profiles={"acc1": 3},
         port_start=40000,
@@ -140,8 +159,13 @@ def test_plan_deployment_missing_profile(fleet_manager, monkeypatch):
 
     monkeypatch.setattr(fleet_manager.server_manager, "list_cities", fake_list_cities)
 
+    profile = Profile(name="acc1", env_file="env.acc1")
+    profile._provider = "prov"
+    monkeypatch.setattr(
+        fleet_manager.compose_manager, "list_profiles", lambda: [profile]
+    )
+
     config = FleetConfig(
-        provider="prov",
         countries=["A"],
         profiles={"missing": 1},
         port_start=30000,
@@ -502,48 +526,6 @@ def test_multi_provider_fleet_planning(tmp_path):
     assert any("expressvpn-" in name for name in service_names)
     assert any("nordvpn-" in name for name in service_names)
     assert any("protonvpn-" in name for name in service_names)
-
-
-def test_multi_provider_legacy_mode(tmp_path):
-    """Test legacy single-provider mode overrides profile providers."""
-    # Setup profiles with different providers
-    compose_path = tmp_path / "compose.yml"
-    ComposeManager.create_initial_compose(compose_path, force=True)
-    manager = ComposeManager(compose_path)
-
-    expressvpn_env = tmp_path / "expressvpn.env"
-    expressvpn_env.write_text(
-        "VPN_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
-    )
-
-    nordvpn_env = tmp_path / "nordvpn.env"
-    nordvpn_env.write_text(
-        "VPN_PROVIDER=nordvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
-    )
-
-    manager.add_profile(Profile(name="express-acc1", env_file=str(expressvpn_env)))
-    manager.add_profile(Profile(name="nord-acc1", env_file=str(nordvpn_env)))
-
-    fleet_manager = FleetManager(compose_file_path=compose_path)
-
-    def fake_list_cities(provider, country):
-        return {"Germany": ["Berlin"], "France": ["Paris"]}.get(country, [])
-
-    fleet_manager.server_manager.list_cities = fake_list_cities
-
-    # Test legacy mode - force all profiles to use protonvpn
-    config = FleetConfig(
-        countries=["Germany", "France"],
-        profiles={"express-acc1": 1, "nord-acc1": 1},
-        provider="protonvpn",  # Legacy mode override
-    )
-
-    plan = fleet_manager.plan_deployment(config)
-
-    # Verify legacy mode overrides profile providers
-    assert len(plan.providers) == 1
-    assert "protonvpn" in plan.providers
-    assert all(s.provider == "protonvpn" for s in plan.services)
 
 
 def test_profile_validation_during_fleet_planning(tmp_path):

@@ -17,9 +17,6 @@ def fleet_plan(
     ctx: typer.Context,
     countries: str = typer.Option(..., help="Comma-separated country list"),
     profiles: str = typer.Option(..., help="Profile slots: acc1:2,acc2:8"),
-    provider: str = typer.Option(
-        None, help="Single provider (legacy mode, overrides profile providers)"
-    ),
     port_start: int = typer.Option(20000, help="Starting port number"),
     naming_template: str = typer.Option(
         "{provider}-{country}-{city}", help="Service naming template"
@@ -30,11 +27,7 @@ def fleet_plan(
         False, help="Ensure each service uses a unique city and server IP"
     ),
 ):
-    """Plan multi-provider VPN deployment based on profile providers.
-
-    NEW: Profiles can specify VPN_PROVIDER in their env files for automatic orchestration.
-    Use --provider to force all profiles to use a single provider (legacy mode).
-    """
+    """Plan multi-provider VPN deployment based on profile providers."""
 
     # Parse inputs
     country_list = [c.strip() for c in countries.split(",")]
@@ -52,20 +45,14 @@ def fleet_plan(
     )
     console.print(f"[blue]📊 Profile allocation: {profiles}[/blue]")
 
-    if provider:
-        console.print(
-            f"[yellow]⚠ Legacy mode: forcing all profiles to use {provider}[/yellow]"
-        )
-    else:
-        console.print(
-            "[green]🔧 Multi-provider mode: using VPN_PROVIDER from profile env files[/green]"
-        )
+    console.print(
+        "[green]🔧 Multi-provider mode: using VPN_PROVIDER from profile env files[/green]"
+    )
 
     # Create fleet configuration
     config_obj = FleetConfig(
         countries=country_list,
         profiles=profile_config,
-        provider=provider,
         port_start=port_start,
         naming_template=naming_template,
         unique_ips=unique_ips,
@@ -259,8 +246,7 @@ def _display_deployment_plan(
     plan: DeploymentPlan, profile_config: dict[str, int] | None = None
 ):
     """Display deployment plan in a formatted table"""
-
-    table = Table(title=f"🚀 Fleet Deployment Plan - {plan.provider}")
+    table = Table(title="🚀 Fleet Deployment Plan")
     table.add_column("Service", style="cyan")
     table.add_column("Profile", style="magenta")
     table.add_column("Location", style="green")
@@ -292,7 +278,8 @@ def _display_deployment_plan(
     # Show summary
     console.print("\n[bold]Summary:[/bold]")
     console.print(f"  • Total services: {len(plan.services)}")
-    console.print(f"  • Provider: {plan.provider}")
+    providers = ", ".join(sorted(plan.providers)) or "n/a"
+    console.print(f"  • Providers: {providers}")
 
     if profile_config:
         console.print("  • Profile allocation:")
