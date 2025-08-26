@@ -420,3 +420,233 @@ def test_get_service_status_counts(monkeypatch):
     running, stopped = get_service_status_counts(["svc1", "svc2", "svc3"])
     assert running == 1
     assert stopped == 2
+
+
+def test_multi_provider_fleet_planning(tmp_path):
+    """Test multi-provider fleet planning based on profile providers."""
+    # Setup compose file and profiles with different providers
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    # Create profile env files with different providers
+    expressvpn_env = tmp_path / "expressvpn.env"
+    expressvpn_env.write_text(
+        "VPN_PROVIDER=expressvpn\n"
+        "OPENVPN_USER=express_user\n"
+        "OPENVPN_PASSWORD=express_pass\n"
+    )
+
+    nordvpn_env = tmp_path / "nordvpn.env"
+    nordvpn_env.write_text(
+        "VPN_PROVIDER=nordvpn\nOPENVPN_USER=nord_user\nOPENVPN_PASSWORD=nord_pass\n"
+    )
+
+    protonvpn_env = tmp_path / "protonvpn.env"
+    protonvpn_env.write_text(
+        "VPN_PROVIDER=protonvpn\n"
+        "OPENVPN_USER=proton_user\n"
+        "OPENVPN_PASSWORD=proton_pass\n"
+    )
+
+    # Add profiles to compose manager
+    manager.add_profile(Profile(name="express-acc1", env_file=str(expressvpn_env)))
+    manager.add_profile(Profile(name="nord-acc1", env_file=str(nordvpn_env)))
+    manager.add_profile(Profile(name="proton-acc1", env_file=str(protonvpn_env)))
+
+    # Create fleet manager and mock city data for each provider
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+
+    def fake_list_cities(provider, country):
+        provider_cities = {
+            "expressvpn": {"Germany": ["Frankfurt"], "France": ["Paris"]},
+            "nordvpn": {"Germany": ["Berlin"], "Netherlands": ["Amsterdam"]},
+            "protonvpn": {"France": ["Lyon"], "Netherlands": ["Rotterdam"]},
+        }
+        return provider_cities.get(provider, {}).get(country, [])
+
+    fleet_manager.server_manager.list_cities = fake_list_cities
+
+    # Test multi-provider fleet configuration (no single provider specified)
+    config = FleetConfig(
+        countries=["Germany", "France", "Netherlands"],
+        profiles={"express-acc1": 2, "nord-acc1": 2, "proton-acc1": 2},
+        port_start=25000,
+    )
+
+    plan = fleet_manager.plan_deployment(config)
+
+    # Verify multi-provider deployment
+    assert len(plan.services) == 6  # 2 services per provider
+    assert len(plan.providers) == 3  # 3 different providers
+    assert "expressvpn" in plan.providers
+    assert "nordvpn" in plan.providers
+    assert "protonvpn" in plan.providers
+
+    # Verify services are created for each provider
+    express_services = [s for s in plan.services if s.provider == "expressvpn"]
+    nord_services = [s for s in plan.services if s.provider == "nordvpn"]
+    proton_services = [s for s in plan.services if s.provider == "protonvpn"]
+
+    assert len(express_services) == 2
+    assert len(nord_services) == 2
+    assert len(proton_services) == 2
+
+    # Verify port coordination across providers
+    all_ports = [s.port for s in plan.services]
+    assert len(set(all_ports)) == 6  # All ports should be unique
+    assert min(all_ports) == 25000  # Should start from specified port
+
+    # Verify service naming includes provider
+    service_names = [s.name for s in plan.services]
+    assert any("expressvpn-" in name for name in service_names)
+    assert any("nordvpn-" in name for name in service_names)
+    assert any("protonvpn-" in name for name in service_names)
+
+
+def test_multi_provider_legacy_mode(tmp_path):
+    """Test legacy single-provider mode overrides profile providers."""
+    # Setup profiles with different providers
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    expressvpn_env = tmp_path / "expressvpn.env"
+    expressvpn_env.write_text(
+        "VPN_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+
+    nordvpn_env = tmp_path / "nordvpn.env"
+    nordvpn_env.write_text(
+        "VPN_PROVIDER=nordvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+
+    manager.add_profile(Profile(name="express-acc1", env_file=str(expressvpn_env)))
+    manager.add_profile(Profile(name="nord-acc1", env_file=str(nordvpn_env)))
+
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+
+    def fake_list_cities(provider, country):
+        return {"Germany": ["Berlin"], "France": ["Paris"]}.get(country, [])
+
+    fleet_manager.server_manager.list_cities = fake_list_cities
+
+    # Test legacy mode - force all profiles to use protonvpn
+    config = FleetConfig(
+        countries=["Germany", "France"],
+        profiles={"express-acc1": 1, "nord-acc1": 1},
+        provider="protonvpn",  # Legacy mode override
+    )
+
+    plan = fleet_manager.plan_deployment(config)
+
+    # Verify legacy mode overrides profile providers
+    assert len(plan.providers) == 1
+    assert "protonvpn" in plan.providers
+    assert all(s.provider == "protonvpn" for s in plan.services)
+
+
+def test_profile_validation_during_fleet_planning(tmp_path):
+    """Test that fleet planning fails fast when profiles have missing VPN_PROVIDER."""
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    # Create invalid profile (missing VPN_PROVIDER)
+    invalid_env = tmp_path / "invalid.env"
+    invalid_env.write_text(
+        "OPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+        # Missing VPN_PROVIDER
+    )
+
+    # Create valid profile
+    valid_env = tmp_path / "valid.env"
+    valid_env.write_text(
+        "VPN_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+
+    manager.add_profile(Profile(name="invalid-profile", env_file=str(invalid_env)))
+    manager.add_profile(Profile(name="valid-profile", env_file=str(valid_env)))
+
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+
+    # Test fleet planning with invalid profile should fail fast
+    config = FleetConfig(
+        countries=["Germany"],
+        profiles={"invalid-profile": 1, "valid-profile": 1},
+    )
+
+    with pytest.raises(ValueError, match="Fleet planning failed.*missing VPN_PROVIDER"):
+        fleet_manager.plan_deployment(config)
+
+
+def test_profile_comprehensive_validation(tmp_path):
+    """Test comprehensive profile validation covers all required fields."""
+    # Test missing VPN_PROVIDER
+    missing_provider_env = tmp_path / "missing_provider.env"
+    missing_provider_env.write_text("OPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n")
+
+    profile = Profile(name="test", env_file=str(missing_provider_env))
+    errors = profile.validate_env_file()
+    assert any("VPN_PROVIDER is required" in error for error in errors)
+
+    # Test missing OPENVPN credentials
+    missing_creds_env = tmp_path / "missing_creds.env"
+    missing_creds_env.write_text("VPN_PROVIDER=expressvpn\n")
+
+    profile = Profile(name="test", env_file=str(missing_creds_env))
+    errors = profile.validate_env_file()
+    assert any("OPENVPN_USER is required" in error for error in errors)
+    assert any("OPENVPN_PASSWORD is required" in error for error in errors)
+
+    # Test HTTP proxy validation when enabled
+    missing_proxy_creds_env = tmp_path / "missing_proxy_creds.env"
+    missing_proxy_creds_env.write_text(
+        "VPN_PROVIDER=nordvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\nHTTPPROXY=on\n"
+        # Missing HTTPPROXY_USER and HTTPPROXY_PASSWORD
+    )
+
+    profile = Profile(name="test", env_file=str(missing_proxy_creds_env))
+    errors = profile.validate_env_file()
+    assert any(
+        "HTTPPROXY_USER is required when HTTPPROXY=on" in error for error in errors
+    )
+    assert any(
+        "HTTPPROXY_PASSWORD is required when HTTPPROXY=on" in error for error in errors
+    )
+
+    # Test valid profile passes validation
+    valid_env = tmp_path / "valid.env"
+    valid_env.write_text(
+        "VPN_PROVIDER=protonvpn\n"
+        "OPENVPN_USER=user\n"
+        "OPENVPN_PASSWORD=pass\n"
+        "HTTPPROXY=on\n"
+        "HTTPPROXY_USER=proxy_user\n"
+        "HTTPPROXY_PASSWORD=proxy_pass\n"
+    )
+
+    profile = Profile(name="test", env_file=str(valid_env))
+    errors = profile.validate_env_file()
+    assert len(errors) == 0  # No validation errors
+
+
+def test_profile_provider_property_validation(tmp_path):
+    """Test that Profile.provider property raises clear errors for missing VPN_PROVIDER."""
+    # Test missing VPN_PROVIDER raises ValueError
+    missing_env = tmp_path / "missing.env"
+    missing_env.write_text("OPENVPN_USER=user\n")
+
+    profile = Profile(name="test", env_file=str(missing_env))
+
+    with pytest.raises(ValueError, match="Profile 'test' is missing VPN_PROVIDER"):
+        _ = profile.provider
+
+    # Test valid provider returns correctly
+    valid_env = tmp_path / "valid.env"
+    valid_env.write_text(
+        "VPN_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+
+    profile = Profile(name="test", env_file=str(valid_env))
+    assert profile.provider == "expressvpn"

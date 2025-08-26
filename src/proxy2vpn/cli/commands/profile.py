@@ -30,8 +30,27 @@ def create(
             f"Environment file '{env_file}' not found",
             "Create the file before creating the profile",
         )
-    manager = ComposeManager.from_ctx(ctx)
+
+    # Validate profile has all required fields
     profile = Profile(name=name, env_file=str(env_file))
+    validation_errors = profile.validate_env_file()
+
+    if validation_errors:
+        console.print(f"[red]❌ Profile validation failed for {env_file}:[/red]")
+        for error in validation_errors:
+            console.print(f"[red]  • {error}[/red]")
+        console.print("\n[yellow]💡 Example valid profile:[/yellow]")
+        console.print("[green]VPN_PROVIDER=expressvpn[/green]")
+        console.print("[green]OPENVPN_USER=your_username[/green]")
+        console.print("[green]OPENVPN_PASSWORD=your_password[/green]")
+        console.print("[green]HTTPPROXY=on[/green]")
+        console.print("[green]HTTPPROXY_USER=proxy_user[/green]")
+        console.print("[green]HTTPPROXY_PASSWORD=proxy_pass[/green]")
+        abort("Fix the environment file and try again")
+
+    console.print(f"[blue]📋 Using provider: {profile.provider}[/blue]")
+
+    manager = ComposeManager.from_ctx(ctx)
     manager.add_profile(profile)
     logger.info("profile_created", extra={"profile_name": name})
     console.print(f"[green]✓[/green] Profile '{name}' created.")

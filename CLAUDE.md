@@ -59,14 +59,26 @@ uv run proxy2vpn fleet rotate --dry-run
 ```
 
 ### Profile Environment File Example
-Profile environment files (e.g., profiles/myprofile.env) should include VPN and HTTP proxy credentials:
+Profile environment files (e.g., profiles/myprofile.env) have comprehensive validation:
 ```bash
+# Required fields (validated during profile creation)
+VPN_PROVIDER=expressvpn
 OPENVPN_USER=your_vpn_username
 OPENVPN_PASSWORD=your_vpn_password
+
+# Optional HTTP proxy (if enabled, credentials required)
 HTTPPROXY=on
 HTTPPROXY_USER=your_proxy_username
 HTTPPROXY_PASSWORD=your_proxy_password
 ```
+
+**Validation Rules**:
+- `VPN_PROVIDER` - Required, must match supported gluetun provider
+- `OPENVPN_USER` - Required, your VPN account username
+- `OPENVPN_PASSWORD` - Required, your VPN account password  
+- `HTTPPROXY_USER/PASSWORD` - Required only if `HTTPPROXY=on`
+
+Profile creation fails fast with clear error messages if any required fields are missing.
 
 ## High-Level Architecture
 

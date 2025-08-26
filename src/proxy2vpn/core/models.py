@@ -188,11 +188,66 @@ class Profile:
     image: str = "qmcgaw/gluetun"
     cap_add: list[str] = field(default_factory=lambda: ["NET_ADMIN"])
     devices: list[str] = field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
+    _provider: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.name = sanitize_name(self.name)
         # Store resolved path but keep as string for YAML serialization
         self.env_file = str(sanitize_path(Path(self.env_file)))
+
+    @property
+    def provider(self) -> str:
+        """Get VPN provider from the environment file.
+
+        Raises ValueError if VPN_PROVIDER is not specified in the profile's env file.
+        """
+        if self._provider is None:
+            self._load_provider_from_env()
+
+        if not self._provider:
+            raise ValueError(
+                f"Profile '{self.name}' is missing VPN_PROVIDER in {self.env_file}. "
+                f"Add 'VPN_PROVIDER=expressvpn' (or nordvpn, protonvpn, etc.) to the env file."
+            )
+        return self._provider
+
+    def validate_env_file(self) -> list[str]:
+        """Validate all required fields in the profile's environment file.
+
+        Returns list of missing/invalid fields. Empty list means valid.
+        """
+        from proxy2vpn.adapters.docker_ops import _load_env_file
+
+        env_vars = _load_env_file(self.env_file)
+        errors = []
+
+        # Required fields
+        if not env_vars.get("VPN_PROVIDER"):
+            errors.append(
+                "VPN_PROVIDER is required (e.g., 'expressvpn', 'nordvpn', 'protonvpn')"
+            )
+
+        if not env_vars.get("OPENVPN_USER"):
+            errors.append("OPENVPN_USER is required (your VPN account username)")
+
+        if not env_vars.get("OPENVPN_PASSWORD"):
+            errors.append("OPENVPN_PASSWORD is required (your VPN account password)")
+
+        # HTTP proxy validation (optional but if enabled, needs credentials)
+        if env_vars.get("HTTPPROXY", "").lower() in ("on", "true", "1"):
+            if not env_vars.get("HTTPPROXY_USER"):
+                errors.append("HTTPPROXY_USER is required when HTTPPROXY=on")
+            if not env_vars.get("HTTPPROXY_PASSWORD"):
+                errors.append("HTTPPROXY_PASSWORD is required when HTTPPROXY=on")
+
+        return errors
+
+    def _load_provider_from_env(self) -> None:
+        """Load provider information from the environment file."""
+        from proxy2vpn.adapters.docker_ops import _load_env_file
+
+        env_vars = _load_env_file(self.env_file)
+        self._provider = env_vars.get("VPN_PROVIDER")
 
     @classmethod
     def from_anchor(cls, name: str, data: dict) -> "Profile":

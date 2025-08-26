@@ -15,9 +15,11 @@ from .server_monitor import ServerMonitor
 
 def fleet_plan(
     ctx: typer.Context,
-    provider: str = typer.Option("protonvpn", help="VPN provider"),
     countries: str = typer.Option(..., help="Comma-separated country list"),
     profiles: str = typer.Option(..., help="Profile slots: acc1:2,acc2:8"),
+    provider: str = typer.Option(
+        None, help="Single provider (legacy mode, overrides profile providers)"
+    ),
     port_start: int = typer.Option(20000, help="Starting port number"),
     naming_template: str = typer.Option(
         "{provider}-{country}-{city}", help="Service naming template"
@@ -28,12 +30,11 @@ def fleet_plan(
         False, help="Ensure each service uses a unique city and server IP"
     ),
 ):
-    """Plan bulk VPN deployment across cities"""
+    """Plan multi-provider VPN deployment based on profile providers.
 
-    console.print(
-        f"[blue]🎯 Planning deployment for {len(countries.split(','))} countries[/blue]"
-    )
-    console.print(f"[blue]📊 Profile allocation: {profiles}[/blue]")
+    NEW: Profiles can specify VPN_PROVIDER in their env files for automatic orchestration.
+    Use --provider to force all profiles to use a single provider (legacy mode).
+    """
 
     # Parse inputs
     country_list = [c.strip() for c in countries.split(",")]
@@ -46,20 +47,29 @@ def fleet_plan(
         console.print("[red]❌ Invalid profiles format. Use: acc1:2,acc2:8[/red]")
         raise typer.Exit(1)
 
-    # Create fleet configuration
-    config_obj = FleetConfig(
-        provider=provider,
-        countries=country_list,
-        profiles=profile_config,
-        port_start=port_start,
-        naming_template=naming_template,
-        unique_ips=unique_ips,
-    )
-
     console.print(
         f"[blue]🎯 Planning deployment for {len(country_list)} countries[/blue]"
     )
     console.print(f"[blue]📊 Profile allocation: {profiles}[/blue]")
+
+    if provider:
+        console.print(
+            f"[yellow]⚠ Legacy mode: forcing all profiles to use {provider}[/yellow]"
+        )
+    else:
+        console.print(
+            "[green]🔧 Multi-provider mode: using VPN_PROVIDER from profile env files[/green]"
+        )
+
+    # Create fleet configuration
+    config_obj = FleetConfig(
+        countries=country_list,
+        profiles=profile_config,
+        provider=provider,
+        port_start=port_start,
+        naming_template=naming_template,
+        unique_ips=unique_ips,
+    )
 
     # Generate deployment plan
     try:
