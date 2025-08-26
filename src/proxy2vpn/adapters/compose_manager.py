@@ -134,10 +134,12 @@ class ComposeManager:
         # Build minimal service config and merge with profile via YAML merge key
         service_config = CommentedMap(service.to_compose_service())
         merged_config = CommentedMap()
-        # Ensure profile has expected anchor for a nice alias emission
+        # Ensure profile has expected anchor without forcing duplicate dumps
         expected_anchor = f"vpn-base-{service.profile}"
         try:
-            profile_map.yaml_set_anchor(expected_anchor, always_dump=True)
+            anchor = profile_map.yaml_anchor()
+            if not anchor or anchor.value != expected_anchor:
+                profile_map.yaml_set_anchor(expected_anchor)
         except Exception:
             pass
         # Use explicit merge key to ensure broad ruamel.yaml compatibility
@@ -174,7 +176,9 @@ class ComposeManager:
         profile_map = self.data[profile_key]
         expected_anchor = f"vpn-base-{service.profile}"
         try:
-            profile_map.yaml_set_anchor(expected_anchor, always_dump=True)
+            anchor = profile_map.yaml_anchor()
+            if not anchor or anchor.value != expected_anchor:
+                profile_map.yaml_set_anchor(expected_anchor)
         except Exception:
             pass
         merged_config = CommentedMap()

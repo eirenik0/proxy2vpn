@@ -111,6 +111,72 @@ def test_add_service_after_init(tmp_path):
     assert loaded_service.profile == "andr"
 
 
+def test_no_duplicate_profile_anchors(tmp_path):
+    compose_path = _copy_compose(tmp_path)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "env.dup"
+    env_path.write_text("KEY=value\n")
+    profile = Profile(name="dup", env_file=str(env_path))
+    manager.add_profile(profile)
+
+    svc1 = VPNService.create(
+        name="vpnA",
+        port=1111,
+        control_port=30002,
+        provider="protonvpn",
+        profile="dup",
+        location="LA",
+        environment={
+            "VPN_SERVICE_PROVIDER": "protonvpn",
+            "SERVER_CITIES": "LA",
+        },
+        labels={
+            "vpn.type": "vpn",
+            "vpn.port": "1111",
+            "vpn.control_port": "30002",
+            "vpn.provider": "protonvpn",
+            "vpn.profile": "dup",
+            "vpn.location": "LA",
+        },
+    )
+    svc2 = VPNService.create(
+        name="vpnB",
+        port=1112,
+        control_port=30003,
+        provider="protonvpn",
+        profile="dup",
+        location="SF",
+        environment={
+            "VPN_SERVICE_PROVIDER": "protonvpn",
+            "SERVER_CITIES": "SF",
+        },
+        labels={
+            "vpn.type": "vpn",
+            "vpn.port": "1112",
+            "vpn.control_port": "30003",
+            "vpn.provider": "protonvpn",
+            "vpn.profile": "dup",
+            "vpn.location": "SF",
+        },
+    )
+    manager.add_service(svc1)
+    manager.add_service(svc2)
+
+    compose_text = compose_path.read_text()
+    assert compose_text.count("&vpn-base-dup") == 1
+    assert compose_text.count("<<: &vpn-base-dup") <= 1
+
+    from ruamel.yaml import YAML
+    from ruamel.yaml.composer import ReusedAnchorWarning
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always", ReusedAnchorWarning)
+        YAML().load(compose_text)
+        assert not any(isinstance(m.message, ReusedAnchorWarning) for m in w)
+
+
 def test_recover_from_corruption(tmp_path):
     compose_path = _copy_compose(tmp_path)
     manager = ComposeManager(compose_path)
