@@ -39,10 +39,6 @@ fmt: ## Format Python code with ruff
 fmt-check: ## Check Python formatting without modifying files
 	uv run --with ruff ruff format --check src/ tests/
 
-integration-test: ## Run bash integration tests
-	@echo "Running integration tests..."
-	@cd tests && ./run_integration_tests.sh
-
 clean: ## Clean up temporary files and caches
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete

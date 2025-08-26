@@ -1,7 +1,5 @@
 """Utilities for fetching and caching VPN server lists."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 import time
@@ -42,6 +40,17 @@ class ServerManager:
         age = time.time() - self.cache_file.stat().st_mtime
         return age < self.ttl
 
+    # Public helper so callers can check freshness without reaching into privates
+    def is_cache_fresh(self) -> bool:
+        """Return True if the cached server list is newer than the TTL."""
+        return self._is_cache_valid()
+
+    def cache_age_seconds(self) -> float | None:
+        """Return age of the cache in seconds, or None if cache missing."""
+        if not self.cache_file.exists():
+            return None
+        return time.time() - self.cache_file.stat().st_mtime
+
     async def _download_servers(self, verify: bool) -> dict[str, dict]:
         parsed = urlparse(config.SERVER_LIST_URL)
         cfg = HTTPClientConfig(
@@ -59,16 +68,28 @@ class ServerManager:
         self.cache_file.write_text(json.dumps(data), encoding="utf-8")
 
     def update_servers(self, verify: bool = True) -> dict[str, dict]:
-        """Fetch the server list, using the cache when possible."""
+        """Synchronous wrapper around :meth:`update_servers`.
 
-        if not self._is_cache_valid():
-            try:
-                asyncio.run(self._fetch_and_cache(verify))
-            except HTTPClientError as exc:
-                abort("Failed to download server list", str(exc))
-        with self.cache_file.open("r", encoding="utf-8") as f:
-            self.data = json.load(f)
-        return self.data
+        Uses ``asyncio.run`` internally when a loop is not running.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # In an active loop, delegate to async variant via a helper task.
+            # Callers should prefer the async method in this context.
+            # For safety, fall back to reading cache if present; otherwise raise.
+            if self.cache_file.exists() and self._is_cache_valid():
+                with self.cache_file.open("r", encoding="utf-8") as f:
+                    self.data = json.load(f)
+                return self.data
+            raise RuntimeError(
+                "update_servers() called from within an active event loop"
+            )
+
+        return asyncio.run(self.fetch_server_list_async(verify))
 
     async def fetch_server_list_async(self, verify: bool = True) -> dict[str, dict]:
         """Fetch and cache the VPN server list asynchronously."""
@@ -83,17 +104,35 @@ class ServerManager:
         return self.data
 
     # ------------------------------------------------------------------
+    # Lazy load helper
+    # ------------------------------------------------------------------
+
+    def _ensure_loaded(self) -> None:
+        """Ensure ``self.data`` is populated, fetching or reading cache if needed.
+
+        This method performs a synchronous load using ``update_servers`` which
+        internally handles async download via ``asyncio.run`` when the cache is
+        stale or missing. This keeps call sites simple and non-async.
+        """
+        if self.data is not None:
+            return
+        # If cache exists and is valid, update_servers() will read it;
+        # otherwise it will download and then read it.
+        self.update_servers()
+
+    # ------------------------------------------------------------------
     # Listing helpers
     # ------------------------------------------------------------------
 
     def list_providers(self) -> list[str]:
-        data = self.data or self.update_servers()
+        self._ensure_loaded()
+        data = self.data or {}
         return sorted(k for k in data.keys() if k != "version")
 
     def list_countries(self, provider: str) -> list[str]:
         """Return available countries for PROVIDER."""
-
-        data = self.data or self.update_servers()
+        self._ensure_loaded()
+        data = self.data or {}
         prov = data.get(provider, {})
         servers = prov.get("servers", [])
         countries = {srv.get("country") for srv in servers if srv.get("country")}
@@ -101,8 +140,8 @@ class ServerManager:
 
     def list_cities(self, provider: str, country: str) -> list[str]:
         """Return available cities for PROVIDER in COUNTRY."""
-
-        data = self.data or self.update_servers()
+        self._ensure_loaded()
+        data = self.data or {}
         prov = data.get(provider, {})
         servers = prov.get("servers", [])
         cities = {
@@ -116,8 +155,8 @@ class ServerManager:
         self, provider: str, location: str
     ) -> tuple[str | None, str | None]:
         """Split LOCATION into city and/or country components."""
-
-        data = self.data or self.update_servers()
+        self._ensure_loaded()
+        data = self.data or {}
         prov = data.get(provider, {})
         servers = prov.get("servers", [])
         loc = location.strip()
@@ -134,7 +173,8 @@ class ServerManager:
 
     def validate_location(self, provider: str, location: str) -> bool:
         """Return ``True`` if LOCATION exists for PROVIDER."""
-        data = self.data or self.update_servers()
+        self._ensure_loaded()
+        data = self.data or {}
         prov = data.get(provider, {})
         servers = prov.get("servers", [])
         if "," in location:
