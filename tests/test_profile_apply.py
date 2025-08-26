@@ -32,7 +32,15 @@ def test_profile_apply(tmp_path):
         manager = ComposeManager.from_ctx(ctx)
         profiles = {p.name for p in manager.list_profiles()}
         assert "test" in profiles
-        profile_apply(ctx, "test", "vpn3", port=7777, control_port=0)
+        profile_apply(
+            ctx,
+            "test",
+            "vpn3",
+            port=7777,
+            control_port=0,
+            httpproxy_user=None,
+            httpproxy_password=None,
+        )
     manager = ComposeManager(compose_path)
     svc = manager.get_service("vpn3")
     assert svc.port == 7777
