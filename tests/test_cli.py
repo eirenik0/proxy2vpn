@@ -6,7 +6,9 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from typer.testing import CliRunner
 
-from proxy2vpn import cli, diagnostics, docker_ops
+from proxy2vpn.cli.main import app
+from proxy2vpn.core.services import diagnostics
+from proxy2vpn.adapters import docker_ops
 
 
 def test_system_diagnose_specific_container(monkeypatch):
@@ -27,6 +29,6 @@ def test_system_diagnose_specific_container(monkeypatch):
         diagnostics.DiagnosticAnalyzer, "health_score", lambda self, results: 100
     )
 
-    result = runner.invoke(cli.app, ["system", "diagnose", "vpn1"])
+    result = runner.invoke(app, ["system", "diagnose", "vpn1"])
     assert result.exit_code == 0
     assert "vpn1: status=running health=100" in result.stdout

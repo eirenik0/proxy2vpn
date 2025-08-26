@@ -4,8 +4,13 @@ import sys
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn import control_client
-
+from proxy2vpn.adapters.http_client import (
+    GluetunControlClient,
+    OpenVPNResponse,
+    IPResponse,
+    OpenVPNStatusResponse,
+    StatusResponse,
+)
 
 BASE_URL = "http://localhost:8000"
 
@@ -20,11 +25,12 @@ def test_get_status_calls_correct_url(monkeypatch):
         called["path"] = path
         return {"status": "ok"}
 
-    monkeypatch.setattr(control_client.GluetunControlClient, "request", fake_request)
-    result = asyncio.run(control_client.get_status(BASE_URL))
-    assert result == {"status": "ok"}
+    client = GluetunControlClient(BASE_URL)
+    monkeypatch.setattr(GluetunControlClient, "request", fake_request)
+    result = asyncio.run(client.status())
+    assert result == StatusResponse(status="ok")
     assert called["method"] == "GET"
-    assert called["path"] == control_client.GluetunControlClient.ENDPOINTS["status"]
+    assert called["path"] == GluetunControlClient.ENDPOINTS["status"]
 
 
 def test_set_openvpn_status_posts_payload(monkeypatch):
@@ -38,11 +44,12 @@ def test_set_openvpn_status_posts_payload(monkeypatch):
         called["json"] = kwargs.get("json")
         return {"status": kwargs["json"]["status"]}
 
-    monkeypatch.setattr(control_client.GluetunControlClient, "request", fake_request)
-    result = asyncio.run(control_client.set_openvpn_status(BASE_URL, True))
-    assert result == {"status": True}
+    client = GluetunControlClient(BASE_URL)
+    monkeypatch.setattr(GluetunControlClient, "request", fake_request)
+    result = asyncio.run(client.set_openvpn(True))
+    assert result == OpenVPNResponse(status=True)
     assert called["method"] == "POST"
-    assert called["path"] == control_client.GluetunControlClient.ENDPOINTS["openvpn"]
+    assert called["path"] == GluetunControlClient.ENDPOINTS["openvpn"]
     assert called["json"] == {"status": True}
 
 
@@ -55,10 +62,11 @@ def test_get_public_ip_returns_ip(monkeypatch):
         called["path"] = path
         return {"ip": "1.2.3.4"}
 
-    monkeypatch.setattr(control_client.GluetunControlClient, "request", fake_request)
-    ip = asyncio.run(control_client.get_public_ip(BASE_URL))
-    assert ip == "1.2.3.4"
-    assert called["path"] == control_client.GluetunControlClient.ENDPOINTS["ip"]
+    client = GluetunControlClient(BASE_URL)
+    monkeypatch.setattr(GluetunControlClient, "request", fake_request)
+    ip = asyncio.run(client.public_ip())
+    assert ip == IPResponse("1.2.3.4")
+    assert called["path"] == GluetunControlClient.ENDPOINTS["ip"]
 
 
 def test_restart_tunnel_puts_status(monkeypatch):
@@ -72,12 +80,10 @@ def test_restart_tunnel_puts_status(monkeypatch):
         called["json"] = kwargs.get("json")
         return {"status": "restarted"}
 
-    monkeypatch.setattr(control_client.GluetunControlClient, "request", fake_request)
-    result = asyncio.run(control_client.restart_tunnel(BASE_URL))
-    assert result == {"status": "restarted"}
+    client = GluetunControlClient(BASE_URL)
+    monkeypatch.setattr(GluetunControlClient, "request", fake_request)
+    result = asyncio.run(client.restart_tunnel())
+    assert result == OpenVPNStatusResponse(status="restarted")
     assert called["method"] == "PUT"
-    assert (
-        called["path"]
-        == control_client.GluetunControlClient.ENDPOINTS["openvpn_status"]
-    )
+    assert called["path"] == GluetunControlClient.ENDPOINTS["openvpn_status"]
     assert called["json"] == {"status": "restarted"}

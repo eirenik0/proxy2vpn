@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from proxy2vpn.logging_utils import configure_logging, get_logger
+from proxy2vpn.adapters.logging_utils import configure_logging, get_logger
 
 
 def test_configure_logging_writes_to_file(tmp_path: Path) -> None:

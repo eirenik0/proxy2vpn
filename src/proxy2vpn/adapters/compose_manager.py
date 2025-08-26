@@ -1,18 +1,17 @@
-from __future__ import annotations
-
-from pathlib import Path
-from typing import Any
 import os
 import shutil
+import typer
 
+from pathlib import Path
+from typing import Any, Self
 from filelock import FileLock
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap, merge_attrib
-from ruamel.yaml.mergevalue import MergeValue
+from ruamel.yaml.comments import CommentedMap
 
-from .models import Profile, VPNService
+from proxy2vpn.core.models import Profile, VPNService
+from proxy2vpn.core import config
 from .compose_validator import validate_compose
-from . import config
+
 
 # Minimal compose template used when initializing a new project
 INITIAL_COMPOSE_TEMPLATE = """\
@@ -36,11 +35,17 @@ class ComposeManager:
         self.lock = FileLock(str(compose_path) + ".lock")
         self.data: CommentedMap = self._load()
 
+    @classmethod
+    def from_ctx(cls, ctx: typer.Context) -> Self:
+        compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+        return cls(compose_path=compose_file)
+
     def _load(self) -> CommentedMap:
         if not self.compose_path.exists():
             raise FileNotFoundError(
                 f"compose file '{self.compose_path}' not found. Run 'proxy2vpn system init' to create it."
             )
+
         backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
         with self.lock:
             try:
@@ -48,18 +53,22 @@ class ComposeManager:
                     data = self.yaml.load(f)
                     if not isinstance(data, dict):
                         raise ValueError("compose file does not contain a mapping")
-                    # Ensure we have a CommentedMap for proper YAML manipulation
                     if not isinstance(data, CommentedMap):
                         data = CommentedMap(data)
-                # basic validation: ensure YAML structure can be parsed
+
                 validate_compose(self.compose_path)
                 return data
             except Exception:
+                # Try to recover from backup if available
                 if backup_path.exists():
                     with backup_path.open("r", encoding="utf-8") as f:
                         data = self.yaml.load(f)
                     shutil.copy2(backup_path, self.compose_path)
-                    return data
+                    return (
+                        CommentedMap(data)
+                        if not isinstance(data, CommentedMap)
+                        else data
+                    )
                 raise
 
     @staticmethod
@@ -100,17 +109,28 @@ class ComposeManager:
         services = self.data.setdefault("services", {})
         if service.name in services:
             raise ValueError(f"Service '{service.name}' already exists")
+
+        # Simple approach: merge profile and service config directly
         profile_key = f"x-vpn-base-{service.profile}"
-        profile_map = self.data.get(profile_key)
-        if profile_map is None:
+        if profile_key not in self.data:
             raise KeyError(f"Profile '{service.profile}' not found")
-        svc_map = CommentedMap(service.to_compose_service())
-        merge_val = MergeValue()
-        merge_val.value = [profile_map]
-        merge_val.merge_pos = 0
-        merge_val.sequence = None
-        setattr(svc_map, merge_attrib, merge_val)
-        services[service.name] = svc_map
+
+        profile_map = self.data[profile_key]
+        # Build minimal service config and merge with profile via YAML merge key
+        service_config = CommentedMap(service.to_compose_service())
+        merged_config = CommentedMap()
+        # Ensure profile has expected anchor for a nice alias emission
+        expected_anchor = f"vpn-base-{service.profile}"
+        try:
+            profile_map.yaml_set_anchor(expected_anchor, always_dump=True)
+        except Exception:
+            pass
+        # Use explicit merge key to ensure broad ruamel.yaml compatibility
+        merged_config["<<"] = profile_map
+        # Then apply/override service-specific keys
+        merged_config.update(service_config)
+
+        services[service.name] = merged_config
         self.save()
 
     def remove_service(self, name: str) -> None:
@@ -126,20 +146,22 @@ class ComposeManager:
         if service.name not in services:
             raise KeyError(f"Service '{service.name}' not found")
 
-        # Get the profile for merging
+        # Rebuild service entry using YAML merge with profile
         profile_key = f"x-vpn-base-{service.profile}"
-        profile_map = self.data.get(profile_key)
-        if profile_map is None:
+        if profile_key not in self.data:
             raise KeyError(f"Profile '{service.profile}' not found")
 
-        # Update service configuration
-        svc_map = CommentedMap(service.to_compose_service())
-        merge_val = MergeValue()
-        merge_val.value = [profile_map]
-        merge_val.merge_pos = 0
-        merge_val.sequence = None
-        setattr(svc_map, merge_attrib, merge_val)  # YAML merge
-        services[service.name] = svc_map
+        profile_map = self.data[profile_key]
+        expected_anchor = f"vpn-base-{service.profile}"
+        try:
+            profile_map.yaml_set_anchor(expected_anchor, always_dump=True)
+        except Exception:
+            pass
+        merged_config = CommentedMap()
+        merged_config["<<"] = profile_map
+        merged_config.update(CommentedMap(service.to_compose_service()))
+
+        services[service.name] = merged_config
         self.save()
 
     # ------------------------------------------------------------------
@@ -164,13 +186,12 @@ class ComposeManager:
         key = f"x-vpn-base-{profile.name}"
         if key in self.data:
             raise ValueError(f"Profile '{profile.name}' already exists")
+
+        # Simplified: no complex anchoring, just store the data
         anchor_map = CommentedMap(profile.to_anchor())
+        # Ensure the expected anchor so validators and merges work nicely
         anchor_map.yaml_set_anchor(f"vpn-base-{profile.name}", always_dump=True)
-        if "services" in self.data:
-            idx = list(self.data.keys()).index("services")
-            self.data.insert(idx, key, anchor_map)
-        else:
-            self.data[key] = anchor_map
+        self.data[key] = anchor_map
         self.save()
 
     def remove_profile(self, name: str) -> None:
@@ -192,7 +213,7 @@ class ComposeManager:
         the first free port is returned.
         """
 
-        port = start or 20000
+        port = start or config.DEFAULT_PORT_START
         used = {svc.port for svc in self.list_services()}
         while port in used:
             port += 1
@@ -215,19 +236,11 @@ class ComposeManager:
         backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
         tmp_path = self.compose_path.with_suffix(self.compose_path.suffix + ".tmp")
         with self.lock:
-            try:
-                if self.compose_path.exists():
-                    shutil.copy2(self.compose_path, backup_path)
-                with tmp_path.open("w", encoding="utf-8") as f:
-                    self.yaml.dump(self.data, f)
-                os.replace(tmp_path, self.compose_path)
-            except Exception:
-                if backup_path.exists():
-                    shutil.copy2(backup_path, self.compose_path)
-                raise
-            finally:
-                if tmp_path.exists():
-                    try:
-                        tmp_path.unlink()
-                    except FileNotFoundError:
-                        pass
+            # Create backup before saving
+            if self.compose_path.exists():
+                shutil.copy2(self.compose_path, backup_path)
+
+            # Atomic write: write to temp file, then replace
+            with tmp_path.open("w", encoding="utf-8") as f:
+                self.yaml.dump(self.data, f)
+            os.replace(tmp_path, self.compose_path)

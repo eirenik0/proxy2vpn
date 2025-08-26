@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import typer
 
-from proxy2vpn.validators import sanitize_name, sanitize_path, validate_port
+from proxy2vpn.adapters.validators import sanitize_name, sanitize_path, validate_port
 
 
 def test_validate_port_bounds():

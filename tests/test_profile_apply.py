@@ -3,8 +3,9 @@ from contextlib import contextmanager
 
 import typer
 
-from proxy2vpn.compose_manager import ComposeManager
-from proxy2vpn import cli
+from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.cli.main import app
+from proxy2vpn.cli.commands.profile import apply as profile_apply
 
 
 def _copy_compose(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -19,7 +20,7 @@ def _copy_compose(tmp_path: pathlib.Path) -> pathlib.Path:
 
 @contextmanager
 def _cli_ctx(compose_path: pathlib.Path):
-    command = typer.main.get_command(cli.app)
+    command = typer.main.get_command(app)
     ctx = typer.Context(command, obj={"compose_file": compose_path})
     with ctx:
         yield ctx
@@ -28,10 +29,10 @@ def _cli_ctx(compose_path: pathlib.Path):
 def test_profile_apply(tmp_path):
     compose_path = _copy_compose(tmp_path)
     with _cli_ctx(compose_path) as ctx:
-        manager = ComposeManager(compose_path)
+        manager = ComposeManager.from_ctx(ctx)
         profiles = {p.name for p in manager.list_profiles()}
         assert "test" in profiles
-        cli.profile_apply(ctx, "test", "vpn3", port=7777, control_port=0)
+        profile_apply(ctx, "test", "vpn3", port=7777, control_port=0)
     manager = ComposeManager(compose_path)
     svc = manager.get_service("vpn3")
     assert svc.port == 7777

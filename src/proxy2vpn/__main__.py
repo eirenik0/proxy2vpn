@@ -1,6 +1,6 @@
 """Module entry point for proxy2vpn CLI."""
 
-from .cli import app
+from .cli.main import app
 
 
 def main() -> None:

@@ -2,14 +2,14 @@ import asyncio
 import pytest
 from pathlib import Path
 
-from proxy2vpn.fleet_manager import (
+from proxy2vpn.adapters.fleet_manager import (
     DeploymentPlan,
     FleetConfig,
     FleetManager,
     ServicePlan,
 )
-from proxy2vpn.compose_manager import ComposeManager
-from proxy2vpn.models import Profile, VPNService
+from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.core.models import Profile, VPNService
 
 
 @pytest.fixture
@@ -289,7 +289,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
     manager.add_profile(Profile(name="acc1", env_file=str(env1)))
     manager.add_profile(Profile(name="acc2", env_file=str(env2)))
 
-    svc1 = VPNService(
+    svc1 = VPNService.create(
         name="prov-a-city1",
         port=20000,
         control_port=31000,
@@ -310,7 +310,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
             "vpn.location": "city1",
         },
     )
-    svc2 = VPNService(
+    svc2 = VPNService.create(
         name="prov-a-city2",
         port=20001,
         control_port=31001,
@@ -331,7 +331,7 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
             "vpn.location": "city2",
         },
     )
-    svc3 = VPNService(
+    svc3 = VPNService.create(
         name="prov-b-city3",
         port=20002,
         control_port=31002,
@@ -401,7 +401,7 @@ def test_start_services_sequential_uses_helper(monkeypatch, fleet_manager):
 
 
 def test_get_service_status_counts(monkeypatch):
-    from proxy2vpn.docker_ops import get_service_status_counts
+    from proxy2vpn.adapters.docker_ops import get_service_status_counts
 
     class FakeContainer:
         def __init__(self, name, status):

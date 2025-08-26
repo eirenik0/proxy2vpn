@@ -5,8 +5,8 @@ import pytest
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn.compose_manager import ComposeManager
-from proxy2vpn.models import Profile, VPNService
+from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.core.models import Profile, VPNService
 from proxy2vpn import docker_ops, monitoring
 
 
@@ -30,7 +30,7 @@ def test_end_to_end_workflow(tmp_path):
         name="test", env_file=str(env_file), image="alpine", cap_add=[], devices=[]
     )
     manager.add_profile(profile)
-    service = VPNService(
+    service = VPNService.create(
         name="vpn1",
         port=12346,
         control_port=30000,

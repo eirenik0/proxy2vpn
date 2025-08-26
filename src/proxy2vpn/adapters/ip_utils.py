@@ -1,7 +1,5 @@
 """Utilities for retrieving the public IP address."""
 
-from __future__ import annotations
-
 import asyncio
 from typing import Mapping
 

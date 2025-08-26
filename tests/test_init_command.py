@@ -6,8 +6,8 @@ import sys
 from ruamel.yaml import YAML
 from types import SimpleNamespace
 
-from proxy2vpn.cli import system_init
-from proxy2vpn.server_manager import ServerManager
+from proxy2vpn.cli.commands.system import init as system_init
+from proxy2vpn.adapters.server_manager import ServerManager
 
 
 def _run_proxy2vpn(args, cwd):

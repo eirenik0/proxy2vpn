@@ -3,15 +3,13 @@
 import asyncio
 from dataclasses import dataclass, field
 
-from rich.console import Console
-
 from .compose_manager import ComposeManager
+from .display_utils import console
 from .docker_ops import ensure_network, remove_container, stop_container
 from .logging_utils import get_logger
-from .models import VPNService
+from proxy2vpn.core.models import VPNService
 from .server_manager import ServerManager
 
-console = Console()
 logger = get_logger(__name__)
 
 
@@ -125,7 +123,7 @@ class FleetManager:
     """Manages bulk VPN deployments across cities and profiles"""
 
     def __init__(self, compose_file_path=None):
-        from . import config
+        from proxy2vpn.core import config
 
         self.server_manager = ServerManager()
         compose_path = compose_file_path or config.COMPOSE_FILE
@@ -340,7 +338,7 @@ class FleetManager:
         else:
             env["SERVER_CITIES"] = service_plan.location
 
-        return VPNService(
+        return VPNService.create(
             name=service_plan.name,
             port=service_plan.port,
             control_port=service_plan.control_port,

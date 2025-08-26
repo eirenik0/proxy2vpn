@@ -3,7 +3,8 @@ from dataclasses import dataclass
 
 from typer.testing import CliRunner
 
-from proxy2vpn import cli
+from proxy2vpn.cli.main import app
+from proxy2vpn.adapters import http_client
 
 
 COMPOSE_FILE = pathlib.Path(__file__).with_name("test_compose.yml")
@@ -53,10 +54,10 @@ def test_vpn_status_uses_localhost(monkeypatch):
         called["base_url"] = base_url
         return DummyClient(base_url)
 
-    monkeypatch.setattr(cli, "GluetunControlClient", fake_client)
+    monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
 
     result = runner.invoke(
-        cli.app, ["--compose-file", str(COMPOSE_FILE), "vpn", "status", "testvpn1"]
+        app, ["--compose-file", str(COMPOSE_FILE), "vpn", "status", "testvpn1"]
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
@@ -70,10 +71,10 @@ def test_vpn_public_ip_uses_localhost(monkeypatch):
         called["base_url"] = base_url
         return DummyClient(base_url)
 
-    monkeypatch.setattr(cli, "GluetunControlClient", fake_client)
+    monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
 
     result = runner.invoke(
-        cli.app,
+        app,
         ["--compose-file", str(COMPOSE_FILE), "vpn", "public-ip", "testvpn1"],
     )
     assert result.exit_code == 0
@@ -88,10 +89,10 @@ def test_vpn_restart_tunnel_uses_localhost(monkeypatch):
         called["base_url"] = base_url
         return DummyClient(base_url)
 
-    monkeypatch.setattr(cli, "GluetunControlClient", fake_client)
+    monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
 
     result = runner.invoke(
-        cli.app,
+        app,
         ["--compose-file", str(COMPOSE_FILE), "vpn", "restart-tunnel", "testvpn1"],
     )
     assert result.exit_code == 0

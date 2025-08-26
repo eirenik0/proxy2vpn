@@ -6,13 +6,11 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from rich.console import Console
-
+from .display_utils import console
 from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError
 from .logging_utils import get_logger
-from .models import VPNService
+from proxy2vpn.core.models import VPNService
 
-console = Console()
 logger = get_logger(__name__)
 
 

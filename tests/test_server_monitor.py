@@ -1,6 +1,7 @@
 import asyncio
 
-from proxy2vpn import server_monitor, models, docker_ops
+from proxy2vpn import server_monitor, docker_ops
+from proxy2vpn.core import models
 
 
 class DummyContainer:
@@ -12,7 +13,7 @@ class DummyContainer:
 
 
 def test_check_service_health_uses_authenticated_proxy(monkeypatch):
-    service = models.VPNService(
+    service = models.VPNService.create(
         name="vpn-test",
         port=8080,
         control_port=30000,

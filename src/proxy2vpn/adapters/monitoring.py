@@ -1,7 +1,5 @@
 """Monitoring utilities for proxy2vpn."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import psutil
