@@ -17,42 +17,46 @@ def test_vpn_export_proxies(monkeypatch, tmp_path):
     async def fake_fetch_ip_async():
         return "203.0.113.1"  # Host machine's public IP
 
-    # Mock get_vpn_containers to return fake containers
-    def fake_get_vpn_containers(all=True):
-        container = SimpleNamespace()
-        container.attrs = {
-            "Config": {"Env": ["HTTPPROXY_USER=user", "HTTPPROXY_PASSWORD=pass"]},
-            "State": {},
-        }
-        container.labels = {"vpn.port": "20001", "vpn.location": "London"}
-        container.status = "running"
-        return [container]
+    # Mock ComposeManager.from_ctx to return a manager with one service
+    class FakeService:
+        name = "svc1"
+        port = 20001
+        location = "London"
+        provider = "expressvpn"
+        environment = {"HTTPPROXY_USER": "user", "HTTPPROXY_PASSWORD": "pass"}
+        credentials = None
+
+    class FakeManager:
+        def list_services(self):
+            return [FakeService()]
+
+    from proxy2vpn.adapters import compose_manager as compose_manager_mod
+
+    def fake_from_ctx(ctx):
+        return FakeManager()
+
+    # Mock container resolution by service name
+    def fake_get_container_by_service_name(name: str):
+        return SimpleNamespace(status="running")
 
     monkeypatch.setattr(ip_utils, "fetch_ip_async", fake_fetch_ip_async)
-    monkeypatch.setattr(docker_ops, "get_vpn_containers", fake_get_vpn_containers)
+    monkeypatch.setattr(
+        compose_manager_mod.ComposeManager,
+        "from_ctx",
+        classmethod(lambda cls, ctx: fake_from_ctx(ctx)),
+    )
+    monkeypatch.setattr(
+        docker_ops, "get_container_by_service_name", fake_get_container_by_service_name
+    )
 
     out = tmp_path / "proxies.csv"
     result = runner.invoke(app, ["vpn", "export-proxies", "--output", str(out)])
     assert result.exit_code == 0
     lines = out.read_text().splitlines()
-    assert lines[0] == "host,port,username,password,location,status"
-    assert lines[1] == "203.0.113.1,20001,user,pass,London,active"
+    assert lines[0] == "host,port,username,password,location,provider,status"
+    assert lines[1] == "203.0.113.1,20001,user,pass,London,expressvpn,active"
 
     # Test with --no-auth flag
-    def fake_get_vpn_containers_no_auth(all=True):
-        container = SimpleNamespace()
-        container.attrs = {
-            "Config": {"Env": ["HTTPPROXY_USER=user", "HTTPPROXY_PASSWORD=pass"]},
-            "State": {},
-        }
-        container.labels = {"vpn.port": "20001", "vpn.location": "London"}
-        container.status = "running"
-        return [container]
-
-    monkeypatch.setattr(
-        docker_ops, "get_vpn_containers", fake_get_vpn_containers_no_auth
-    )
-
     out_no = tmp_path / "proxies_no.csv"
     result2 = runner.invoke(
         app,
@@ -64,3 +68,6 @@ def test_vpn_export_proxies(monkeypatch, tmp_path):
     assert fields[1] == "20001"  # port
     assert fields[2] == ""  # username (empty due to --no-auth)
     assert fields[3] == ""  # password (empty due to --no-auth)
+    assert fields[4] == "London"  # location
+    assert fields[5] == "expressvpn"  # provider
+    assert fields[6] == "active"  # status

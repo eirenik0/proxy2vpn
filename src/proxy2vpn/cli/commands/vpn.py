@@ -516,11 +516,81 @@ async def export_proxies(
         False, "--no-auth", help="Exclude proxy authentication credentials"
     ),
 ):
-    """Export running VPN proxies to a CSV file."""
+    """Export VPN proxies defined in the compose file to a CSV file.
 
-    from proxy2vpn.adapters.docker_ops import collect_proxy_info
+    This relies on the compose structure and exports only services defined in
+    the project's compose.yml, instead of scanning all Docker containers with
+    a VPN label. Adds the `provider` column.
+    """
 
-    proxies = await collect_proxy_info(include_credentials=not no_auth)
+    from proxy2vpn.adapters import ip_utils
+    from proxy2vpn.adapters import docker_ops
+
+    manager = ComposeManager.from_ctx(ctx)
+    services = manager.list_services()
+
+    # Fetch host public IP once (used for running services)
+    try:
+        host_ip = await ip_utils.fetch_ip_async()
+    except Exception:
+        host_ip = ""
+
+    rows: list[dict[str, str]] = []
+    for svc in services:
+        # Resolve runtime container to determine status
+        container = docker_ops.get_container_by_service_name(svc.name)
+        status = (
+            "running"
+            if (container and getattr(container, "status", "") == "running")
+            else "stopped"
+        )
+        host = host_ip if status == "running" else ""
+
+        # Build effective environment: start from profile env file, overlay service env, then apply credential overrides
+        effective_env: dict[str, str] = {}
+        try:
+            profile = manager.get_profile(svc.profile)
+            # Use internal loader for env files (consistent with validators)
+            from proxy2vpn.adapters.docker_ops import _load_env_file as _load_env
+
+            profile_env = (
+                _load_env(str(profile._resolve_env_path()))
+                if hasattr(profile, "_resolve_env_path")
+                else {}
+            )
+            if isinstance(profile_env, dict):
+                effective_env.update({k: str(v) for k, v in profile_env.items()})
+        except Exception:
+            # If profile/env file not resolvable, continue with empty base
+            pass
+        # Overlay service-specific environment from compose
+        effective_env.update({k: str(v) for k, v in (svc.environment or {}).items()})
+
+        # Apply service credential overrides (labels) to effective env
+        if svc.credentials:
+            if svc.credentials.httpproxy_user:
+                effective_env["HTTPPROXY_USER"] = svc.credentials.httpproxy_user
+            if svc.credentials.httpproxy_password:
+                effective_env["HTTPPROXY_PASSWORD"] = svc.credentials.httpproxy_password
+
+        # Extract credentials (or blank when --no-auth)
+        username = ""
+        password = ""
+        if not no_auth:
+            username = effective_env.get("HTTPPROXY_USER", "") or ""
+            password = effective_env.get("HTTPPROXY_PASSWORD", "") or ""
+
+        rows.append(
+            {
+                "host": host,
+                "port": str(svc.port),
+                "username": username,
+                "password": password,
+                "location": svc.location or "",
+                "provider": svc.provider or "",
+                "status": "active" if status == "running" else "stopped",
+            }
+        )
 
     with output.open("w", newline="") as fh:
         writer = csv.DictWriter(
@@ -531,15 +601,14 @@ async def export_proxies(
                 "username",
                 "password",
                 "location",
+                "provider",
                 "status",
             ],
         )
         writer.writeheader()
-        for row in proxies:
+        for row in rows:
             writer.writerow(row)
-    console.print(
-        f"[green]\u2713[/green] Exported {len(proxies)} proxies to '{output}'."
-    )
+    console.print(f"[green]\u2713[/green] Exported {len(rows)} proxies to '{output}'.")
 
 
 @app.command("status")
