@@ -69,7 +69,7 @@ EOF
 
 # 3. Register the profile and create a VPN service
 proxy2vpn profile create production profiles/production.env
-proxy2vpn vpn create london-proxy production --port 8888 --provider protonvpn --location "United Kingdom"
+proxy2vpn vpn create london-proxy production --port 8888 --location "United Kingdom"
 
 # 4. Start and test your VPN
 proxy2vpn vpn start london-proxy
@@ -211,8 +211,8 @@ proxy2vpn fleet deploy --parallel
 ### Geo-location Testing
 ```bash
 # Test your app from different countries
-proxy2vpn vpn create us-east production --provider protonvpn --location "New York"
-proxy2vpn vpn create eu-west production --provider protonvpn --location "Amsterdam"
+proxy2vpn vpn create us-east production --location "New York"
+proxy2vpn vpn create eu-west production --location "Amsterdam"
 proxy2vpn vpn start --all
 ```
 
@@ -246,7 +246,7 @@ proxy2vpn vpn create dev-proxy dev-account --port 8888 --location "Netherlands"
 - `proxy2vpn profile apply PROFILE SERVICE [--port PORT]`
 
 ### VPN services
-- `proxy2vpn vpn create NAME PROFILE [--port PORT] [--provider PROVIDER] [--location LOCATION]`
+- `proxy2vpn vpn create NAME PROFILE [--port PORT] [--location LOCATION]`
 - `proxy2vpn vpn list [--diagnose] [--ips-only]`
 - `proxy2vpn vpn start [NAME | --all]`
 - `proxy2vpn vpn stop [NAME | --all]`
