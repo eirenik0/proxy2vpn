@@ -35,6 +35,17 @@ class VPNContainer(BaseModel):
         return value
 
 
+class ServiceCredentials(BaseModel):
+    """Service-specific credential overrides.
+
+    These credentials override the default profile credentials for HTTP proxy
+    authentication, allowing unique passwords per service.
+    """
+
+    httpproxy_user: str | None = None
+    httpproxy_password: str | None = None
+
+
 class VPNConfig(BaseModel):
     """VPN-specific configuration."""
 
@@ -50,6 +61,7 @@ class VPNService(BaseModel):
 
     container: VPNContainer
     config: VPNConfig
+    credentials: ServiceCredentials | None = None
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -96,6 +108,7 @@ class VPNService(BaseModel):
         location: str,
         environment: dict[str, str],
         labels: dict[str, str],
+        credentials: ServiceCredentials | None = None,
     ) -> "VPNService":
         """Backward compatible constructor for tests."""
 
@@ -107,7 +120,7 @@ class VPNService(BaseModel):
             environment=environment,
             labels=labels,
         )
-        return cls(container=container, config=config)
+        return cls(container=container, config=config, credentials=credentials)
 
     @classmethod
     def from_compose_service(cls, name: str, service_def: dict) -> "VPNService":
@@ -137,10 +150,58 @@ class VPNService(BaseModel):
             environment=env_dict,
             labels=labels,
         )
-        return cls(container=container, config=config)
+        # Parse service-specific credentials from labels
+        credentials = None
+        httpproxy_user = labels.get("vpn.httpproxy_user")
+        httpproxy_password = labels.get("vpn.httpproxy_password")
+
+        if httpproxy_user or httpproxy_password:
+            credentials = ServiceCredentials(
+                httpproxy_user=httpproxy_user,
+                httpproxy_password=httpproxy_password,
+            )
+
+        return cls(container=container, config=config, credentials=credentials)
+
+    def validate_httpproxy_config(self) -> list[str]:
+        """Validate HTTP proxy configuration for this service.
+
+        Returns list of validation errors. Empty list means valid.
+        """
+        errors = []
+
+        # Check if HTTP proxy is enabled in environment or via credentials
+        env_dict = dict(self.config.environment)
+
+        # Apply credential overrides to get effective configuration
+        if self.credentials:
+            if self.credentials.httpproxy_user:
+                env_dict["HTTPPROXY_USER"] = self.credentials.httpproxy_user
+            if self.credentials.httpproxy_password:
+                env_dict["HTTPPROXY_PASSWORD"] = self.credentials.httpproxy_password
+
+        httpproxy_enabled = env_dict.get("HTTPPROXY", "").lower() in ("on", "true", "1")
+
+        if httpproxy_enabled:
+            if not env_dict.get("HTTPPROXY_USER"):
+                errors.append("HTTPPROXY_USER is required when HTTPPROXY=on")
+            if not env_dict.get("HTTPPROXY_PASSWORD"):
+                errors.append("HTTPPROXY_PASSWORD is required when HTTPPROXY=on")
+
+        return errors
 
     def to_compose_service(self) -> dict:
-        env_list = [f"{k}={v}" for k, v in self.config.environment.items()]
+        # Start with base environment
+        env_dict = dict(self.config.environment)
+
+        # Override with service-specific credentials if provided
+        if self.credentials:
+            if self.credentials.httpproxy_user:
+                env_dict["HTTPPROXY_USER"] = self.credentials.httpproxy_user
+            if self.credentials.httpproxy_password:
+                env_dict["HTTPPROXY_PASSWORD"] = self.credentials.httpproxy_password
+
+        env_list = [f"{k}={v}" for k, v in env_dict.items()]
         ports = [
             f"0.0.0.0:{self.container.proxy_port}:8888/tcp",
             f"127.0.0.1:{self.container.control_port}:8000/tcp",
@@ -148,6 +209,14 @@ class VPNService(BaseModel):
         labels = dict(self.config.labels)
         labels.setdefault("vpn.port", str(self.container.proxy_port))
         labels.setdefault("vpn.control_port", str(self.container.control_port))
+
+        # Store service credentials in labels for serialization
+        if self.credentials:
+            if self.credentials.httpproxy_user:
+                labels["vpn.httpproxy_user"] = self.credentials.httpproxy_user
+            if self.credentials.httpproxy_password:
+                labels["vpn.httpproxy_password"] = self.credentials.httpproxy_password
+
         return {
             "ports": ports,
             "environment": env_list,
