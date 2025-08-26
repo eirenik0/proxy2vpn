@@ -586,6 +586,54 @@ async def public_ip(
     console.print(ip.ip)
 
 
+@app.command("dns-status")
+@run_async
+async def dns_status(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show DNS service status for SERVICE."""
+
+    base_url = _service_control_base_url(ctx, service)
+    from proxy2vpn.adapters import http_client
+
+    async with http_client.GluetunControlClient(base_url) as client:
+        status = await client.dns_status()
+    console.print(status.status)
+
+
+@app.command("updater-status")
+@run_async
+async def updater_status(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show updater job status for SERVICE."""
+
+    base_url = _service_control_base_url(ctx, service)
+    from proxy2vpn.adapters import http_client
+
+    async with http_client.GluetunControlClient(base_url) as client:
+        status = await client.updater_status()
+    console.print(status.status)
+
+
+@app.command("port-forwarded")
+@run_async
+async def port_forwarded(
+    ctx: typer.Context,
+    service: str = typer.Argument(..., callback=sanitize_name),
+):
+    """Show port forwarded for SERVICE."""
+
+    base_url = _service_control_base_url(ctx, service)
+    from proxy2vpn.adapters import http_client
+
+    async with http_client.GluetunControlClient(base_url) as client:
+        pf = await client.port_forwarded()
+    console.print(str(pf.port))
+
+
 @app.command("restart-tunnel")
 @run_async
 async def restart_tunnel(

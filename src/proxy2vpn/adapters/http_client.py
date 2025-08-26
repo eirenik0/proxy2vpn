@@ -214,6 +214,27 @@ class OpenVPNStatusResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class DNSStatusResponse(BaseModel):
+    """Response payload for the ``/dns/status`` endpoint."""
+
+    status: str
+    model_config = ConfigDict(extra="ignore")
+
+
+class UpdaterStatusResponse(BaseModel):
+    """Response payload for the ``/updater/status`` endpoint."""
+
+    status: str
+    model_config = ConfigDict(extra="ignore")
+
+
+class PortForwardResponse(BaseModel):
+    """Response payload for the ``/openvpn/portforwarded`` endpoint."""
+
+    port: int
+    model_config = ConfigDict(extra="ignore")
+
+
 class GluetunControlClient(HTTPClient):
     """Client for interacting with Gluetun's control API."""
 
@@ -260,3 +281,15 @@ class GluetunControlClient(HTTPClient):
         payload = {"status": "restarted"}
         data = await self.request("PUT", self.ENDPOINTS["openvpn_status"], json=payload)
         return OpenVPNStatusResponse(**data)
+
+    async def dns_status(self) -> DNSStatusResponse:
+        data = await self.get(self.ENDPOINTS["dns_status"])
+        return DNSStatusResponse(**data)
+
+    async def updater_status(self) -> UpdaterStatusResponse:
+        data = await self.get(self.ENDPOINTS["updater_status"])
+        return UpdaterStatusResponse(**data)
+
+    async def port_forwarded(self) -> PortForwardResponse:
+        data = await self.get(self.ENDPOINTS["port_forward"])
+        return PortForwardResponse(**data)

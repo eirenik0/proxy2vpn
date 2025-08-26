@@ -14,7 +14,10 @@ from proxy2vpn.adapters import docker_ops
 def test_system_diagnose_specific_container(monkeypatch):
     runner = CliRunner()
 
-    container = SimpleNamespace(name="vpn1")
+    container = SimpleNamespace(
+        name="vpn1",
+        attrs={"NetworkSettings": {"Ports": {"8000/tcp": [{"HostPort": "30000"}]}}},
+    )
     monkeypatch.setattr(docker_ops, "get_vpn_containers", lambda all=True: [container])
     monkeypatch.setattr(
         docker_ops, "get_problematic_containers", lambda all=True: [container]
@@ -27,6 +30,9 @@ def test_system_diagnose_specific_container(monkeypatch):
     )
     monkeypatch.setattr(
         diagnostics.DiagnosticAnalyzer, "health_score", lambda self, results: 100
+    )
+    monkeypatch.setattr(
+        diagnostics.DiagnosticAnalyzer, "control_api_checks", lambda self, base_url: []
     )
 
     result = runner.invoke(app, ["system", "diagnose", "vpn1"])

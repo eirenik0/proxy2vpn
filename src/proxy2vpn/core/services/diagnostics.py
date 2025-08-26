@@ -129,6 +129,91 @@ class DiagnosticAnalyzer:
                 )
             ]
 
+    def control_api_checks(self, base_url: str) -> list[DiagnosticResult]:
+        """Query the control API for service health."""
+
+        import asyncio
+        from proxy2vpn.adapters.http_client import GluetunControlClient
+
+        async def _query() -> list[DiagnosticResult]:
+            results: list[DiagnosticResult] = []
+            async with GluetunControlClient(base_url) as client:
+                try:
+                    dns = await client.dns_status()
+                    ok = dns.status == "running"
+                    results.append(
+                        DiagnosticResult(
+                            check="dns_status",
+                            passed=ok,
+                            message=f"dns={dns.status}",
+                            recommendation="Start DNS service" if not ok else "",
+                        )
+                    )
+                except Exception:
+                    results.append(
+                        DiagnosticResult(
+                            check="dns_status",
+                            passed=False,
+                            message="dns status unavailable",
+                            recommendation="Control server not reachable",
+                        )
+                    )
+
+                try:
+                    upd = await client.updater_status()
+                    ok = upd.status in {"completed", "running"}
+                    results.append(
+                        DiagnosticResult(
+                            check="updater_status",
+                            passed=ok,
+                            message=f"updater={upd.status}",
+                            recommendation="Updater not running" if not ok else "",
+                        )
+                    )
+                except Exception:
+                    results.append(
+                        DiagnosticResult(
+                            check="updater_status",
+                            passed=False,
+                            message="updater status unavailable",
+                            recommendation="Control server not reachable",
+                        )
+                    )
+
+                try:
+                    pf = await client.port_forwarded()
+                    ok = pf.port > 0
+                    results.append(
+                        DiagnosticResult(
+                            check="port_forward",
+                            passed=ok,
+                            message=f"port={pf.port}",
+                            recommendation="No port forwarded" if not ok else "",
+                        )
+                    )
+                except Exception:
+                    results.append(
+                        DiagnosticResult(
+                            check="port_forward",
+                            passed=False,
+                            message="port forward unavailable",
+                            recommendation="Control server not reachable",
+                        )
+                    )
+            return results
+
+        try:
+            return asyncio.run(_query())
+        except Exception:
+            return [
+                DiagnosticResult(
+                    check="control_api",
+                    passed=False,
+                    message="control API check failed",
+                    recommendation="Ensure control server is accessible.",
+                )
+            ]
+
     def analyze(
         self, log_lines: Iterable[str], port: int | None = None
     ) -> list[DiagnosticResult]:

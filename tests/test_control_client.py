@@ -9,6 +9,9 @@ from proxy2vpn.adapters.http_client import (
     OpenVPNResponse,
     IPResponse,
     OpenVPNStatusResponse,
+    DNSStatusResponse,
+    UpdaterStatusResponse,
+    PortForwardResponse,
     StatusResponse,
 )
 
@@ -87,3 +90,51 @@ def test_restart_tunnel_puts_status(monkeypatch):
     assert called["method"] == "PUT"
     assert called["path"] == GluetunControlClient.ENDPOINTS["openvpn_status"]
     assert called["json"] == {"status": "restarted"}
+
+
+def test_dns_status_calls_correct_path(monkeypatch):
+    called: dict[str, object] = {}
+
+    async def fake_request(self, method, path, **kwargs):
+        called["method"] = method
+        called["path"] = path
+        return {"status": "running"}
+
+    client = GluetunControlClient(BASE_URL)
+    monkeypatch.setattr(GluetunControlClient, "request", fake_request)
+    result = asyncio.run(client.dns_status())
+    assert result == DNSStatusResponse(status="running")
+    assert called["method"] == "GET"
+    assert called["path"] == GluetunControlClient.ENDPOINTS["dns_status"]
+
+
+def test_updater_status_calls_correct_path(monkeypatch):
+    called: dict[str, object] = {}
+
+    async def fake_request(self, method, path, **kwargs):
+        called["method"] = method
+        called["path"] = path
+        return {"status": "completed"}
+
+    client = GluetunControlClient(BASE_URL)
+    monkeypatch.setattr(GluetunControlClient, "request", fake_request)
+    result = asyncio.run(client.updater_status())
+    assert result == UpdaterStatusResponse(status="completed")
+    assert called["method"] == "GET"
+    assert called["path"] == GluetunControlClient.ENDPOINTS["updater_status"]
+
+
+def test_port_forwarded_calls_correct_path(monkeypatch):
+    called: dict[str, object] = {}
+
+    async def fake_request(self, method, path, **kwargs):
+        called["method"] = method
+        called["path"] = path
+        return {"port": 8888}
+
+    client = GluetunControlClient(BASE_URL)
+    monkeypatch.setattr(GluetunControlClient, "request", fake_request)
+    result = asyncio.run(client.port_forwarded())
+    assert result == PortForwardResponse(port=8888)
+    assert called["method"] == "GET"
+    assert called["path"] == GluetunControlClient.ENDPOINTS["port_forward"]
