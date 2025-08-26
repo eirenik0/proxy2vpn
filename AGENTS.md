@@ -1,13 +1,15 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/proxy2vpn`: Typer-based CLI and core modules (`cli.py`, `server_manager.py`, `compose_manager.py`, `docker_ops.py`, `models.py`, `config.py`).
+- `src/proxy2vpn/cli`: Typer entrypoints, command groups, and CLI helpers.
+- `src/proxy2vpn/core`: Domain models, configuration, and internal services.
+- `src/proxy2vpn/adapters`: Compose, Docker, HTTP, server-list, and validation integrations.
 - `tests/`: Pytest suite (`test_*.py`) and sample compose file.
 - `news/`: Towncrier fragments for changelog entries.
 - `scripts/`: Release helpers (e.g., `bump_version.py`).
-- Root: `Makefile`, `pyproject.toml`, example compose files (`compose*.yml`), optional local `profiles/*.env` (gitignored).
-- `config.py` exports HTTP client defaults (`DEFAULT_TIMEOUT`, `MAX_RETRIES`, `VERIFY_SSL`) and `CONTROL_API_ENDPOINTS` for the
-  control API.
+- Root: `Makefile`, `pyproject.toml`, project docs, and generated local state such as `compose.yml` and `control-server-auth.toml`.
+- `src/proxy2vpn/core/config.py` exports HTTP client defaults (`DEFAULT_TIMEOUT`, `MAX_RETRIES`, `VERIFY_SSL`) and
+  `CONTROL_API_ENDPOINTS` for the control API.
 
 ## Build, Test, and Development Commands
 - Setup: `uv sync` or `pip install -e ".[dev]"`.

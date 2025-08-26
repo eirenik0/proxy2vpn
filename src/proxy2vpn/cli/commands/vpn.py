@@ -54,7 +54,7 @@ def _resolve_service_name(ctx: typer.Context, service: str | None) -> str:
     if not services:
         abort(
             "No VPN services found.",
-            "Create one with 'proxy2vpn vpn create <name> <profile>'.",
+            "Create one with 'proxy2vpn vpn create'.",
         )
     if len(services) == 1:
         return services[0].name
@@ -867,7 +867,6 @@ def restore(
     Strategy: restart container; if still unhealthy, recreate container. If recreation
     still results in poor health, suggest changing location (not automated yet).
     """
-    from proxy2vpn.adapters import compose_manager
     from proxy2vpn.adapters.docker_ops import (
         analyze_container_logs,
         restart_container,
@@ -876,8 +875,7 @@ def restore(
     )
     from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = compose_manager.ComposeManager(compose_file)
+    manager = ComposeManager.from_ctx(ctx)
 
     if not all and not name:
         abort("Specify a service NAME or use --all")

@@ -8,3 +8,7 @@ cache/
 *.lock
 dist/
 .envrc
+compose.yml
+compose.yml.bak
+control-server-auth.toml
+tmp_test_cli_create/

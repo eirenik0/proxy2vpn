@@ -2,14 +2,12 @@
 
 import json
 import logging
-from pathlib import Path
 
 import typer
 
 from proxy2vpn.core import config
 from proxy2vpn.cli.typer_ext import HelpfulTyper, run_async
 from proxy2vpn.adapters.compose_manager import ComposeManager
-from proxy2vpn.adapters.compose_validator import validate_compose
 from proxy2vpn.adapters.server_manager import ServerManager
 from proxy2vpn.adapters.display_utils import console
 from proxy2vpn.common import abort
@@ -30,7 +28,7 @@ async def init(
 ):
     """Generate an initial compose.yml file and bootstrap required config files."""
 
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    compose_file = (ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)
     overwrite = force
     # Track compose status and whether we should exit with error after doing other work
     compose_created = False
@@ -106,10 +104,10 @@ async def init(
 
 
 @app.command("validate")
-def validate(compose_file: Path = typer.Option(config.COMPOSE_FILE)):
+def validate(ctx: typer.Context):
     """Validate that the compose file is well formed."""
-
-    errors = validate_compose(compose_file)
+    compose_manager = ComposeManager.from_ctx(ctx)
+    errors = compose_manager.validate_compose_file()
     if errors:
         for err in errors:
             typer.echo(f"- {err}", err=True)

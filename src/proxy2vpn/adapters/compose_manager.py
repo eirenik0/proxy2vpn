@@ -11,6 +11,7 @@ from ruamel.yaml.comments import CommentedMap
 from proxy2vpn.core.models import Profile, VPNService
 from proxy2vpn.core import config
 from .compose_validator import validate_compose
+from .compose_utils import iter_port_mappings
 
 
 # Minimal compose template used when initializing a new project
@@ -85,6 +86,7 @@ class ComposeManager:
 
         yaml = YAML()
         data = yaml.load(INITIAL_COMPOSE_TEMPLATE)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as f:
             yaml.dump(data, f)
 
@@ -92,6 +94,10 @@ class ComposeManager:
     def config(self) -> dict[str, Any]:
         """Return global configuration stored under x-config."""
         return self.data.get("x-config", {})
+
+    def validate_compose_file(self) -> list[str]:
+        """Validate a docker compose file and return a list of errors."""
+        return validate_compose(self.compose_path)
 
     def list_services(self) -> list[VPNService]:
         services = self.data.get("services", {})
@@ -237,16 +243,46 @@ class ComposeManager:
     # Utility helpers
     # ------------------------------------------------------------------
 
+    def get_all_used_ports(self) -> set[int]:
+        """Get all ports currently in use by services."""
+        ports = set()
+        services = self.data.get("services", {})
+
+        for service_config in services.values():
+            # VPN services store ports in labels (more reliable)
+            labels = service_config.get("labels", {})
+            if labels.get("vpn.type") == "vpn":
+                for label_key in ["vpn.port", "vpn.control_port"]:
+                    port_str = labels.get(label_key)
+                    if port_str:
+                        try:
+                            ports.add(int(port_str))
+                        except ValueError:
+                            pass
+            else:
+                # Non-VPN services use standard port mappings
+                for host_port, _ in iter_port_mappings(service_config.get("ports")):
+                    ports.add(host_port)
+
+        return ports
+
+    def get_used_proxy_ports(self) -> set[int]:
+        """Get all proxy ports currently in use by services."""
+        return {svc.port for svc in self.list_services()}
+
+    def get_used_control_ports(self) -> set[int]:
+        """Get all control ports currently in use by services."""
+        return {svc.control_port for svc in self.list_services()}
+
     def next_available_port(self, start: int = 0) -> int:
-        """Find the next available host port starting from START.
+        """Find the next available proxy port starting from START.
 
         If START is 0 the search begins from 20000 which is the default
-        range used by proxy2vpn.  Existing service ports are inspected and
-        the first free port is returned.
+        range used by proxy2vpn.  Only proxy ports are considered.
         """
 
         port = start or config.DEFAULT_PORT_START
-        used = {svc.port for svc in self.list_services()}
+        used = self.get_used_proxy_ports()
         while port in used:
             port += 1
         return port
@@ -259,7 +295,7 @@ class ComposeManager:
         """
 
         port = start or config.DEFAULT_CONTROL_PORT_START
-        used = {svc.control_port for svc in self.list_services()}
+        used = self.get_used_control_ports()
         while port in used:
             port += 1
         return port

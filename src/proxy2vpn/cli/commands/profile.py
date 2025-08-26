@@ -120,7 +120,7 @@ def add(
     if not env_file.exists():
         abort(
             f"Environment file '{env_file}' not found",
-            "Create the file with 'proxy2vpn profile add' or manually",
+            "Create the file with 'proxy2vpn profile create' or manually",
         )
 
     # Validate profile has all required fields
@@ -152,9 +152,7 @@ def add(
 @app.command("list")
 def list_profiles(ctx: typer.Context):
     """List available profiles."""
-
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
+    manager = ComposeManager.from_ctx(ctx)
     profiles = manager.list_profiles()
     if not profiles:
         console.print("[yellow]⚠[/yellow] No profiles found.")
@@ -178,9 +176,7 @@ def remove(
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt"),
 ):
     """Remove a profile from the compose file."""
-
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
+    manager = ComposeManager.from_ctx(ctx)
     try:
         manager.get_profile(name)
     except KeyError:
@@ -198,8 +194,8 @@ def delete(
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt"),
 ):
     """Delete a profile's environment file."""
-
-    env_file_path = Path("profiles") / f"{name}.env"
+    compose_file: Path = (ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)
+    env_file_path = compose_file.parent / "profiles" / f"{name}.env"
     if not env_file_path.exists():
         abort(f"Environment file '{env_file_path}' not found")
     if not force:
@@ -226,9 +222,7 @@ def apply(
     ),
 ):
     """Create a VPN service from a profile."""
-
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = ComposeManager(compose_file)
+    manager = ComposeManager.from_ctx(ctx)
     try:
         manager.get_profile(profile)
     except KeyError:

@@ -108,6 +108,7 @@ def fleet_deploy(
     ),
 ):
     """Deploy VPN fleet from plan file"""
+    _ = ctx
 
     # Load deployment plan
     try:
@@ -200,25 +201,52 @@ def fleet_rotate(
 ):
     """Rotate VPN servers for better availability"""
 
-    fleet_manager = FleetManager()
-    http_client = HTTPClient(HTTPClientConfig(base_url=""))
-    server_monitor = ServerMonitor(fleet_manager, http_client=http_client)
+    from .fleet_state_manager import (
+        FleetStateManager,
+        OperationConfig,
+        RotationCriteria,
+    )
+
+    # Convert criteria string to enum
+    criteria_map = {
+        "random": RotationCriteria.RANDOM,
+        "performance": RotationCriteria.PERFORMANCE,
+        "load": RotationCriteria.LOAD,
+    }
+    criteria_enum = criteria_map.get(criteria, RotationCriteria.RANDOM)
+
+    # Create operation config
+    config = OperationConfig(
+        dry_run=dry_run,
+        criteria=criteria_enum,
+        countries=[country] if country else None,
+        provider=provider if provider != "protonvpn" else None,
+    )
+
+    async def run_rotation():
+        fleet_manager = FleetStateManager()
+        try:
+            result = await fleet_manager.rotate_servers(config)
+
+            if result.dry_run:
+                console.print("[yellow]🔍 Dry run complete - no changes made[/yellow]")
+            elif result.success:
+                console.print("[green]✅ Server rotation complete[/green]")
+                console.print(f"  • Services affected: {len(result.services_affected)}")
+                console.print(f"  • Execution time: {result.execution_time:.2f}s")
+            else:
+                console.print("[red]❌ Server rotation failed[/red]")
+                for error in result.errors:
+                    console.print(f"  • {error}")
+
+        finally:
+            await fleet_manager.close()
 
     try:
-        result = asyncio.run(server_monitor.rotate_failed_servers(dry_run=dry_run))
-
-        if result.dry_run:
-            console.print("[yellow]🔍 Dry run complete - no changes made[/yellow]")
-        else:
-            console.print("[green]✅ Server rotation complete[/green]")
-            console.print(f"  • Rotated: {result.rotated} services")
-            console.print(f"  • Failed: {result.failed} services")
-
+        asyncio.run(run_rotation())
     except Exception as e:
         console.print(f"[red]❌ Rotation failed: {e}[/red]")
         raise typer.Exit(1)
-    finally:
-        asyncio.run(http_client.close())
 
 
 def fleet_scale(
@@ -227,6 +255,7 @@ def fleet_scale(
     countries: str = typer.Option(None, help="Comma-separated countries to scale"),
     factor: int = typer.Option(1, help="Scale factor"),
     profile: str = typer.Option(None, help="Add services to specific profile"),
+    dry_run: bool = typer.Option(False, help="Show scaling plan only"),
 ):
     """Scale VPN fleet up or down"""
 
@@ -234,12 +263,67 @@ def fleet_scale(
         console.print(f"[red]❌ Unknown action: {action}. Use 'up' or 'down'[/red]")
         raise typer.Exit(1)
 
-    console.print("[yellow]⚠ Fleet scaling not yet implemented[/yellow]")
-    console.print(f"  Requested: {action} by factor {factor}")
+    from .fleet_state_manager import FleetStateManager, OperationConfig, OperationType
+
+    # Parse countries
+    country_list = None
     if countries:
-        console.print(f"  Countries: {countries}")
-    if profile:
-        console.print(f"  Profile: {profile}")
+        country_list = [c.strip() for c in countries.split(",")]
+
+    # Create operation config
+    config = OperationConfig(
+        dry_run=dry_run,
+        countries=country_list,
+        profile=profile,
+    )
+
+    # Map action to operation type
+    operation_type = (
+        OperationType.SCALE_UP if action == "up" else OperationType.SCALE_DOWN
+    )
+
+    async def run_scaling():
+        fleet_manager = FleetStateManager()
+        try:
+            result = await fleet_manager.scale_fleet(config, operation_type, factor)
+
+            if result.dry_run:
+                console.print("[yellow]🔍 Dry run complete - no changes made[/yellow]")
+            elif result.success:
+                action_word = (
+                    "scaled up"
+                    if operation_type == OperationType.SCALE_UP
+                    else "scaled down"
+                )
+                console.print(f"[green]✅ Fleet {action_word} successfully[/green]")
+                console.print(f"  • Services affected: {len(result.services_affected)}")
+                if result.services_affected:
+                    console.print(
+                        f"  • Services: {', '.join(result.services_affected[:5])}"
+                    )
+                    if len(result.services_affected) > 5:
+                        console.print(
+                            f"    ... and {len(result.services_affected) - 5} more"
+                        )
+                console.print(f"  • Execution time: {result.execution_time:.2f}s")
+            else:
+                action_word = (
+                    "scaling up"
+                    if operation_type == OperationType.SCALE_UP
+                    else "scaling down"
+                )
+                console.print(f"[red]❌ Fleet {action_word} failed[/red]")
+                for error in result.errors:
+                    console.print(f"  • {error}")
+
+        finally:
+            await fleet_manager.close()
+
+    try:
+        asyncio.run(run_scaling())
+    except Exception as e:
+        console.print(f"[red]❌ Scaling failed: {e}[/red]")
+        raise typer.Exit(1)
 
 
 def _display_deployment_plan(

@@ -92,8 +92,9 @@ def scale(
     countries: str = typer.Option(None, help="Comma-separated countries to scale"),
     factor: int = typer.Option(1, help="Scale factor"),
     profile: str = typer.Option(None, help="Add services to specific profile"),
+    dry_run: bool = typer.Option(False, help="Show scaling plan only"),
 ):
     """Scale VPN fleet up or down"""
     from proxy2vpn.adapters.fleet_commands import fleet_scale
 
-    fleet_scale(ctx, action, countries, factor, profile)
+    fleet_scale(ctx, action, countries, factor, profile, dry_run)

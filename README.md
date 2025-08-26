@@ -230,9 +230,9 @@ HTTPPROXY_PASSWORD=proxy_pass
 EOF
 
 # Register profiles
-proxy2vpn profile create expressvpn-main profiles/expressvpn-main.env
-proxy2vpn profile create nordvpn-backup profiles/nordvpn-backup.env
-proxy2vpn profile create protonvpn-fleet profiles/protonvpn-fleet.env
+proxy2vpn profile add expressvpn-main profiles/expressvpn-main.env
+proxy2vpn profile add nordvpn-backup profiles/nordvpn-backup.env
+proxy2vpn profile add protonvpn-fleet profiles/protonvpn-fleet.env
 
 # Single command deploys across ALL providers automatically
 proxy2vpn fleet plan \
@@ -311,8 +311,19 @@ proxy2vpn fleet deploy --parallel
 ### Geo-location Testing
 ```bash
 # Test your app from different countries
-proxy2vpn vpn create us-east production --location "New York"
-proxy2vpn vpn create eu-west production --location "Amsterdam"
+proxy2vpn vpn create
+# - Service name: us-east
+# - Profile: production
+# - Host port: 0
+# - Control port: 0
+# - Location: "New York"
+
+proxy2vpn vpn create
+# - Service name: eu-west
+# - Profile: production
+# - Host port: 0
+# - Control port: 0
+# - Location: "Amsterdam"
 proxy2vpn vpn start --all
 ```
 
@@ -328,7 +339,12 @@ proxy2vpn fleet scale down --factor 0  # Clean up after tests
 ### Development Environment
 ```bash
 # Persistent development proxies
-proxy2vpn vpn create dev-proxy dev-account --port 8888 --location "Netherlands"
+proxy2vpn vpn create
+# - Service name: dev-proxy
+# - Profile: dev-account
+# - Host port: 8888
+# - Control port: 0
+# - Location: "Netherlands"
 # Always available at localhost:8888 for your development
 ```
 
