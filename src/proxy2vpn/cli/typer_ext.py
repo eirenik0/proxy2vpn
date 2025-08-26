@@ -56,14 +56,9 @@ class HelpfulTyper(typer.Typer):
         except FileNotFoundError as exc:
             self.console.print(f"[red]Error:[/red] {exc}")
             raise SystemExit(1)
-        except Exception as exc:
-            # Handle other exceptions more gracefully
-            if "Missing argument" in str(exc) or "required" in str(exc).lower():
-                self.console.print("\n[red]Error:[/red] Missing required arguments")
-                self.console.print(
-                    "[dim]Run the command with '--help' to see required arguments.[/dim]"
-                )
-                raise SystemExit(2)
+        except Exception:
+            # For unexpected runtime errors, do not mis-report them as missing arguments.
+            # Let Typer/Click propagate the original exception so users see the real cause.
             raise
 
     def _handle_usage_error(self, exc: UsageError) -> None:
