@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.13.0]
+
+### Bug fixes
+
+- Fix Docker network cleanup by force-removing networks when initial deletion fails. (#138)
+- Fix `fleet plan` to validate profile names and prevent deployment failures from missing profiles. (#154)
+- Fix proxy accessibility by binding proxy ports to 0.0.0.0 while keeping control ports localhost-only. (#155)
+- Fix server list loading errors. (#156)
+- Fix fleet deployments to include SERVER_COUNTRIES environment variable alongside city information. (#220)
+- Fix Gluetun control API 401 errors by mounting authentication config that disables credentials for control routes. (#242)
+
+### Features
+
+- Replace `--recreate-network` flag with `--force` in `fleet deploy` command to rebuild containers and network. (#121)
+- Add provider column to `vpn list` command output. (#143)
+- Add location validation for VPN commands with support for city, country, or city,country formats and `--force` bypass option. (#200)
+- Add `start_vpn_service` helper function to consolidate VPN container startup logic across fleet operations. (#240)
+- Add service status counting helper for improved fleet status reporting. (#300)
+
+### Miscellaneous
+
+- Adopt built-in collection generics and PEP 604 union types. (#150)
+- Refactor codebase for improved maintainability. (#151)
+- Reorganize code into separate modules for better structure. (#152)
+
+
 ## [0.12.0]
 
 ### Bug fixes
