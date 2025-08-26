@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from proxy2vpn.adapters.compose_utils import parse_env, iter_port_mappings
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -113,44 +114,14 @@ class VPNService(BaseModel):
         host_port = 0
         control_host_port = 0
 
-        def _parse_port_mapping(p: object) -> tuple[int | None, int | None]:
-            """Return (container_port, host_port) if parseable, else (None, None)."""
-
-            try:
-                if isinstance(p, dict):
-                    target = p.get("target")
-                    published = p.get("published") or p.get("host_port")
-                    if target is not None and published is not None:
-                        return int(target), int(published)
-                    return None, None
-                s = str(p)
-                parts = s.split(":")
-                cont_raw = parts[-1]
-                cont_port = int(cont_raw.split("/")[0])
-                if len(parts) == 2:
-                    host = int(parts[0])
-                else:
-                    host = int(parts[-2])
-                return cont_port, host
-            except Exception:
-                return None, None
-
-        for p in service_def.get("ports", []) or []:
-            cont, host = _parse_port_mapping(p)
-            if cont == 8888 and host is not None:
+        for host, cont in iter_port_mappings(service_def.get("ports", []) or []):
+            if cont == 8888:
                 host_port = host
-            elif cont == 8000 and host is not None:
+            elif cont == 8000:
                 control_host_port = host
 
-        env_dict: dict[str, str] = {}
         env_entries = service_def.get("environment", []) or []
-        if isinstance(env_entries, dict):
-            env_dict = {str(k): str(v) for k, v in env_entries.items()}
-        else:
-            for item in env_entries:
-                if isinstance(item, str) and "=" in item:
-                    k, v = item.split("=", 1)
-                    env_dict[k] = v
+        env_dict: dict[str, str] = parse_env(env_entries)
 
         labels = dict(service_def.get("labels", {}))
 
