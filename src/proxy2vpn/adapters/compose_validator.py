@@ -74,6 +74,9 @@ def validate_compose(
                         env_files = [env_files]
                     for env_file in env_files:
                         env_path = Path(env_file)
+                        # Resolve relative to compose file location for portability
+                        if not env_path.is_absolute():
+                            env_path = path.parent / env_path
                         if not env_path.exists():
                             errors.append(
                                 f"Profile '{name}' env_file '{env_path}' not found"

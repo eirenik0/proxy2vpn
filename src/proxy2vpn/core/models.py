@@ -165,6 +165,7 @@ class Profile(BaseModel):
     devices: list[str] = Field(default_factory=lambda: ["/dev/net/tun:/dev/net/tun"])
 
     _provider: str | None = PrivateAttr(default=None)
+    _base_dir: Path | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -179,7 +180,16 @@ class Profile(BaseModel):
     @field_validator("env_file")
     @classmethod
     def _validate_env_file(cls, value: str) -> str:
-        return str(Path(value).expanduser().resolve())
+        # Keep the original user-provided path for YAML portability.
+        # Resolution is handled at runtime relative to the compose file dir.
+        return str(value)
+
+    def _resolve_env_path(self) -> Path:
+        """Resolve env_file path relative to the compose base dir if available."""
+        p = Path(self.env_file)
+        if not p.is_absolute() and self._base_dir is not None:
+            return (self._base_dir / p).expanduser().resolve()
+        return p.expanduser().resolve()
 
     @property
     def provider(self) -> str:
@@ -206,7 +216,7 @@ class Profile(BaseModel):
 
         from proxy2vpn.adapters.docker_ops import _load_env_file
 
-        env_vars = _load_env_file(self.env_file)
+        env_vars = _load_env_file(str(self._resolve_env_path()))
         errors: list[str] = []
 
         if not env_vars.get("VPN_PROVIDER"):
@@ -233,7 +243,7 @@ class Profile(BaseModel):
 
         from proxy2vpn.adapters.docker_ops import _load_env_file
 
-        env_vars = _load_env_file(self.env_file)
+        env_vars = _load_env_file(str(self._resolve_env_path()))
         self._provider = env_vars.get("VPN_PROVIDER")
 
     @classmethod

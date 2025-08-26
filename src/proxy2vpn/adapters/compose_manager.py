@@ -173,14 +173,19 @@ class ComposeManager:
         for key, value in self.data.items():
             if key.startswith("x-vpn-base-"):
                 name = key[len("x-vpn-base-") :]
-                profiles.append(Profile.from_anchor(name, value))
+                p = Profile.from_anchor(name, value)
+                # Set base dir so relative env_file paths resolve against compose location
+                p._base_dir = self.compose_path.parent
+                profiles.append(p)
         return profiles
 
     def get_profile(self, name: str) -> Profile:
         key = f"x-vpn-base-{name}"
         if key not in self.data:
             raise KeyError(f"Profile '{name}' not found")
-        return Profile.from_anchor(name, self.data[key])
+        p = Profile.from_anchor(name, self.data[key])
+        p._base_dir = self.compose_path.parent
+        return p
 
     def add_profile(self, profile: Profile) -> None:
         key = f"x-vpn-base-{profile.name}"
