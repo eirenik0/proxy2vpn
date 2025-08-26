@@ -3,7 +3,7 @@ import sys
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn import diagnostics
+from proxy2vpn.core.services import diagnostics
 
 
 def test_temporal_analysis():
@@ -23,7 +23,7 @@ def test_connectivity(monkeypatch):
     monkeypatch.setattr(diagnostics.ip_utils, "fetch_ip", fake_fetch_ip)
     analyzer = diagnostics.DiagnosticAnalyzer()
     results = analyzer.check_connectivity(8080)
-    assert any(r.check == "dns_leak" and r.passed for r in results)
+    assert any(r.check == "connectivity" and r.passed for r in results)
 
 
 def test_connectivity_message_contains_ips(monkeypatch):
@@ -33,8 +33,8 @@ def test_connectivity_message_contains_ips(monkeypatch):
     monkeypatch.setattr(diagnostics.ip_utils, "fetch_ip", fake_fetch_ip)
     analyzer = diagnostics.DiagnosticAnalyzer()
     result = analyzer.check_connectivity(8080)[0]
-    assert "direct=2.2.2.2" in result.message
-    assert "proxied=1.1.1.1" in result.message
+    assert "real=2.2.2.2" in result.message
+    assert "vpn=1.1.1.1" in result.message
 
 
 def test_connectivity_failure_includes_direct_ip(monkeypatch):
@@ -46,8 +46,8 @@ def test_connectivity_failure_includes_direct_ip(monkeypatch):
     monkeypatch.setattr(diagnostics.ip_utils, "fetch_ip", fake_fetch_ip)
     analyzer = diagnostics.DiagnosticAnalyzer()
     result = analyzer.check_connectivity(8080)[0]
-    assert "direct=2.2.2.2" in result.message
-    assert "proxied" not in result.message
+    assert "VPN proxy connection failed" in result.message
+    assert not result.passed
 
 
 def test_health_score():
@@ -63,4 +63,21 @@ def test_health_score():
             check="error", passed=False, message="", recommendation="", persistent=True
         ),
     ]
-    assert analyzer.health_score(results) == 25
+    assert analyzer.health_score(results) == 80
+
+
+def test_health_score_connectivity_failure():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    results = [
+        diagnostics.DiagnosticResult(
+            check="connectivity",
+            passed=False,
+            message="VPN not working",
+            recommendation="Fix VPN",
+        ),
+        diagnostics.DiagnosticResult(
+            check="ok", passed=True, message="", recommendation=""
+        ),
+    ]
+    # Connectivity failure should result in health score 0 regardless of other checks
+    assert analyzer.health_score(results) == 0

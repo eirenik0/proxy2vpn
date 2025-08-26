@@ -72,60 +72,79 @@ class DiagnosticAnalyzer:
             )
         ]
 
-    def check_connectivity(self, port: int) -> list[DiagnosticResult]:
-        """Connectivity + DNS leak checks with informative messages."""
+    def check_connectivity(
+        self,
+        port: int,
+        proxy_user: str | None = None,
+        proxy_password: str | None = None,
+    ) -> list[DiagnosticResult]:
+        """Connectivity + DNS leak checks with HTTP proxy authentication support."""
+        # Build proxy URL with authentication if provided
+        if proxy_user and proxy_password:
+            proxy_url = f"http://{proxy_user}:{proxy_password}@localhost:{port}"
+        else:
+            proxy_url = f"http://localhost:{port}"
+
         proxies = {
-            "http": f"http://localhost:{port}",
-            "https": f"http://localhost:{port}",
+            "http": proxy_url,
+            "https": proxy_url,
         }
 
         try:
+            # Test direct connection first
             direct = ip_utils.fetch_ip()
-            proxied = ip_utils.fetch_ip(proxies=proxies)
-
-            results: list[DiagnosticResult] = []
-            if not proxied:
-                msg = f"Connectivity test failed (direct={direct})"
-                results.append(
+            if not direct:
+                return [
                     DiagnosticResult(
                         check="connectivity",
                         passed=False,
-                        message=msg,
-                        recommendation="Ensure VPN container network is reachable.",
+                        message="No internet connection",
+                        recommendation="Check network connectivity",
                     )
-                )
-                return results
+                ]
 
-            msg = f"direct={direct} proxied={proxied}"
-            results.append(
+            # Test proxy connection - this is the critical test
+            proxied = ip_utils.fetch_ip(proxies=proxies)
+
+            # If proxy connection fails, container is broken
+            if not proxied:
+                return [
+                    DiagnosticResult(
+                        check="connectivity",
+                        passed=False,
+                        message="VPN proxy connection failed",
+                        recommendation="VPN container is not responding - check container status and port accessibility",
+                    )
+                ]
+
+            # If proxy returns same IP as direct, VPN is not working
+            if proxied == direct:
+                return [
+                    DiagnosticResult(
+                        check="connectivity",
+                        passed=False,
+                        message=f"VPN not working - still showing real IP {direct}",
+                        recommendation="VPN tunnel is down - check VPN container logs and configuration",
+                    )
+                ]
+
+            # Success case - VPN is working properly
+            return [
                 DiagnosticResult(
                     check="connectivity",
-                    passed=proxied is not None,
-                    message=msg,
+                    passed=True,
+                    message=f"VPN working: real={direct} vpn={proxied}",
                     recommendation="",
                 )
-            )
+            ]
 
-            # DNS leak check passes when IPs differ
-            leak_ok = proxied != direct
-            results.append(
-                DiagnosticResult(
-                    check="dns_leak",
-                    passed=leak_ok,
-                    message=msg,
-                    recommendation="Check firewall and kill switch settings."
-                    if not leak_ok
-                    else "",
-                )
-            )
-            return results
-        except Exception:
+        except Exception as e:
             return [
                 DiagnosticResult(
                     check="connectivity",
                     passed=False,
-                    message="Connectivity test failed",
-                    recommendation="Network error during testing.",
+                    message=f"Connectivity test failed: {e}",
+                    recommendation="Check if container port {port} is accessible",
                 )
             ]
 
@@ -215,18 +234,33 @@ class DiagnosticAnalyzer:
             ]
 
     def analyze(
-        self, log_lines: Iterable[str], port: int | None = None
+        self,
+        log_lines: Iterable[str],
+        port: int | None = None,
+        proxy_user: str | None = None,
+        proxy_password: str | None = None,
     ) -> list[DiagnosticResult]:
         """Analyze logs and optionally test connectivity."""
         results = self.analyze_logs(log_lines)
         if port:
-            results.extend(self.check_connectivity(port))
+            results.extend(self.check_connectivity(port, proxy_user, proxy_password))
         return results
 
     def health_score(self, results: Iterable[DiagnosticResult]) -> int:
-        """Weighted score: start 100, -50 per persistent fail, -25 per non-persistent fail."""
-        score = 100
+        """Reality-based health scoring: broken containers get 0, working containers get high scores."""
+        # If connectivity fails, container is completely useless
         for r in results:
-            if not r.passed:
-                score -= 50 if r.persistent else 25
-        return max(0, score)
+            if r.check == "connectivity" and not r.passed:
+                return 0
+
+        # If DNS or authentication fails persistently, container is broken
+        critical_failures = ["dns_status", "auth_failure"]
+        for r in results:
+            if r.check in critical_failures and not r.passed:
+                return 0 if r.persistent else 25
+
+        # Minor issues don't matter if core functionality works
+        minor_issues = sum(
+            1 for r in results if not r.passed and r.check not in critical_failures
+        )
+        return max(50, 100 - (minor_issues * 10))

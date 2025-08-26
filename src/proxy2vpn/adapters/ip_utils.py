@@ -38,6 +38,7 @@ async def _fetch_ip(client: HTTPClient, url: str, proxy: str | None) -> str:
         if ip:
             return ip
     except HTTPClientError:
+        # Don't hide proxy connection failures - let caller handle them
         return ""
     return ""
 

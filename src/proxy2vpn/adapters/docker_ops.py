@@ -53,10 +53,21 @@ def create_container(
 ) -> Container:
     """Create a container with the given name and image.
 
-    The image is pulled if it is not available locally.
+    If a container with the same name already exists, it will be removed first
+    to avoid name conflicts. The image is pulled if it is not available locally.
     """
     client = _client()
     try:
+        # Remove any existing container with the same name to avoid conflicts
+        try:
+            existing = client.containers.get(name)
+            try:
+                existing.remove(force=True)
+            except DockerException:
+                pass
+        except NotFound:
+            pass
+
         client.images.pull(image)
         container = client.containers.create(
             image, name=name, command=list(command) if command else None, detach=True
@@ -127,6 +138,16 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
 
     client = _client()
     try:
+        # Remove any existing container with the same name to avoid conflicts
+        try:
+            existing = client.containers.get(service.name)
+            try:
+                existing.remove(force=True)
+            except DockerException:
+                pass
+        except NotFound:
+            pass
+
         client.images.pull(profile.image)
         env = _load_env_file(profile.env_file)
         env.update(service.environment)
@@ -385,7 +406,20 @@ def analyze_container_logs(
         logs = list(container_logs(name, lines=lines, follow=False))
         port_label = container.labels.get("vpn.port")
         port = int(port_label) if port_label and port_label.isdigit() else None
-        return analyzer.analyze(logs, port=port)
+
+        # Extract HTTP proxy credentials from container environment
+        proxy_user = None
+        proxy_password = None
+        env_vars = container.attrs.get("Config", {}).get("Env", [])
+        for env_var in env_vars:
+            if env_var.startswith("HTTPPROXY_USER="):
+                proxy_user = env_var.split("=", 1)[1]
+            elif env_var.startswith("HTTPPROXY_PASSWORD="):
+                proxy_password = env_var.split("=", 1)[1]
+
+        return analyzer.analyze(
+            logs, port=port, proxy_user=proxy_user, proxy_password=proxy_password
+        )
     except DockerException as exc:
         raise RuntimeError(f"Failed to analyze logs for {name}: {exc}") from exc
 

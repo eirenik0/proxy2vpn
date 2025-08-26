@@ -44,3 +44,26 @@ def create_service_table(title: str, include_health: bool = False) -> Table:
         table.add_column("Health", style="bold")
 
     return table
+
+
+def format_health_score(score) -> str:
+    """Format health score with color gradient from red (0) to green (100)."""
+    if score == "N/A":
+        return "N/A"
+
+    try:
+        score = int(score)
+    except (ValueError, TypeError):
+        return str(score)
+
+    # Clamp score to 0-100 range
+    score = max(0, min(100, score))
+
+    # Calculate RGB values for gradient from red to green
+    # Red (255, 0, 0) at score 0 -> Green (0, 255, 0) at score 100
+    red = int(255 * (100 - score) / 100)
+    green = int(255 * score / 100)
+    blue = 0
+
+    # Format as Rich RGB color
+    return f"[rgb({red},{green},{blue})]{score}[/rgb({red},{green},{blue})]"

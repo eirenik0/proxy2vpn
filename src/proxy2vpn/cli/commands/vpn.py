@@ -197,12 +197,6 @@ def create(ctx: typer.Context) -> None:
 @run_async
 async def list_services(
     ctx: typer.Context,
-    diagnose: bool = typer.Option(
-        False, "--diagnose", help="Include diagnostic health scores"
-    ),
-    ips_only: bool = typer.Option(
-        False, "--ips-only", help="Show only container IP addresses"
-    ),
 ):
     """List VPN services with their status and IP addresses."""
 
@@ -218,25 +212,68 @@ async def list_services(
     )
     from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
-    if ips_only:
-        containers = get_vpn_containers(all=False)
-        ips = await asyncio.gather(
-            *(get_container_ip_async(container) for container in containers)
-        )
-        for container, ip in zip(containers, ips):
-            console.print(f"{container.name}: {ip}")
-        return
-
     services = manager.list_services()
     containers = {c.name: c for c in get_vpn_containers(all=True)}
-    analyzer = DiagnosticAnalyzer() if diagnose else None
+    analyzer = DiagnosticAnalyzer()
 
+    # Get all running containers for IP resolution
     running = {name: c for name, c in containers.items() if c.status == "running"}
-    ips = await asyncio.gather(
-        *(get_container_ip_async(container) for container in running.values())
-    )
-    ip_map = dict(zip(running.keys(), ips))
 
+    # Create async functions for concurrent execution
+    async def get_container_health(container_name: str) -> int:
+        """Async wrapper to run diagnostic analysis in thread pool"""
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        # Run the sync function in a thread pool to avoid blocking
+        results = await loop.run_in_executor(
+            None, analyze_container_logs, container_name, 100, analyzer
+        )
+        return analyzer.health_score(results)
+
+    # Get IPs for running containers
+    ip_tasks = [get_container_ip_async(container) for container in running.values()]
+
+    # Get health scores for running containers
+    health_tasks = []
+    running_services = []
+    for svc in services:
+        container = containers.get(svc.name)
+        if container and container.status == "running" and container.name:
+            health_tasks.append(get_container_health(container.name))
+            running_services.append(svc.name)
+
+    # Execute all async operations concurrently
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Analyzing health", total=1)
+
+        # Wait for all operations to complete
+        if ip_tasks:
+            ips = await asyncio.gather(*ip_tasks, return_exceptions=True)
+        else:
+            ips = []
+
+        if health_tasks:
+            health_scores = await asyncio.gather(*health_tasks, return_exceptions=True)
+        else:
+            health_scores = []
+
+        progress.advance(task)
+
+    # Create lookup maps
+    ip_map = {}
+    if ips:
+        for container, ip in zip(running.values(), ips):
+            if not isinstance(ip, Exception):
+                ip_map[container.name] = ip
+
+    health_map = {}
+    if health_scores:
+        for service_name, score in zip(running_services, health_scores):
+            if not isinstance(score, Exception):
+                health_map[service_name] = score
+
+    # Build table
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("N", style="dim blue")
     table.add_column("Name", style="green")
@@ -246,22 +283,26 @@ async def list_services(
     table.add_column("Location")
     table.add_column("Status")
     table.add_column("IP")
-    if diagnose:
-        table.add_column("Health")
+    table.add_column("Health")
 
-    async def add_row(i: int, svc: VPNService):
+    from proxy2vpn.adapters.display_utils import format_health_score
+
+    for i, svc in enumerate(services, 1):
         container = containers.get(svc.name)
+
         if container:
             status = container.status
             ip = ip_map.get(svc.name, "N/A")
-            health = "N/A"
-            if diagnose and container.name:
-                results = analyze_container_logs(container.name, analyzer=analyzer)
-                health = str(analyzer.health_score(results)) if analyzer else "N/A"
+            # Get health score from our concurrent analysis
+            if status == "running":
+                health_val = health_map.get(svc.name, 0)
+            else:
+                health_val = 0
         else:
             status = "not created"
             ip = "N/A"
-            health = "N/A"
+            health_val = "N/A"
+
         status_style = "green" if status == "running" else "red"
         row = [
             str(i),
@@ -272,20 +313,9 @@ async def list_services(
             svc.location,
             f"[{status_style}]{status}[/{status_style}]",
             ip,
+            format_health_score(health_val),
         ]
-        if diagnose:
-            row.append(health)
         table.add_row(*row)
-
-    if diagnose:
-        with Progress() as progress:
-            task = progress.add_task("[cyan]Checking", total=len(services))
-            for i, svc in enumerate(services, 1):
-                await add_row(i, svc)
-                progress.advance(task)
-    else:
-        for i, svc in enumerate(services, 1):
-            await add_row(i, svc)
 
     console.print(table)
 
@@ -774,6 +804,93 @@ async def port_forwarded(
     async with http_client.GluetunControlClient(base_url) as client:
         pf = await client.port_forwarded()
     console.print(str(pf.port))
+
+
+@app.command("restore")
+def restore(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
+    all: bool = typer.Option(
+        False, "--all", help="Restore all VPN services below threshold"
+    ),
+    threshold: int = typer.Option(
+        60, "--threshold", help="Health threshold to trigger restore (0-100)"
+    ),
+):
+    """Attempt to restore unhealthy VPN services.
+
+    Strategy: restart container; if still unhealthy, recreate container. If recreation
+    still results in poor health, suggest changing location (not automated yet).
+    """
+    from proxy2vpn.adapters import compose_manager
+    from proxy2vpn.adapters.docker_ops import (
+        analyze_container_logs,
+        restart_container,
+        recreate_vpn_container,
+        get_vpn_containers,
+    )
+    from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
+
+    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    manager = compose_manager.ComposeManager(compose_file)
+
+    if not all and not name:
+        abort("Specify a service NAME or use --all")
+
+    targets: list[VPNService]
+    if all:
+        targets = manager.list_services()
+    else:
+        targets = [validate_service_exists(manager, name or "")]  # type: ignore[arg-type]
+
+    analyzer = DiagnosticAnalyzer()
+    restored: list[str] = []
+    unchanged: list[str] = []
+
+    for svc in targets:
+        # Compute current health
+        containers = {c.name: c for c in get_vpn_containers(all=True)}
+        score = 0
+        if (container := containers.get(svc.name)) is not None:
+            try:
+                results = analyze_container_logs(container.name, analyzer=analyzer)
+                score = analyzer.health_score(results)
+            except Exception:
+                score = 0
+        if score >= threshold:
+            unchanged.append(svc.name)
+            continue
+        # Try restart
+        try:
+            restart_container(svc.name)
+        except Exception:
+            pass
+        # Re-evaluate
+        containers = {c.name: c for c in get_vpn_containers(all=True)}
+        score2 = 0
+        if (container := containers.get(svc.name)) is not None:
+            try:
+                results = analyze_container_logs(container.name, analyzer=analyzer)
+                score2 = analyzer.health_score(results)
+            except Exception:
+                score2 = 0
+        if score2 >= threshold:
+            restored.append(svc.name)
+            continue
+        # Recreate
+        profile = manager.get_profile(svc.profile)
+        try:
+            recreate_vpn_container(svc, profile)
+        except Exception:
+            pass
+        restored.append(svc.name)
+
+    for n in restored:
+        console.print(format_success_message("Restored", n))
+    if unchanged:
+        console.print("[yellow]No action needed:[/yellow] " + ", ".join(unchanged))
 
 
 @app.command("restart-tunnel")
