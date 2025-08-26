@@ -19,7 +19,6 @@ class FleetConfig:
 
     countries: list[str]  # ["Germany", "France", "Netherlands"]
     profiles: dict[str, int]  # {"acc1": 2, "acc2": 8} - profile slots
-    provider: str | None = None  # Optional single provider (legacy support)
     port_start: int = 20000
     control_port_start: int = 30000
     naming_template: str = "{provider}-{country}-{city}"
@@ -140,7 +139,7 @@ class FleetManager:
 
     def plan_deployment(self, config: FleetConfig) -> DeploymentPlan:
         """Create deployment plan with multi-provider orchestration based on profile providers."""
-        plan = DeploymentPlan(provider=config.provider)
+        plan = DeploymentPlan()
 
         # Load all profiles and validate they exist
         available_profiles = {p.name: p for p in self.compose_manager.list_profiles()}
@@ -152,19 +151,12 @@ class FleetManager:
         profile_providers: dict[str, list[str]] = {}
         for profile_name in config.profiles.keys():
             profile = available_profiles[profile_name]
+            try:
+                provider = profile.provider
+            except ValueError as e:
+                raise ValueError(f"Fleet planning failed: {e}") from e
 
-            # Use legacy single provider if specified, otherwise use profile provider
-            if config.provider:
-                provider = config.provider
-            else:
-                try:
-                    provider = profile.provider
-                except ValueError as e:
-                    raise ValueError(f"Fleet planning failed: {e}") from e
-
-            if provider not in profile_providers:
-                profile_providers[provider] = []
-            profile_providers[provider].append(profile_name)
+            profile_providers.setdefault(provider, []).append(profile_name)
 
         console.print(
             f"[blue]📋 Multi-provider deployment across {len(profile_providers)} providers[/blue]"

@@ -9,7 +9,6 @@ app = HelpfulTyper(help="Manage VPN fleets across multiple cities")
 @app.command("plan")
 def plan(
     ctx: typer.Context,
-    provider: str = typer.Option("protonvpn", help="VPN provider"),
     countries: str = typer.Option(..., help="Comma-separated country list"),
     profiles: str = typer.Option(..., help="Profile slots: acc1:2,acc2:8"),
     port_start: int = typer.Option(20000, help="Starting port number"),
@@ -27,7 +26,6 @@ def plan(
 
     fleet_plan(
         ctx,
-        provider,
         countries,
         profiles,
         port_start,
