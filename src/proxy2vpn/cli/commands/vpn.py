@@ -40,6 +40,32 @@ def _service_control_base_url(ctx: typer.Context, name: str) -> str:
     return f"http://localhost:{svc.control_port}/v1"
 
 
+def _resolve_service_name(ctx: typer.Context, service: str | None) -> str:
+    """Resolve optional service name.
+
+    - If provided, return it.
+    - If not provided, auto-select when there is exactly one service.
+    - If none or multiple exist, abort with a helpful message.
+    """
+    if service:
+        return service
+    manager = ComposeManager.from_ctx(ctx)
+    services = manager.list_services()
+    if not services:
+        abort(
+            "No VPN services found.",
+            "Create one with 'proxy2vpn vpn create <name> <profile>'.",
+        )
+    if len(services) == 1:
+        return services[0].name
+    names = ", ".join(sorted(s.name for s in services))
+    abort(
+        "Multiple VPN services found; please specify SERVICE.",
+        f"Available: {names}",
+    )
+    return ""  # unreachable, for typing
+
+
 def _validate_service_locations(services: list[VPNService], force: bool) -> None:
     if force:
         return
@@ -615,11 +641,14 @@ async def export_proxies(
 @run_async
 async def status(
     ctx: typer.Context,
-    service: str = typer.Argument(..., callback=sanitize_name),
+    service: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
 ):
     """Show control server status for SERVICE."""
 
-    base_url = _service_control_base_url(ctx, service)
+    resolved = _resolve_service_name(ctx, service)
+    base_url = _service_control_base_url(ctx, resolved)
     # Import via adapters module so tests can monkeypatch the client
     from proxy2vpn.adapters import http_client
 
@@ -642,11 +671,14 @@ async def status(
 @run_async
 async def public_ip(
     ctx: typer.Context,
-    service: str = typer.Argument(..., callback=sanitize_name),
+    service: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
 ):
     """Show public IP reported by the control API for SERVICE."""
 
-    base_url = _service_control_base_url(ctx, service)
+    resolved = _resolve_service_name(ctx, service)
+    base_url = _service_control_base_url(ctx, resolved)
     # Import via adapters module so tests can monkeypatch the client
     from proxy2vpn.adapters import http_client
 
@@ -659,11 +691,14 @@ async def public_ip(
 @run_async
 async def dns_status(
     ctx: typer.Context,
-    service: str = typer.Argument(..., callback=sanitize_name),
+    service: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
 ):
     """Show DNS service status for SERVICE."""
 
-    base_url = _service_control_base_url(ctx, service)
+    resolved = _resolve_service_name(ctx, service)
+    base_url = _service_control_base_url(ctx, resolved)
     from proxy2vpn.adapters import http_client
 
     async with http_client.GluetunControlClient(base_url) as client:
@@ -675,11 +710,14 @@ async def dns_status(
 @run_async
 async def updater_status(
     ctx: typer.Context,
-    service: str = typer.Argument(..., callback=sanitize_name),
+    service: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
 ):
     """Show updater job status for SERVICE."""
 
-    base_url = _service_control_base_url(ctx, service)
+    resolved = _resolve_service_name(ctx, service)
+    base_url = _service_control_base_url(ctx, resolved)
     from proxy2vpn.adapters import http_client
 
     async with http_client.GluetunControlClient(base_url) as client:
@@ -691,11 +729,14 @@ async def updater_status(
 @run_async
 async def port_forwarded(
     ctx: typer.Context,
-    service: str = typer.Argument(..., callback=sanitize_name),
+    service: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
 ):
     """Show port forwarded for SERVICE."""
 
-    base_url = _service_control_base_url(ctx, service)
+    resolved = _resolve_service_name(ctx, service)
+    base_url = _service_control_base_url(ctx, resolved)
     from proxy2vpn.adapters import http_client
 
     async with http_client.GluetunControlClient(base_url) as client:
@@ -707,11 +748,14 @@ async def port_forwarded(
 @run_async
 async def restart_tunnel(
     ctx: typer.Context,
-    service: str = typer.Argument(..., callback=sanitize_name),
+    service: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
 ):
     """Restart the VPN tunnel for SERVICE via the control API."""
 
-    base_url = _service_control_base_url(ctx, service)
+    resolved = _resolve_service_name(ctx, service)
+    base_url = _service_control_base_url(ctx, resolved)
     # Import via adapters module so tests can monkeypatch the client
     from proxy2vpn.adapters import http_client
 

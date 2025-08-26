@@ -7,7 +7,7 @@ from typing import Any, Self
 from urllib.parse import urlparse
 
 import aiohttp
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, AliasChoices
 
 from proxy2vpn.core.config import (
     CONTROL_API_ENDPOINTS,
@@ -201,16 +201,22 @@ class OpenVPNResponse(BaseModel):
 
 
 class IPResponse(BaseModel):
-    """Response payload for the ``/ip`` endpoint."""
+    """Response payload for the ``/ip`` endpoint.
 
-    ip: str
+    Accepts either 'ip' or 'public_ip' keys from server responses.
+    """
+
+    ip: str = Field(validation_alias=AliasChoices("ip", "public_ip"))
     model_config = ConfigDict(extra="ignore")
 
 
 class OpenVPNStatusResponse(BaseModel):
-    """Response payload for the ``/openvpn/status`` endpoint."""
+    """Response payload for the ``/openvpn/status`` endpoint.
 
-    status: str
+    Accepts either 'status' or legacy 'outcome' key from server responses.
+    """
+
+    status: str = Field(validation_alias=AliasChoices("status", "outcome"))
     model_config = ConfigDict(extra="ignore")
 
 
@@ -278,9 +284,28 @@ class GluetunControlClient(HTTPClient):
         return IPResponse(**data)
 
     async def restart_tunnel(self) -> OpenVPNStatusResponse:
-        payload = {"status": "restarted"}
-        data = await self.request("PUT", self.ENDPOINTS["openvpn_status"], json=payload)
-        return OpenVPNStatusResponse(**data)
+        """Request a VPN tunnel restart.
+
+        Tries the newer Gluetun convention first (PUT status="restarted").
+        If the server responds with an error (e.g., older versions not supporting
+        "restarted"), falls back to a stop/start sequence using the same endpoint
+        with status="stopped" then status="running".
+        """
+        try:
+            payload = {"status": "restarted"}
+            data = await self.request(
+                "PUT", self.ENDPOINTS["openvpn_status"], json=payload
+            )
+            return OpenVPNStatusResponse(**data)
+        except HTTPClientError:
+            # Fallback for older servers: stop then start
+            await self.request(
+                "PUT", self.ENDPOINTS["openvpn_status"], json={"status": "stopped"}
+            )
+            data = await self.request(
+                "PUT", self.ENDPOINTS["openvpn_status"], json={"status": "running"}
+            )
+            return OpenVPNStatusResponse(**data)
 
     async def dns_status(self) -> DNSStatusResponse:
         data = await self.get(self.ENDPOINTS["dns_status"])
