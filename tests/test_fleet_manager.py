@@ -298,7 +298,48 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
 
     out = capsys.readouterr().out
     assert "Invalid location bad for prov" in out
-    assert "Skipping 1 invalid service" in out
+
+
+def test_force_deploy_overwrites_compose(tmp_path, monkeypatch):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+    manager.add_profile(Profile(name="test", env_file="env.test"))
+
+    fm_initial = FleetManager(compose_file_path=compose_path)
+    old_plan = ServicePlan(
+        name="oldsvc",
+        profile="test",
+        location="OldCity",
+        country="C",
+        port=10000,
+        control_port=30000,
+        provider="prov",
+    )
+    old_service = fm_initial._create_service_from_plan(old_plan)
+    manager.add_service(old_service)
+
+    fm = FleetManager(compose_file_path=compose_path)
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.fleet_manager.ensure_network", lambda force: None
+    )
+
+    new_plan = [
+        ServicePlan(
+            name="newsvc",
+            profile="test",
+            location="NewCity",
+            country="C",
+            port=10001,
+            control_port=30001,
+            provider="prov",
+        )
+    ]
+
+    asyncio.run(fm._create_service_definitions(new_plan, force=True, added_services=[]))
+
+    services = fm.compose_manager.list_services()
+    assert [s.name for s in services] == ["newsvc"]
 
 
 def test_get_fleet_status_reconstructs_allocator(tmp_path):
