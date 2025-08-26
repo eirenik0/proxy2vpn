@@ -55,25 +55,36 @@ class ProfileAllocator:
         )
 
     def get_next_available(
-        self, profile_config: dict[str, int] | None = None
+        self, allowed_profiles: dict[str, int] | None = None
     ) -> ProfileSlot | None:
-        """Get next available profile slot using round-robin with load balancing"""
-        if profile_config and not self.slots:
-            self.setup_profiles(profile_config)
+        """Get next available profile slot using round-robin with load balancing.
 
-        # Find profiles with available slots
-        available_profiles = [
-            slot for slot in self.slots.values() if slot.available_slots > 0
-        ]
+        If ``allowed_profiles`` is provided, selection is restricted to those
+        profile names. This is used when planning services for a specific VPN
+        provider so that slots from other providers are not allocated.
+        """
+        if allowed_profiles and not self.slots:
+            self.setup_profiles(allowed_profiles)
 
-        if not available_profiles:
+        if allowed_profiles:
+            candidates = [
+                self.slots[name]
+                for name in allowed_profiles.keys()
+                if name in self.slots and self.slots[name].available_slots > 0
+            ]
+        else:
+            candidates = [
+                slot for slot in self.slots.values() if slot.available_slots > 0
+            ]
+
+        if not candidates:
             logger.warning("No profile slots available")
             console.print("[yellow]⚠️ No profile slots available[/yellow]")
             return None
 
         # Round-robin with load balancing: choose profile with lowest utilization
         # This ensures even distribution across profiles
-        best_profile = min(available_profiles, key=lambda p: p.utilization_ratio)
+        best_profile = min(candidates, key=lambda p: p.utilization_ratio)
 
         logger.debug(
             f"Selected profile {best_profile.name} "

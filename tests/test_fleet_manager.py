@@ -529,6 +529,52 @@ def test_multi_provider_fleet_planning(tmp_path):
     assert any("protonvpn-" in name for name in service_names)
 
 
+def test_fleet_plan_respects_profile_providers(tmp_path):
+    """Ensure fleet planning allocates profiles matching provider."""
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    express_env = tmp_path / "express.env"
+    express_env.write_text(
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=u\nOPENVPN_PASSWORD=p\n"
+    )
+    nord_env = tmp_path / "nord.env"
+    nord_env.write_text(
+        "VPN_SERVICE_PROVIDER=nordvpn\nOPENVPN_USER=u\nOPENVPN_PASSWORD=p\n"
+    )
+
+    manager.add_profile(Profile(name="express", env_file=str(express_env)))
+    manager.add_profile(Profile(name="nord", env_file=str(nord_env)))
+
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+
+    def fake_list_cities(provider, country):
+        data = {
+            "expressvpn": {"Germany": ["Frankfurt", "Berlin"]},
+            "nordvpn": {"Germany": ["Hamburg"]},
+        }
+        return data.get(provider, {}).get(country, [])
+
+    fleet_manager.server_manager.list_cities = fake_list_cities
+
+    config = FleetConfig(
+        countries=["Germany"],
+        profiles={"express": 2, "nord": 1},
+        port_start=10000,
+    )
+
+    plan = fleet_manager.plan_deployment(config)
+
+    express_services = [s for s in plan.services if s.provider == "expressvpn"]
+    nord_services = [s for s in plan.services if s.provider == "nordvpn"]
+
+    assert len(express_services) == 2
+    assert all(s.profile == "express" for s in express_services)
+    assert len(nord_services) == 1
+    assert all(s.profile == "nord" for s in nord_services)
+
+
 def test_profile_validation_during_fleet_planning(tmp_path):
     """Test that fleet planning fails fast when profiles have missing VPN_SERVICE_PROVIDER."""
     compose_path = tmp_path / "compose.yml"
