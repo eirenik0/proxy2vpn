@@ -56,7 +56,7 @@ class HelpfulTyper(typer.Typer):
         except FileNotFoundError as exc:
             self.console.print(f"[red]Error:[/red] {exc}")
             raise SystemExit(1)
-        except Exception as exc:
+        except Exception:
             # For unexpected runtime errors, do not mis-report them as missing arguments.
             # Let Typer/Click propagate the original exception so users see the real cause.
             raise

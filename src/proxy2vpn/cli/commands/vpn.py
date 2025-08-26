@@ -81,28 +81,21 @@ def _validate_service_locations(services: list[VPNService], force: bool) -> None
 
 
 @app.command("create")
-def create(
-    ctx: typer.Context,
-    name: str = typer.Argument(..., callback=sanitize_name),
-    profile: str = typer.Argument(..., callback=sanitize_name),
-    port: int = typer.Option(
-        0,
-        callback=validate_port,
-        help="Host port to expose; 0 for auto",
-    ),
-    control_port: int = typer.Option(
-        0,
-        callback=validate_port,
-        help="Control port; 0 for auto",
-    ),
-    location: str = typer.Option("", help="Optional location, e.g. city"),
-    force: bool = typer.Option(
-        False, "--force", "-f", help="Ignore location validation"
-    ),
-):
-    """Create a VPN service entry in the compose file."""
+def create(ctx: typer.Context) -> None:
+    """Interactively create a VPN service entry in the compose file."""
 
     manager = ComposeManager.from_ctx(ctx)
+
+    try:
+        name = sanitize_name(typer.prompt("Service name"))
+    except typer.BadParameter as exc:
+        abort(str(exc))
+
+    try:
+        profile = sanitize_name(typer.prompt("Profile name"))
+    except typer.BadParameter as exc:
+        abort(str(exc))
+
     try:
         prof = manager.get_profile(profile)
         provider = prof.provider
@@ -113,6 +106,24 @@ def create(
         )
     except ValueError as exc:
         abort(str(exc))
+
+    port = typer.prompt("Host port to expose (0 for auto)", default=0, type=int)
+    try:
+        port = validate_port(port)
+    except typer.BadParameter as exc:
+        abort(str(exc))
+
+    control_port = typer.prompt("Control port (0 for auto)", default=0, type=int)
+    try:
+        control_port = validate_port(control_port)
+    except typer.BadParameter as exc:
+        abort(str(exc))
+
+    location = typer.prompt("Location (optional)", default="").strip()
+    force = False
+    if location:
+        force = typer.confirm("Ignore location validation?", default=False)
+
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
     if control_port == 0:
@@ -121,7 +132,6 @@ def create(
         )
 
     env = {"VPN_SERVICE_PROVIDER": provider}
-    location = location.strip()
     if location:
         # Import via adapters module so tests can monkeypatch ServerManager
         from proxy2vpn.adapters import server_manager
@@ -137,6 +147,7 @@ def create(
             env["SERVER_CITIES"] = city
         if country:
             env["SERVER_COUNTRIES"] = country
+
     labels = {
         "vpn.type": "vpn",
         "vpn.port": str(port),
