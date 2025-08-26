@@ -59,6 +59,7 @@ proxy2vpn system init
 # 2. Create your first profile with VPN credentials
 mkdir -p profiles
 cat <<'EOF' > profiles/production.env
+VPN_PROVIDER=protonvpn
 OPENVPN_USER=your_protonvpn_username
 OPENVPN_PASSWORD=your_protonvpn_password
 HTTPPROXY=on

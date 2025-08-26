@@ -196,10 +196,19 @@ class Profile:
         self.env_file = str(sanitize_path(Path(self.env_file)))
 
     @property
-    def provider(self) -> str | None:
-        """Get VPN provider from the environment file, if specified."""
+    def provider(self) -> str:
+        """Get VPN provider from the environment file.
+
+        Raises ValueError if VPN_PROVIDER is not specified in the profile's env file.
+        """
         if self._provider is None:
             self._load_provider_from_env()
+
+        if not self._provider:
+            raise ValueError(
+                f"Profile '{self.name}' is missing VPN_PROVIDER in {self.env_file}. "
+                f"Add 'VPN_PROVIDER=expressvpn' (or nordvpn, protonvpn, etc.) to the env file."
+            )
         return self._provider
 
     def _load_provider_from_env(self) -> None:

@@ -152,14 +152,15 @@ class FleetManager:
         profile_providers: dict[str, list[str]] = {}
         for profile_name in config.profiles.keys():
             profile = available_profiles[profile_name]
-            provider = profile.provider or config.provider
-            if not provider:
-                from proxy2vpn.core import config as app_config
 
-                provider = app_config.DEFAULT_PROVIDER
-                console.print(
-                    f"[yellow]⚠ Profile '{profile_name}' has no VPN_PROVIDER, using default: {provider}[/yellow]"
-                )
+            # Use legacy single provider if specified, otherwise use profile provider
+            if config.provider:
+                provider = config.provider
+            else:
+                try:
+                    provider = profile.provider
+                except ValueError as e:
+                    raise ValueError(f"Fleet planning failed: {e}") from e
 
             if provider not in profile_providers:
                 profile_providers[provider] = []

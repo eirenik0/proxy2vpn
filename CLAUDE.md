@@ -59,14 +59,17 @@ uv run proxy2vpn fleet rotate --dry-run
 ```
 
 ### Profile Environment File Example
-Profile environment files (e.g., profiles/myprofile.env) should include VPN and HTTP proxy credentials:
+Profile environment files (e.g., profiles/myprofile.env) must include VPN_PROVIDER and credentials:
 ```bash
+VPN_PROVIDER=expressvpn
 OPENVPN_USER=your_vpn_username
 OPENVPN_PASSWORD=your_vpn_password
 HTTPPROXY=on
 HTTPPROXY_USER=your_proxy_username
 HTTPPROXY_PASSWORD=your_proxy_password
 ```
+
+**Note**: VPN_PROVIDER is required and must match a supported gluetun provider (expressvpn, nordvpn, protonvpn, etc.)
 
 ## High-Level Architecture
 

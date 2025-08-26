@@ -30,8 +30,16 @@ def create(
             f"Environment file '{env_file}' not found",
             "Create the file before creating the profile",
         )
-    manager = ComposeManager.from_ctx(ctx)
+
+    # Validate profile has required VPN_PROVIDER field
     profile = Profile(name=name, env_file=str(env_file))
+    try:
+        provider = profile.provider  # This will raise ValueError if missing
+        console.print(f"[blue]📋 Using provider: {provider}[/blue]")
+    except ValueError as e:
+        abort(str(e))
+
+    manager = ComposeManager.from_ctx(ctx)
     manager.add_profile(profile)
     logger.info("profile_created", extra={"profile_name": name})
     console.print(f"[green]✓[/green] Profile '{name}' created.")
