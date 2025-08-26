@@ -37,6 +37,17 @@ def test_profile_management(tmp_path):
     assert "new" not in {p.name for p in manager.list_profiles()}
 
 
+def test_profile_inserted_before_services(tmp_path):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+    env_path = tmp_path / "env.top"
+    env_path.write_text("KEY=value\n")
+    manager.add_profile(Profile(name="top", env_file=str(env_path)))
+    content = compose_path.read_text()
+    assert content.index("x-vpn-base-top:") < content.index("services:")
+
+
 def test_add_and_remove_service(tmp_path):
     compose_path = _copy_compose(tmp_path)
     manager = ComposeManager(compose_path)
