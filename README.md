@@ -56,7 +56,7 @@ Get a VPN endpoint running in under 5 minutes:
 # 1. Initialize your workspace
 proxy2vpn system init
 
-# 2. Create your first profile with VPN credentials
+# 2. Create your first profile with VPN credentials (all fields required)
 mkdir -p profiles
 cat <<'EOF' > profiles/production.env
 VPN_PROVIDER=protonvpn

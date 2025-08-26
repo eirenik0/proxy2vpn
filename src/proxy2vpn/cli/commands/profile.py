@@ -31,13 +31,24 @@ def create(
             "Create the file before creating the profile",
         )
 
-    # Validate profile has required VPN_PROVIDER field
+    # Validate profile has all required fields
     profile = Profile(name=name, env_file=str(env_file))
-    try:
-        provider = profile.provider  # This will raise ValueError if missing
-        console.print(f"[blue]📋 Using provider: {provider}[/blue]")
-    except ValueError as e:
-        abort(str(e))
+    validation_errors = profile.validate_env_file()
+
+    if validation_errors:
+        console.print(f"[red]❌ Profile validation failed for {env_file}:[/red]")
+        for error in validation_errors:
+            console.print(f"[red]  • {error}[/red]")
+        console.print("\n[yellow]💡 Example valid profile:[/yellow]")
+        console.print("[green]VPN_PROVIDER=expressvpn[/green]")
+        console.print("[green]OPENVPN_USER=your_username[/green]")
+        console.print("[green]OPENVPN_PASSWORD=your_password[/green]")
+        console.print("[green]HTTPPROXY=on[/green]")
+        console.print("[green]HTTPPROXY_USER=proxy_user[/green]")
+        console.print("[green]HTTPPROXY_PASSWORD=proxy_pass[/green]")
+        abort("Fix the environment file and try again")
+
+    console.print(f"[blue]📋 Using provider: {profile.provider}[/blue]")
 
     manager = ComposeManager.from_ctx(ctx)
     manager.add_profile(profile)
