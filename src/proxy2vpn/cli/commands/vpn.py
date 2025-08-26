@@ -91,21 +91,42 @@ def create(ctx: typer.Context) -> None:
     except typer.BadParameter as exc:
         abort(str(exc))
 
-    try:
-        profile = sanitize_name(typer.prompt("Profile name"))
-    except typer.BadParameter as exc:
-        abort(str(exc))
-
-    try:
-        prof = manager.get_profile(profile)
-        provider = prof.provider
-    except KeyError:
+    profiles = manager.list_profiles()
+    if not profiles:
         abort(
-            f"Profile '{profile}' not found",
-            "Create it with 'proxy2vpn profile create'",
+            "No profiles found.",
+            "Create one with 'proxy2vpn profile create'",
         )
-    except ValueError as exc:
-        abort(str(exc))
+
+    console.print("Available profiles:")
+    for idx, p in enumerate(profiles, start=1):
+        console.print(f"{idx}. {p.name}")
+
+    selected = typer.prompt("Select profile", default="1").strip()
+
+    if selected.isdigit():
+        idx = int(selected)
+        if not 1 <= idx <= len(profiles):
+            abort(
+                f"Invalid selection {selected}",
+                f"Select a number between 1 and {len(profiles)}",
+            )
+        prof = profiles[idx - 1]
+    else:
+        try:
+            selected = sanitize_name(selected)
+        except typer.BadParameter as exc:
+            abort(str(exc))
+        prof_map = {p.name: p for p in profiles}
+        if selected not in prof_map:
+            abort(
+                f"Profile '{selected}' not found",
+                "Create one with 'proxy2vpn profile create'",
+            )
+        prof = prof_map[selected]
+
+    profile = prof.name
+    provider = prof.provider
 
     port = typer.prompt("Host port to expose (0 for auto)", default=0, type=int)
     try:

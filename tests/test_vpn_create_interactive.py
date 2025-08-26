@@ -27,6 +27,7 @@ def test_vpn_create_interactive(tmp_path):
         input="svc\ntest\n0\n0\n\n",
     )
     assert result.exit_code == 0
+    assert "Available profiles" in result.stdout
     manager = ComposeManager(compose_path)
     svc = manager.get_service("svc")
     assert svc.profile == "test"
