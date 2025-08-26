@@ -28,24 +28,81 @@ async def init(
         False, "--force", "-f", help="Overwrite existing compose file if it exists"
     ),
 ):
-    """Generate an initial compose.yml file."""
+    """Generate an initial compose.yml file and bootstrap required config files."""
 
     compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     overwrite = force
+    # Track compose status and whether we should exit with error after doing other work
+    compose_created = False
+    need_exit_error = False
+
     if compose_file.exists() and not force:
-        typer.confirm(f"Overwrite existing '{compose_file}'?", abort=True)
-        overwrite = True
+        # Ask for confirmation but do not abort – we want to continue with other steps
+        confirmed = typer.confirm(f"Overwrite existing '{compose_file}'?", abort=False)
+        overwrite = bool(confirmed)
+
     try:
         ComposeManager.create_initial_compose(compose_file, force=overwrite)
+        compose_created = True
         logger.info("compose_initialized", extra={"file": str(compose_file)})
     except FileExistsError:
+        need_exit_error = True
+        logger.info("compose_kept_existing", extra={"file": str(compose_file)})
+
+    # Create or update control server auth config only during system init
+    auth_config = config.CONTROL_AUTH_CONFIG_FILE
+    created = False
+    updated = False
+    try:
+        auth_config.parent.mkdir(parents=True, exist_ok=True)
+        if auth_config.exists():
+            if force or typer.confirm(
+                f"Overwrite existing '{auth_config}'?", abort=False
+            ):
+                auth_config.write_text(config.CONTROL_AUTH_CONFIG_TEMPLATE)
+                updated = True
+                logger.info(
+                    "auth_config_updated",
+                    extra={"file": str(auth_config.resolve())},
+                )
+        else:
+            auth_config.write_text(config.CONTROL_AUTH_CONFIG_TEMPLATE)
+            created = True
+            logger.info(
+                "auth_config_created",
+                extra={"file": str(auth_config.resolve())},
+            )
+    except Exception as exc:
         abort(
-            f"Compose file '{compose_file}' already exists",
-            "Use --force to overwrite",
+            f"Failed to write '{auth_config}': {exc}",
+            "Check file permissions or run again with appropriate rights.",
         )
+
     mgr = ServerManager()
     await mgr.fetch_server_list_async()
-    console.print(f"[green]✓[/green] Created '{compose_file}' and updated server list.")
+    # Build a user-friendly status for the auth file
+    if created:
+        auth_msg = f"generated '{auth_config}'"
+    elif updated:
+        auth_msg = f"updated '{auth_config}'"
+    else:
+        auth_msg = f"kept existing '{auth_config}'"
+
+    # Print final message and exit appropriately
+    if compose_created:
+        console.print(
+            f"[green]✓[/green] Created '{compose_file}', {auth_msg}, and updated server list."
+        )
+    else:
+        # Compose not created (kept existing). Still inform the user about other actions.
+        console.print(
+            f"[yellow]⚠[/yellow] Kept existing '{compose_file}', {auth_msg}, and updated server list."
+        )
+        if need_exit_error:
+            abort(
+                f"Compose file '{compose_file}' already exists",
+                "Use --force to overwrite",
+            )
 
 
 @app.command("validate")

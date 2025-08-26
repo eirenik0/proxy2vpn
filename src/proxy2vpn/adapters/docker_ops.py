@@ -137,8 +137,9 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         }
         auth_config = config.CONTROL_AUTH_CONFIG_FILE
         if not auth_config.exists():
-            auth_config.parent.mkdir(parents=True, exist_ok=True)
-            auth_config.write_text(config.CONTROL_AUTH_CONFIG_TEMPLATE)
+            raise RuntimeError(
+                f"Missing '{auth_config}'. Run 'proxy2vpn system init' to create required files."
+            )
         volumes = {
             str(auth_config.resolve()): {
                 "bind": "/gluetun/auth/config.toml",
