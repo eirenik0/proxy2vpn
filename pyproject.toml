@@ -24,6 +24,7 @@ dependencies = [
     "aiohttp",
     "filelock",
     "psutil",
+    "pydantic>=2",
 ]
 
 [tool.towncrier]
