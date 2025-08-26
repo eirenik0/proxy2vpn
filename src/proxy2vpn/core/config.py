@@ -48,13 +48,14 @@ VERIFY_SSL = True
 
 # Mapping of control API endpoints.
 CONTROL_API_ENDPOINTS = {
-    "status": "/status",
-    "openvpn": "/openvpn",
-    "ip": "/ip",
-    "openvpn_status": "/openvpn/status",
-    "dns_status": "/dns/status",
-    "updater_status": "/updater/status",
-    "port_forward": "/openvpn/portforwarded",
+    # Keep keys stable for call sites/tests; update paths to v1 routes
+    "status": "/v1/openvpn/status",
+    "openvpn": "/v1/openvpn/status",  # legacy key pointing to status path
+    "ip": "/v1/publicip/ip",
+    "openvpn_status": "/v1/openvpn/status",
+    "dns_status": "/v1/dns/status",
+    "updater_status": "/v1/updater/status",
+    "port_forward": "/v1/openvpn/portforwarded",
 }
 
 # Path to the control server authentication configuration mounted into
@@ -70,12 +71,21 @@ CONTROL_AUTH_CONFIG_TEMPLATE = """[[roles]]
 name = "proxy2vpn"
 auth = "none"
 routes = [
-  "GET /v1/status",
-  "GET /v1/ip",
-  "POST /v1/openvpn",
+  # OpenVPN status and settings
+  "GET /v1/openvpn/status",
   "PUT /v1/openvpn/status",
-  "GET /v1/dns/status",
-  "GET /v1/updater/status",
   "GET /v1/openvpn/portforwarded",
+  "GET /v1/openvpn/settings",
+
+  # DNS control
+  "GET /v1/dns/status",
+  "PUT /v1/dns/status",
+
+  # Updater control
+  "GET /v1/updater/status",
+  "PUT /v1/updater/status",
+
+  # Public IP
+  "GET /v1/publicip/ip",
 ]
 """
