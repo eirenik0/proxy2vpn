@@ -220,7 +220,10 @@ class ComposeManager:
         anchor_map = CommentedMap(profile.to_anchor())
         # Ensure the expected anchor so validators and merges work nicely
         anchor_map.yaml_set_anchor(f"vpn-base-{profile.name}", always_dump=True)
-        self.data[key] = anchor_map
+        # Insert profile definition before services so profiles stay at the top
+        keys = list(self.data.keys())
+        insert_at = keys.index("services") if "services" in self.data else len(keys)
+        self.data.insert(insert_at, key, anchor_map)
         self.save()
 
     def remove_profile(self, name: str) -> None:
