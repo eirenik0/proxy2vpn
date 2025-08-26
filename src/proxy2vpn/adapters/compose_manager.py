@@ -155,6 +155,11 @@ class ComposeManager:
         del services[name]
         self.save()
 
+    def clear_services(self) -> None:
+        """Remove all services from the compose file."""
+        self.data["services"] = CommentedMap()
+        self.save()
+
     def update_service(self, service: VPNService) -> None:
         """Update an existing service with new configuration"""
         services = self.data.get("services", {})

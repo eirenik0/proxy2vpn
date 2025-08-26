@@ -424,6 +424,9 @@ class FleetManager:
         """Create service definitions in compose file and update added_services list."""
         await asyncio.to_thread(ensure_network, force)
 
+        if force:
+            await asyncio.to_thread(self.compose_manager.clear_services)
+
         for service_plan in services:
             vpn_service = self._create_service_from_plan(service_plan)
             self._add_service_with_force_handling(vpn_service, force)
