@@ -94,9 +94,19 @@ def create(
             ]
         )
 
+    # Ensure parent directory exists with restrictive permissions
+    env_file_path.parent.mkdir(exist_ok=True, mode=0o700)
+
+    # Write environment file
     env_file_path.write_text("\n".join(env_content) + "\n")
 
+    # Set restrictive permissions (owner read/write only) to protect credentials
+    env_file_path.chmod(0o600)
+
     console.print(f"[green]✓[/green] Environment file created at '{env_file_path}'")
+    console.print(
+        "[yellow]ℹ[/yellow]  File permissions set to 0o600 (owner read/write only)"
+    )
     console.print(
         f"[blue]💡 Next: Create a profile with 'proxy2vpn profile add {name} {env_file_path}'[/blue]"
     )

@@ -12,6 +12,9 @@ from proxy2vpn.core.models import Profile, VPNService
 from proxy2vpn.core import config
 from .compose_validator import validate_compose
 from .compose_utils import iter_port_mappings
+from .logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 # Minimal compose template used when initializing a new project
@@ -141,8 +144,19 @@ class ComposeManager:
             anchor = profile_map.yaml_anchor()
             if not anchor or anchor.value != expected_anchor:
                 profile_map.yaml_set_anchor(expected_anchor)
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as exc:
+            # Expected YAML library errors - log but continue
+            logger.warning(
+                "Failed to set YAML anchor for profile",
+                extra={"profile": service.profile, "error": str(exc)},
+            )
+        except Exception as exc:
+            # Unexpected error - log and re-raise to prevent silent corruption
+            logger.error(
+                "Unexpected error setting YAML anchor",
+                extra={"profile": service.profile, "error": str(exc)},
+            )
+            raise
         # Use explicit merge key to ensure broad ruamel.yaml compatibility
         merged_config["<<"] = profile_map
         # Then apply/override service-specific keys
@@ -180,8 +194,19 @@ class ComposeManager:
             anchor = profile_map.yaml_anchor()
             if not anchor or anchor.value != expected_anchor:
                 profile_map.yaml_set_anchor(expected_anchor)
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as exc:
+            # Expected YAML library errors - log but continue
+            logger.warning(
+                "Failed to set YAML anchor for profile",
+                extra={"profile": service.profile, "error": str(exc)},
+            )
+        except Exception as exc:
+            # Unexpected error - log and re-raise to prevent silent corruption
+            logger.error(
+                "Unexpected error setting YAML anchor",
+                extra={"profile": service.profile, "error": str(exc)},
+            )
+            raise
         merged_config = CommentedMap()
         merged_config["<<"] = profile_map
         merged_config.update(CommentedMap(service.to_compose_service()))
@@ -296,14 +321,24 @@ class ComposeManager:
         return port
 
     def save(self) -> None:
+        """Save compose data atomically with backup.
+
+        Uses atomic file operations to prevent data loss:
+        1. Write new data to temp file
+        2. Atomically move current file to backup (if exists)
+        3. Atomically move temp file to current
+        """
         backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
         tmp_path = self.compose_path.with_suffix(self.compose_path.suffix + ".tmp")
         with self.lock:
-            # Create backup before saving
-            if self.compose_path.exists():
-                shutil.copy2(self.compose_path, backup_path)
-
-            # Atomic write: write to temp file, then replace
+            # Write to temp file first (atomic operation)
             with tmp_path.open("w", encoding="utf-8") as f:
                 self.yaml.dump(self.data, f)
+
+            # Create atomic backup by moving current to backup (if exists)
+            # This ensures backup is always consistent with a valid compose file
+            if self.compose_path.exists():
+                os.replace(self.compose_path, backup_path)
+
+            # Finally, atomically move temp file to current location
             os.replace(tmp_path, self.compose_path)
