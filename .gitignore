@@ -8,3 +8,4 @@ cache/
 *.lock
 dist/
 .envrc
+control-server-auth.toml
