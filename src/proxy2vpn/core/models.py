@@ -259,11 +259,29 @@ class Profile(BaseModel):
         return str(value)
 
     def _resolve_env_path(self) -> Path:
-        """Resolve env_file path relative to the compose base dir if available."""
+        """Resolve env_file path relative to the compose base dir if available.
+
+        Security: Validates that resolved path is within base_dir to prevent
+        path traversal attacks (e.g., ../../../etc/passwd).
+        """
         p = Path(self.env_file)
         if not p.is_absolute() and self._base_dir is not None:
-            return (self._base_dir / p).expanduser().resolve()
-        return p.expanduser().resolve()
+            resolved = (self._base_dir / p).expanduser().resolve()
+        else:
+            resolved = p.expanduser().resolve()
+
+        # Prevent path traversal attacks - ensure resolved path is under base_dir
+        if self._base_dir is not None:
+            base_resolved = self._base_dir.resolve()
+            try:
+                resolved.relative_to(base_resolved)
+            except ValueError:
+                raise ValueError(
+                    f"Security: env_file '{self.env_file}' must be under base directory "
+                    f"'{base_resolved}'. Path traversal is not allowed."
+                )
+
+        return resolved
 
     @property
     def provider(self) -> str:
