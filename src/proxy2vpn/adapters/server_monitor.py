@@ -94,7 +94,9 @@ class ServerMonitor:
 
     def __init__(self, fleet_manager, http_client: HTTPClient | None = None):
         self.fleet_manager = fleet_manager
-        self.http_client = http_client or HTTPClient(HTTPClientConfig(base_url=""))
+        self.http_client = http_client or HTTPClient(
+            HTTPClientConfig(base_url="http://localhost")
+        )
         self.availability_cache: dict[str, ServerAvailability] = {}
         self.rotation_history: list[RotationRecord] = []
         self.failed_servers: dict[str, list[datetime]] = {}  # Track failure history

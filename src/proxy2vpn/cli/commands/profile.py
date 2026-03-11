@@ -194,8 +194,13 @@ def delete(
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt"),
 ):
     """Delete a profile's environment file."""
-    compose_file: Path = (ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)
-    env_file_path = compose_file.parent / "profiles" / f"{name}.env"
+    manager = ComposeManager.from_ctx(ctx)
+    try:
+        profile = manager.get_profile(name)
+    except KeyError:
+        abort(f"Profile '{name}' not found")
+
+    env_file_path = profile._resolve_env_path()
     if not env_file_path.exists():
         abort(f"Environment file '{env_file_path}' not found")
     if not force:
@@ -224,24 +229,28 @@ def apply(
     """Create a VPN service from a profile."""
     manager = ComposeManager.from_ctx(ctx)
     try:
-        manager.get_profile(profile)
+        resolved_profile = manager.get_profile(profile)
     except KeyError:
         abort(
             f"Profile '{profile}' not found",
             "Create it with 'proxy2vpn profile create'",
         )
+    try:
+        provider = resolved_profile.provider
+    except ValueError as exc:
+        abort(str(exc))
     if port == 0:
         port = manager.next_available_port(config.DEFAULT_PORT_START)
     if control_port == 0:
         control_port = manager.next_available_control_port(
             config.DEFAULT_CONTROL_PORT_START
         )
-    env = {"VPN_SERVICE_PROVIDER": config.DEFAULT_PROVIDER}
+    env = {"VPN_SERVICE_PROVIDER": provider}
     labels = {
         "vpn.type": "vpn",
         "vpn.port": str(port),
         "vpn.control_port": str(control_port),
-        "vpn.provider": config.DEFAULT_PROVIDER,
+        "vpn.provider": provider,
         "vpn.profile": profile,
         "vpn.location": "",
     }
@@ -262,7 +271,7 @@ def apply(
         name=service,
         port=port,
         control_port=control_port,
-        provider=config.DEFAULT_PROVIDER,
+        provider=provider,
         profile=profile,
         location="",
         environment=env,

@@ -1,3 +1,4 @@
+import json
 import asyncio
 import pytest
 from pathlib import Path
@@ -429,6 +430,8 @@ def test_get_fleet_status_reconstructs_allocator(tmp_path):
     assert status["total_services"] == 3
     assert status["profile_counts"] == {"acc1": 2, "acc2": 1}
     assert status["country_counts"] == {"a": 2, "b": 1}
+    assert status["services_by_provider"]["prov"][0]["name"] == "prov-a-city1"
+    json.dumps(status)
 
 
 def test_start_services_parallel_uses_helper(monkeypatch, fleet_manager):
@@ -562,6 +565,9 @@ def test_multi_provider_fleet_planning(tmp_path):
     all_ports = [s.port for s in plan.services]
     assert len(set(all_ports)) == 6  # All ports should be unique
     assert min(all_ports) == 25000  # Should start from specified port
+    all_control_ports = sorted(s.control_port for s in plan.services)
+    assert len(set(all_control_ports)) == 6
+    assert all_control_ports == list(range(30000, 30006))
 
     # Verify service naming includes provider
     service_names = [s.name for s in plan.services]

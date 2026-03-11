@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from pathlib import Path
 
 import typer
 from ruamel.yaml import YAML
@@ -11,6 +12,11 @@ from .display_utils import console
 from .fleet_manager import FleetConfig, FleetManager, DeploymentPlan
 from .http_client import HTTPClient, HTTPClientConfig
 from .server_monitor import ServerMonitor
+from proxy2vpn.core import config
+
+
+def _compose_file_from_ctx(ctx: typer.Context) -> Path:
+    return Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE))
 
 
 def fleet_plan(
@@ -60,7 +66,7 @@ def fleet_plan(
 
     # Generate deployment plan
     try:
-        fleet_manager = FleetManager()
+        fleet_manager = FleetManager(compose_file_path=_compose_file_from_ctx(ctx))
         plan = fleet_manager.plan_deployment(config_obj)
     except Exception as e:
         console.print(f"[red]❌ Planning failed: {e}[/red]")
@@ -85,7 +91,7 @@ def fleet_plan(
             yaml.dump(plan.to_dict(), f)
         console.print(f"[green]✓[/green] Deployment plan saved to {output}")
         console.print(
-            f"[blue]💡 Run 'proxy2vpn fleet deploy {output}' to execute[/blue]"
+            f"[blue]💡 Run 'proxy2vpn fleet deploy --plan-file {output}' to execute[/blue]"
         )
     except Exception as e:
         console.print(f"[red]❌ Failed to save plan: {e}[/red]")
@@ -108,8 +114,6 @@ def fleet_deploy(
     ),
 ):
     """Deploy VPN fleet from plan file"""
-    _ = ctx
-
     # Load deployment plan
     try:
         yaml = YAML()
@@ -131,7 +135,7 @@ def fleet_deploy(
     console.print(f"[green]🚀 Deploying {len(plan.services)} VPN services...[/green]")
 
     # Execute deployment
-    fleet_manager = FleetManager()
+    fleet_manager = FleetManager(compose_file_path=_compose_file_from_ctx(ctx))
 
     try:
         result = asyncio.run(
@@ -168,23 +172,24 @@ def fleet_status(
 ):
     """Show current fleet status and profile allocation"""
 
-    fleet_manager = FleetManager()
+    fleet_manager = FleetManager(compose_file_path=_compose_file_from_ctx(ctx))
 
     try:
+        fleet_status_data = fleet_manager.get_fleet_status()
+
         if show_allocation:
-            allocation_status = fleet_manager.profile_allocator.get_allocation_status()
-            _display_allocation_table(allocation_status)
+            _display_allocation_table(fleet_status_data["profile_allocation"])
 
         if show_health:
             console.print("\n[bold]Health Status:[/bold]")
-            http_client = HTTPClient(HTTPClientConfig(base_url=""))
+            http_client = HTTPClient(HTTPClientConfig(base_url="http://localhost"))
             server_monitor = ServerMonitor(fleet_manager, http_client=http_client)
-            health_results = asyncio.run(server_monitor.check_fleet_health())
-            asyncio.run(http_client.close())
+            try:
+                health_results = asyncio.run(server_monitor.check_fleet_health())
+            finally:
+                asyncio.run(http_client.close())
             _display_health_results(health_results)
 
-        # Show all VPN services grouped by provider
-        fleet_status_data = fleet_manager.get_fleet_status()
         _display_fleet_services(fleet_status_data, format)
 
     except Exception as e:
@@ -224,7 +229,7 @@ def fleet_rotate(
     )
 
     async def run_rotation():
-        fleet_manager = FleetStateManager()
+        fleet_manager = FleetStateManager(str(_compose_file_from_ctx(ctx)))
         try:
             result = await fleet_manager.rotate_servers(config)
 
@@ -283,7 +288,7 @@ def fleet_scale(
     )
 
     async def run_scaling():
-        fleet_manager = FleetStateManager()
+        fleet_manager = FleetStateManager(str(_compose_file_from_ctx(ctx)))
         try:
             result = await fleet_manager.scale_fleet(config, operation_type, factor)
 
@@ -457,10 +462,10 @@ def _display_fleet_services(fleet_status: dict, format: str):
                 table.add_row(
                     str(i),
                     provider,
-                    service.name,
-                    service.location,
-                    service.profile,
-                    str(service.port),
+                    str(service["name"]),
+                    str(service["location"]),
+                    str(service["profile"]),
+                    str(service["port"]),
                 )
 
             console.print(table)

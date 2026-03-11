@@ -9,6 +9,7 @@ from proxy2vpn.cli.commands.profile import (
     delete as profile_delete,
     remove as profile_remove,
 )
+from proxy2vpn.core.models import Profile
 
 
 def _copy_compose(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -39,11 +40,12 @@ def test_profile_remove(tmp_path):
 
 
 def test_profile_delete_env(tmp_path, monkeypatch):
-    compose_path = _copy_compose(tmp_path)
-    env_dir = tmp_path / "profiles"
-    env_dir.mkdir()
-    env_file = env_dir / "test.env"
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    env_file = tmp_path / "custom-location.env"
     env_file.write_text("KEY=value\n")
+    manager = ComposeManager(compose_path)
+    manager.add_profile(Profile(name="test", env_file=str(env_file)))
     monkeypatch.chdir(tmp_path)
     with _cli_ctx(compose_path) as ctx:
         profile_delete(ctx, "test", force=True)

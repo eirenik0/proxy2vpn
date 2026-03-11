@@ -1,4 +1,4 @@
-.PHONY: help test changelog changelog-draft release lint format format-check integration-test clean all
+.PHONY: help test changelog changelog-draft release lint fmt fmt-check clean all
 
 help: ## Show available targets
 		@echo "Targets:"
@@ -9,9 +9,8 @@ help: ## Show available targets
 		@echo "  lint              Run Python linting (ruff)"
 		@echo "  fmt               Format Python code with ruff"
 		@echo "  fmt-check         Check Python formatting without modifying files"
-		@echo "  integration-test  Run bash integration tests"
 		@echo "  clean             Clean up temporary files and caches"
-		@echo "  all               Run all checks (format, lint, test, integration)"
+		@echo "  all               Run all checks (format check, lint, test)"
 
 test:
 	uv run --with pytest,pytest-xdist pytest -n auto
@@ -46,5 +45,5 @@ clean: ## Clean up temporary files and caches
 	rm -rf src/*.egg-info
 	rm -rf build dist
 
-all: format lint test integration-test ## Run all checks (format, lint, test, integration)
+all: fmt-check lint test ## Run all checks (format check, lint, test)
 	@echo "All checks passed!"

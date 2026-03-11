@@ -118,26 +118,37 @@ class FleetStateManager:
     """
 
     _instance: Optional["FleetStateManager"] = None
+    _instance_compose_path: Optional[str] = None
     _lock = asyncio.Lock()
 
-    def __new__(cls, compose_file_path: Optional[str] = None) -> "FleetStateManager":
-        if cls._instance is None:
+    @classmethod
+    def _resolve_compose_path(cls, compose_file_path: str | Path | None) -> Path:
+        from proxy2vpn.core import config
+
+        compose_path = (
+            Path(compose_file_path) if compose_file_path else config.COMPOSE_FILE
+        )
+        return compose_path.expanduser().resolve()
+
+    def __new__(
+        cls, compose_file_path: str | Path | None = None
+    ) -> "FleetStateManager":
+        compose_path = str(cls._resolve_compose_path(compose_file_path))
+        if cls._instance is None or cls._instance_compose_path != compose_path:
             cls._instance = super().__new__(cls)
+            cls._instance_compose_path = compose_path
         return cls._instance
 
-    def __init__(self, compose_file_path: Optional[str] = None):
+    def __init__(self, compose_file_path: str | Path | None = None):
         # Only initialize once
         if hasattr(self, "_initialized"):
             return
 
-        from proxy2vpn.core import config
-
         # Core managers
-        compose_path = compose_file_path or config.COMPOSE_FILE
-        if isinstance(compose_path, str):
-            compose_path = Path(compose_path)
+        compose_path = self._resolve_compose_path(compose_file_path)
         self.compose_manager = ComposeManager(compose_path)
         self.server_manager = ServerManager()
+        self.compose_path = compose_path
 
         # Fleet state
         self.services: Dict[str, VPNService] = {}
@@ -146,7 +157,7 @@ class FleetStateManager:
         self.last_health_check: Optional[datetime] = None
 
         # HTTP client for health checks - reused across operations
-        self.http_client = HTTPClient(HTTPClientConfig(base_url=""))
+        self.http_client = HTTPClient(HTTPClientConfig(base_url="http://localhost"))
 
         # Port allocation tracking
         self.allocated_ports: Set[int] = set()

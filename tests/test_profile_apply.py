@@ -11,7 +11,9 @@ from proxy2vpn.cli.commands.profile import apply as profile_apply
 def _copy_compose(tmp_path: pathlib.Path) -> pathlib.Path:
     src = pathlib.Path(__file__).parent / "test_compose.yml"
     env_path = tmp_path / "env.test"
-    env_path.write_text("KEY=value\n")
+    env_path.write_text(
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
     dest = tmp_path / "compose.yml"
     text = src.read_text().replace("env.test", str(env_path))
     dest.write_text(text)
@@ -47,3 +49,5 @@ def test_profile_apply(tmp_path):
     assert svc.labels.get("vpn.port") == "7777"
     assert svc.control_port == 30002
     assert svc.labels.get("vpn.control_port") == "30002"
+    assert svc.provider == "expressvpn"
+    assert svc.environment["VPN_SERVICE_PROVIDER"] == "expressvpn"

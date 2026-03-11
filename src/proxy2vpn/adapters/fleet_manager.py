@@ -201,7 +201,7 @@ class FleetManager:
 
         for provider, profile_names in profile_providers.items():
             provider_slots = {p: config.profiles[p] for p in profile_names}
-            current_port = self._plan_provider_services(
+            current_port, current_control_port = self._plan_provider_services(
                 plan,
                 provider,
                 config.countries,
@@ -210,8 +210,6 @@ class FleetManager:
                 current_control_port,
                 config,
             )
-            # Space out control ports per provider
-            current_control_port = current_port + 100
 
         return plan
 
@@ -224,7 +222,7 @@ class FleetManager:
         start_port: int,
         start_control_port: int,
         config: FleetConfig,
-    ) -> int:
+    ) -> tuple[int, int]:
         """Plan services for a specific provider."""
         console.print(
             f"[green]🌍 Planning {provider} services across {len(countries)} countries[/green]"
@@ -324,7 +322,7 @@ class FleetManager:
         console.print(
             f"[green]✓ {provider}: Planned {len([s for s in plan.services if s.provider == provider])} services[/green]"
         )
-        return current_port
+        return current_port, current_control_port
 
     def _validate_service_locations(
         self, services: list[ServicePlan]
@@ -630,17 +628,26 @@ class FleetManager:
         services = self.compose_manager.list_services()
         allocation_status = self.profile_allocator.get_allocation_status()
 
-        fleet_services: dict[str, list[VPNService]] = {}
+        fleet_services: dict[str, list[dict[str, object]]] = {}
         country_counts: dict[str, int] = {}
         profile_counts: dict[str, int] = {
             name: data["used_slots"] for name, data in allocation_status.items()
         }
 
         for service in services:
-            if service.provider:
-                fleet_services.setdefault(service.provider, []).append(service)
-
             country = self._extract_country(service)
+            if service.provider:
+                fleet_services.setdefault(service.provider, []).append(
+                    {
+                        "name": service.name,
+                        "profile": service.profile,
+                        "provider": service.provider,
+                        "location": service.location,
+                        "country": country,
+                        "port": service.port,
+                        "control_port": service.control_port,
+                    }
+                )
             country_counts[country] = country_counts.get(country, 0) + 1
 
         return {
