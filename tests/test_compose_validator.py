@@ -174,7 +174,7 @@ def test_location_validation(tmp_path, monkeypatch):
     monkeypatch.setattr(
         compose_validator, "ServerManager", lambda: DummyServerManager()
     )
-    assert validate_compose(compose) == []
+    assert validate_compose(compose, validate_locations=True) == []
 
     compose.write_text(
         dedent(
@@ -199,5 +199,63 @@ def test_location_validation(tmp_path, monkeypatch):
             """
         )
     )
-    errors = validate_compose(compose)
+    errors = validate_compose(compose, validate_locations=True)
     assert any("invalid location" in e for e in errors)
+
+
+def test_malformed_environment_entries(tmp_path):
+    env = _env(tmp_path)
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        dedent(
+            f"""
+            x-vpn-base-test: &vpn-base-test
+              image: gluetun
+              cap_add: [NET_ADMIN]
+              devices: [/dev/net/tun]
+              env_file: {env}
+            services:
+              svc:
+                <<: *vpn-base-test
+                ports: ["20000:1194/tcp"]
+                environment:
+                  - "BROKEN_ENTRY"
+                  - ["not", "a", "map"]
+                labels:
+                  vpn.type: vpn
+                  vpn.port: "20000"
+                  vpn.profile: test
+            """
+        )
+    )
+    errors = validate_compose(compose)
+    assert any("invalid environment entry" in e for e in errors)
+
+
+def test_malformed_ports_entries(tmp_path):
+    env = _env(tmp_path)
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        dedent(
+            f"""
+            x-vpn-base-test: &vpn-base-test
+              image: gluetun
+              cap_add: [NET_ADMIN]
+              devices: [/dev/net/tun]
+              env_file: {env}
+            services:
+              svc:
+                <<: *vpn-base-test
+                ports:
+                  - 12345
+                  - "not-a-port"
+                environment: {{VAR: "1"}}
+                labels:
+                  vpn.type: vpn
+                  vpn.port: "12345"
+                  vpn.profile: test
+            """
+        )
+    )
+    errors = validate_compose(compose)
+    assert any("invalid port mapping" in e for e in errors)

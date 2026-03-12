@@ -50,6 +50,17 @@ def test_connectivity_failure_includes_direct_ip(monkeypatch):
     assert not result.passed
 
 
+def test_connectivity_errors_are_redacted(monkeypatch):
+    def fake_fetch_ip(proxies=None, timeout=5):
+        raise RuntimeError("failed via http://user:pass@localhost:8080/connect")
+
+    monkeypatch.setattr(diagnostics.ip_utils, "fetch_ip", fake_fetch_ip)
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    result = analyzer.check_connectivity(8080, proxy_user="user", proxy_password="pass")[0]
+    assert "user:pass" not in result.message
+    assert "***:***" in result.message
+
+
 def test_health_score():
     analyzer = diagnostics.DiagnosticAnalyzer()
     results = [

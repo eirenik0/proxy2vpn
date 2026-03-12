@@ -4,6 +4,7 @@ import sys
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.adapters import compose_manager as compose_manager_mod
 from proxy2vpn.core import config
 from proxy2vpn.core.models import Profile, VPNService
 
@@ -204,3 +205,21 @@ def test_recover_from_corruption(tmp_path):
     compose_path.write_text("not: [valid")
     recovered = ComposeManager(compose_path)
     assert recovered.config["health_check_interval"] == "5"
+
+
+def test_validate_compose_file_validate_locations_flag(tmp_path, monkeypatch):
+    compose_path = _copy_compose(tmp_path)
+    manager = ComposeManager(compose_path)
+    captured = {}
+
+    def fake_validate_compose(path, server_manager=None, validate_locations=False):
+        captured["path"] = path
+        captured["validate_locations"] = validate_locations
+        return []
+
+    monkeypatch.setattr(compose_manager_mod, "validate_compose", fake_validate_compose)
+    manager.validate_compose_file()
+    assert captured["validate_locations"] is False
+
+    manager.validate_compose_file(validate_locations=True)
+    assert captured["validate_locations"] is True

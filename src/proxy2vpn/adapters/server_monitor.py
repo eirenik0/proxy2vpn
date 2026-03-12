@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .display_utils import console
 from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError
 from .logging_utils import get_logger
+from .proxy_utils import build_proxy_urls_from_container
+from .proxy_utils import redact_proxy_url
 from proxy2vpn.core.models import VPNService
 
 logger = get_logger(__name__)
@@ -127,9 +129,7 @@ class ServerMonitor:
                 return False
 
             # Test proxy connectivity
-            from .docker_ops import _get_authenticated_proxy_url
-
-            proxies = _get_authenticated_proxy_url(container, str(service.port))
+            proxies = build_proxy_urls_from_container(container, service.port)
             test_url = "http://httpbin.org/ip"
 
             start_time = time.perf_counter()
@@ -152,11 +152,15 @@ class ServerMonitor:
             self._record_failure(service.location)
             return False
         except HTTPClientError as e:
-            logger.error(f"Network error testing service {service.name}: {e}")
+            logger.error(
+                f"Network error testing service {service.name}: {redact_proxy_url(str(e))}"
+            )
             self._record_failure(service.location)
             return False
         except Exception as e:
-            logger.error(f"Error checking service {service.name}: {e}")
+            logger.error(
+                f"Error checking service {service.name}: {redact_proxy_url(str(e))}"
+            )
             return False
 
     def _record_failure(self, location: str):

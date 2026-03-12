@@ -25,6 +25,11 @@ async def init(
     force: bool = typer.Option(
         False, "--force", "-f", help="Overwrite existing compose file if it exists"
     ),
+    refresh_servers: bool = typer.Option(
+        True,
+        "--refresh-servers/--skip-server-refresh",
+        help="Refresh server list from control API during init.",
+    ),
 ):
     """Generate an initial compose.yml file and bootstrap required config files."""
 
@@ -76,8 +81,43 @@ async def init(
             "Check file permissions or run again with appropriate rights.",
         )
 
+    server_list_updated = False
     mgr = ServerManager()
-    await mgr.fetch_server_list_async()
+    has_cache = mgr.cache_file.exists()
+
+    if refresh_servers:
+        try:
+            await mgr.fetch_server_list_async()
+            server_list_updated = True
+        except Exception as exc:
+            if has_cache:
+                stale = not mgr.is_cache_fresh()
+                cache_state = "stale" if stale else "cached"
+                logger.warning(
+                    "server_list_refresh_failed",
+                    extra={"error": str(exc), "cache_state": cache_state},
+                )
+                console.print(
+                    f"[yellow]⚠[/yellow] Could not refresh server list ({exc}); "
+                    f"continuing with {cache_state} cache."
+                )
+            else:
+                raise
+    else:
+        if has_cache:
+            cache_state = "fresh" if mgr.is_cache_fresh() else "stale"
+            if cache_state == "stale":
+                console.print(
+                    "[yellow]⚠[/yellow] Server list refresh disabled; using stale cache."
+                )
+            else:
+                logger.debug(
+                    "server_list_refresh_skipped", extra={"cache_state": cache_state}
+                )
+        else:
+            console.print(
+                "[yellow]⚠[/yellow] Server list refresh disabled and no cache is available."
+            )
     # Build a user-friendly status for the auth file
     if created:
         auth_msg = f"generated '{auth_config}'"
@@ -89,12 +129,14 @@ async def init(
     # Print final message and exit appropriately
     if compose_created:
         console.print(
-            f"[green]✓[/green] Created '{compose_file}', {auth_msg}, and updated server list."
+            f"[green]✓[/green] Created '{compose_file}', {auth_msg}, and "
+            f"{'updated' if server_list_updated else 'kept existing'} server list."
         )
     else:
         # Compose not created (kept existing). Still inform the user about other actions.
         console.print(
-            f"[yellow]⚠[/yellow] Kept existing '{compose_file}', {auth_msg}, and updated server list."
+            f"[yellow]⚠[/yellow] Kept existing '{compose_file}', {auth_msg}, and "
+            f"{'updated' if server_list_updated else 'kept'} server list."
         )
         if need_exit_error:
             abort(
@@ -104,10 +146,22 @@ async def init(
 
 
 @app.command("validate")
-def validate(ctx: typer.Context):
+def validate(
+    ctx: typer.Context,
+    validate_locations: bool = typer.Option(
+        False,
+        "--validate-locations",
+        help="Enable server-location checks using available server list cache.",
+    ),
+):
     """Validate that the compose file is well formed."""
     compose_manager = ComposeManager.from_ctx(ctx)
-    errors = compose_manager.validate_compose_file()
+    effective_validate_locations = (
+        validate_locations if isinstance(validate_locations, bool) else False
+    )
+    errors = compose_manager.validate_compose_file(
+        validate_locations=effective_validate_locations
+    )
     if errors:
         for err in errors:
             typer.echo(f"- {err}", err=True)

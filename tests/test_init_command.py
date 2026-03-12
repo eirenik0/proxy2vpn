@@ -2,11 +2,13 @@ import os
 import pathlib
 import subprocess
 import sys
+from time import time
 
 from ruamel.yaml import YAML
 from types import SimpleNamespace
 
 from proxy2vpn.cli.commands.system import init as system_init
+from proxy2vpn.cli.commands.system import validate as system_validate
 from proxy2vpn.adapters.server_manager import ServerManager
 
 
@@ -64,3 +66,64 @@ def test_system_init_updates_servers(tmp_path, monkeypatch):
     ctx = SimpleNamespace(obj={"compose_file": tmp_path / "compose.yml"})
     system_init(ctx, force=True)
     assert called["update"] is True
+
+
+def test_system_init_uses_cached_server_list_when_refresh_fails(tmp_path, monkeypatch):
+    cache_file = tmp_path / "servers.json"
+    cache_file.write_text("{}")
+    cache_file.touch()
+    os.utime(cache_file, (time() - 60, time() - 60))
+    called = {}
+
+    class OfflineManager:
+        def __init__(self) -> None:
+            self.cache_file = cache_file
+
+        async def fetch_server_list_async(self, verify: bool = True):
+            called["update"] = True
+            raise RuntimeError("network down")
+
+        def is_cache_fresh(self):
+            return False
+
+    # Redirect ServerManager creation to use a deterministic fake with stale cache.
+    monkeypatch.setattr("proxy2vpn.cli.commands.system.ServerManager", lambda: OfflineManager())
+    ctx = SimpleNamespace(obj={"compose_file": tmp_path / "compose.yml"})
+    monkeypatch.chdir(tmp_path)
+    # No exception should be raised when cached data exists and refresh fails.
+    system_init(ctx, force=True)
+    assert called["update"] is True
+
+
+def test_system_validate_defaults_to_no_location_validation(monkeypatch):
+    called = {}
+
+    class FakeManager:
+        def validate_compose_file(self, validate_locations: bool = False):
+            called["validate_locations"] = validate_locations
+            return []
+
+    monkeypatch.setattr(
+        "proxy2vpn.cli.commands.system.ComposeManager",
+        type("ComposeManager", (), {"from_ctx": classmethod(lambda _cls, _ctx: FakeManager())}),
+    )
+    ctx = SimpleNamespace(obj={})
+    system_validate(ctx)
+    assert called["validate_locations"] is False
+
+
+def test_system_validate_explicit_flag_triggers_location_checks(monkeypatch):
+    called = {}
+
+    class FakeManager:
+        def validate_compose_file(self, validate_locations: bool = False):
+            called["validate_locations"] = validate_locations
+            return []
+
+    monkeypatch.setattr(
+        "proxy2vpn.cli.commands.system.ComposeManager",
+        type("ComposeManager", (), {"from_ctx": classmethod(lambda _cls, _ctx: FakeManager())}),
+    )
+    ctx = SimpleNamespace(obj={})
+    system_validate(ctx, validate_locations=True)
+    assert called["validate_locations"] is True

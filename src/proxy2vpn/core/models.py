@@ -151,7 +151,9 @@ class VPNService(BaseModel):
             environment=env_dict,
             labels=labels,
         )
-        # Parse service-specific credentials from labels
+        # Parse legacy service-specific credentials from labels.
+        # These labels are read for backward compatibility but will no longer be
+        # serialized by to_compose_service().
         credentials = None
         httpproxy_user = labels.get("vpn.httpproxy_user")
         httpproxy_password = labels.get("vpn.httpproxy_password")
@@ -211,12 +213,6 @@ class VPNService(BaseModel):
         labels.setdefault("vpn.port", str(self.container.proxy_port))
         labels.setdefault("vpn.control_port", str(self.container.control_port))
 
-        # Store service credentials in labels for serialization
-        if self.credentials:
-            if self.credentials.httpproxy_user:
-                labels["vpn.httpproxy_user"] = self.credentials.httpproxy_user
-            if self.credentials.httpproxy_password:
-                labels["vpn.httpproxy_password"] = self.credentials.httpproxy_password
         volumes = [
             f"{config.CONTROL_AUTH_CONFIG_FILE}:/gluetun/auth/config.toml:ro",
         ]

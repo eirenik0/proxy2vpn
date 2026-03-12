@@ -51,20 +51,35 @@ def parse_env(env: Any) -> dict[str, str]:
 
     Accepts a dict or a list of "KEY=VAL" entries; ignores invalid lines.
     """
+    return parse_env_with_issues(env)[0]
+
+
+def parse_env_with_issues(env: Any) -> tuple[dict[str, str], list[str]]:
+    """Parse compose ``environment`` entries and return parse issues.
+
+    Returns ``(parsed, issues)`` where ``parsed`` is a normalized mapping and
+    ``issues`` contains human-readable parse errors.
+    """
     if not env:
-        return {}
+        return {}, []
     if isinstance(env, dict):
-        return {str(k): str(v) for k, v in env.items()}
+        return {str(k): str(v) for k, v in env.items()}, []
+    if not isinstance(env, list):
+        return {}, ["environment must be a mapping or list of 'KEY=VALUE' entries"]
+
     result: dict[str, str] = {}
-    for item in env or []:
+    issues: list[str] = []
+    for item in env:
         try:
             if isinstance(item, str) and "=" in item:
                 k, v = item.split("=", 1)
                 result[k] = v
+            else:
+                issues.append(f"invalid environment entry: {item!r}")
         except Exception:
-            # Ignore malformed entries; validator will surface errors elsewhere
-            continue
-    return result
+            # Ignore malformed entries; caller handles issues from this helper.
+            issues.append(f"invalid environment entry: {item!r}")
+    return result, issues
 
 
 def iter_port_mappings(ports: Any) -> Iterator[Tuple[int, int]]:
@@ -73,16 +88,34 @@ def iter_port_mappings(ports: Any) -> Iterator[Tuple[int, int]]:
     Supports string formats like "8888:8888", "0.0.0.0:8888:8888/tcp" and
     mapping forms like {target: 8888, published: 20000}.
     """
+    for host, cont in iter_port_mappings_with_issues(ports)[0]:
+        yield host, cont
+
+
+def iter_port_mappings_with_issues(
+    ports: Any,
+) -> tuple[list[Tuple[int, int]], list[str]]:
+    """Parse compose ``ports`` entries and return parse issues.
+
+    Returns ``(parsed, issues)`` where ``parsed`` is a list of ``(host, target)``
+    tuples.
+    """
     if not ports:
-        return
-    for p in ports or []:
+        return [], []
+    if not isinstance(ports, list):
+        return [], ["ports must be a list"]
+
+    parsed: list[Tuple[int, int]] = []
+    issues: list[str] = []
+    for p in ports:
         try:
             if isinstance(p, dict):
                 target = p.get("target")
                 published = p.get("published") or p.get("host_port")
                 if target is None or published is None:
+                    issues.append(f"invalid port mapping: {p!r}")
                     continue
-                yield int(published), int(target)
+                parsed.append((int(published), int(target)))
                 continue
             s = str(p)
             parts = s.split(":")
@@ -93,11 +126,13 @@ def iter_port_mappings(ports: Any) -> Iterator[Tuple[int, int]]:
             elif len(parts) >= 3:
                 host_port = int(parts[-2])
             else:
+                issues.append(f"invalid port mapping: {p!r}")
                 continue
-            yield host_port, cont_port
+            parsed.append((host_port, cont_port))
         except Exception:
-            # Skip invalid entries; callers may treat absence as an error
-            continue
+            # Ignore malformed entries and return structured issues for validation.
+            issues.append(f"invalid port mapping: {p!r}")
+    return parsed, issues
 
 
 def find_host_port_for_target(ports: Any, target: int) -> int | None:

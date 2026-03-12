@@ -6,6 +6,8 @@ from typing import Iterable
 from pydantic import BaseModel, ConfigDict
 
 from proxy2vpn.adapters import ip_utils
+from proxy2vpn.adapters.proxy_utils import build_proxy_urls
+from proxy2vpn.adapters.proxy_utils import redact_proxy_url
 
 
 class DiagnosticResult(BaseModel):
@@ -89,16 +91,7 @@ class DiagnosticAnalyzer:
         direct_ip: str | None = None,
     ) -> list[DiagnosticResult]:
         """Connectivity + DNS leak checks with HTTP proxy authentication support."""
-        # Build proxy URL with authentication if provided
-        if proxy_user and proxy_password:
-            proxy_url = f"http://{proxy_user}:{proxy_password}@localhost:{port}"
-        else:
-            proxy_url = f"http://localhost:{port}"
-
-        proxies = {
-            "http": proxy_url,
-            "https": proxy_url,
-        }
+        proxies = build_proxy_urls(port, username=proxy_user, password=proxy_password)
 
         try:
             # Use pre-fetched direct IP if provided, otherwise fetch it
@@ -153,11 +146,12 @@ class DiagnosticAnalyzer:
             ]
 
         except Exception as e:
+            message = redact_proxy_url(str(e))
             return [
                 DiagnosticResult(
                     check="connectivity",
                     passed=False,
-                    message=f"Connectivity test failed: {e}",
+                    message=f"Connectivity test failed: {message}",
                     recommendation="Check if container port {port} is accessible",
                 )
             ]

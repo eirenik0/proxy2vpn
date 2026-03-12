@@ -6,7 +6,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.nodes import MappingNode, ScalarNode
 
 from .server_manager import ServerManager
-from .compose_utils import iter_port_mappings, parse_env
+from .compose_utils import iter_port_mappings_with_issues, parse_env_with_issues
 
 
 class ValidationError(Exception):
@@ -28,7 +28,9 @@ def _parse_yaml(path: Path):
 
 
 def validate_compose(
-    path: Path, server_manager: ServerManager | None = None
+    path: Path,
+    server_manager: ServerManager | None = None,
+    validate_locations: bool = False,
 ) -> list[str]:
     """Validate a docker compose file and return a list of errors."""
 
@@ -38,7 +40,7 @@ def validate_compose(
     except Exception as exc:  # pragma: no cover - error path
         return [f"YAML syntax error: {exc}"]
 
-    if server_manager is None:
+    if validate_locations and server_manager is None:
         try:
             server_manager = ServerManager()
             server_manager.update_servers()
@@ -123,30 +125,26 @@ def validate_compose(
                 if label not in labels:
                     errors.append(f"Service '{svc_name}' missing label '{label}'")
 
-            # port mappings and duplicates
-            # Evaluate and validate port mappings using shared parser
-            raw_ports = svc_data.get("ports", []) or []
-            if raw_ports:
-                for entry in raw_ports:
-                    # Detect invalid entries by checking if parser yields nothing
-                    yielded = False
-                    for host_port, _ in iter_port_mappings([entry]):
-                        yielded = True
-                        other = ports_seen.get(host_port)
-                        if other and other != svc_name:
-                            errors.append(
-                                f"Duplicate port {host_port} used by services '{other}' and '{svc_name}'"
-                            )
-                        else:
-                            ports_seen[host_port] = svc_name
-                    if not yielded:
-                        errors.append(
-                            f"Service '{svc_name}' invalid port mapping '{entry}'"
-                        )
+            env_entries = svc_data.get("environment", []) or []
+            env_dict, env_issues = parse_env_with_issues(env_entries)
+            for issue in env_issues:
+                errors.append(f"Service '{svc_name}' {issue}")
 
-            if server_manager is not None:
-                env_entries = svc_data.get("environment", []) or []
-                env_dict: dict[str, str] = parse_env(env_entries)
+            # Port mappings and duplicates
+            raw_ports = svc_data.get("ports", []) or []
+            parsed_ports, port_issues = iter_port_mappings_with_issues(raw_ports)
+            for issue in port_issues:
+                errors.append(f"Service '{svc_name}' {issue}")
+            for host_port, _ in parsed_ports:
+                other = ports_seen.get(host_port)
+                if other and other != svc_name:
+                    errors.append(
+                        f"Duplicate port {host_port} used by services '{other}' and '{svc_name}'"
+                    )
+                else:
+                    ports_seen[host_port] = svc_name
+
+            if validate_locations and server_manager is not None:
                 provider = labels.get("vpn.provider") or env_dict.get(
                     "VPN_SERVICE_PROVIDER"
                 )

@@ -153,6 +153,36 @@ def test_collect_proxy_info(monkeypatch):
     assert result_no_auth[0]["password"] == ""
 
 
+def test_analyze_container_logs_redacts_proxy_error_messages(monkeypatch):
+    class DummyContainer:
+        name = "vpn-test"
+        labels = {"vpn.port": "8080"}
+        attrs = {"Config": {"Env": ["HTTPPROXY_USER=user", "HTTPPROXY_PASSWORD=pass"]}}
+
+        def reload(self):
+            pass
+
+        def logs(self, *args, **kwargs):
+            return [b"ok"]
+
+    class DummyContainers:
+        def get(self, name):
+            return DummyContainer()
+
+    class DummyClient:
+        containers = DummyContainers()
+
+    def fake_fetch_ip(*args, **kwargs):
+        raise RuntimeError("request failed: http://user:pass@localhost:8080")
+
+    monkeypatch.setattr(docker_ops, "_client", lambda: DummyClient())
+    monkeypatch.setattr(docker_ops.ip_utils, "fetch_ip", fake_fetch_ip)
+
+    results = docker_ops.analyze_container_logs("vpn-test")
+    assert any("***:***" in result.message for result in results)
+    assert all("user:pass" not in result.message for result in results)
+
+
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
 def test_restart_and_logs():
     name = "proxy2vpn-test-logs"

@@ -57,7 +57,7 @@ class ComposeManager:
                     if not isinstance(data, CommentedMap):
                         data = CommentedMap(data)
 
-                validate_compose(self.compose_path)
+                validate_compose(self.compose_path, validate_locations=False)
                 return data
             except Exception:
                 # Try to recover from backup if available
@@ -95,9 +95,9 @@ class ComposeManager:
         """Return global configuration stored under x-config."""
         return self.data.get("x-config", {})
 
-    def validate_compose_file(self) -> list[str]:
+    def validate_compose_file(self, validate_locations: bool = False) -> list[str]:
         """Validate a docker compose file and return a list of errors."""
-        return validate_compose(self.compose_path)
+        return validate_compose(self.compose_path, validate_locations=validate_locations)
 
     def list_services(self) -> list[VPNService]:
         services = self.data.get("services", {})

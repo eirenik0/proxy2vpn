@@ -11,6 +11,10 @@ from proxy2vpn.core import config
 from .compose_manager import ComposeManager
 from .display_utils import console
 from .logging_utils import get_logger
+from .proxy_utils import (
+    build_proxy_urls_from_container,
+    extract_proxy_credentials_from_env,
+)
 from . import ip_utils
 
 import docker
@@ -301,9 +305,17 @@ def container_logs(name: str, lines: int = 100, follow: bool = False) -> Iterato
         container = client.containers.get(name)
         if follow:
             for line in container.logs(stream=True, follow=True, tail=lines):
-                yield line.decode().rstrip()
+                if isinstance(line, bytes):
+                    yield line.decode().rstrip()
+                else:
+                    yield str(line).rstrip()
         else:
-            output = container.logs(tail=lines).decode().splitlines()
+            output = container.logs(tail=lines)
+            if isinstance(output, list):
+                for line in output:
+                    yield str(line.decode().rstrip()) if isinstance(line, bytes) else str(line)
+                return
+            output = output.decode().splitlines()
             for line in output:
                 yield line
     except DockerException as exc:
@@ -412,14 +424,8 @@ def analyze_container_logs(
         port = int(port_label) if port_label and port_label.isdigit() else None
 
         # Extract HTTP proxy credentials from container environment
-        proxy_user = None
-        proxy_password = None
         env_vars = container.attrs.get("Config", {}).get("Env", [])
-        for env_var in env_vars:
-            if env_var.startswith("HTTPPROXY_USER="):
-                proxy_user = env_var.split("=", 1)[1]
-            elif env_var.startswith("HTTPPROXY_PASSWORD="):
-                proxy_password = env_var.split("=", 1)[1]
+        proxy_user, proxy_password = extract_proxy_credentials_from_env(env_vars)
 
         return analyzer.analyze(
             logs,
@@ -494,30 +500,10 @@ def _get_authenticated_proxy_url(container: Container, port: str) -> dict[str, s
     unauthenticated URLs if credentials are not available.
     """
     try:
-        # Extract environment variables from container
-        env_list = container.attrs.get("Config", {}).get("Env", [])
-        env_vars = {}
-        for env_var in env_list:
-            if "=" in env_var:
-                key, value = env_var.split("=", 1)
-                env_vars[key] = value
-
-        # Check for proxy credentials
-        proxy_user = env_vars.get("HTTPPROXY_USER")
-        proxy_password = env_vars.get("HTTPPROXY_PASSWORD")
-
-        if proxy_user and proxy_password:
-            # Use authenticated proxy URLs
-            auth_url = f"http://{proxy_user}:{proxy_password}@localhost:{port}"
-            return {"http": auth_url, "https": auth_url}
-        else:
-            # Fall back to unauthenticated proxy URLs
-            base_url = f"http://localhost:{port}"
-            return {"http": base_url, "https": base_url}
+        return build_proxy_urls_from_container(container, port)
     except Exception:
         # Fall back to unauthenticated proxy URLs on any error
-        base_url = f"http://localhost:{port}"
-        return {"http": base_url, "https": base_url}
+        return {"http": f"http://localhost:{port}", "https": f"http://localhost:{port}"}
 
 
 def get_container_ip(container: Container) -> str:
@@ -565,12 +551,8 @@ async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str,
 
     for container in containers:
         # Extract environment variables simply
-        env_vars = {}
-        if hasattr(container, "attrs") and container.attrs:
-            for env_var in container.attrs.get("Config", {}).get("Env", []):
-                if "=" in env_var:
-                    key, value = env_var.split("=", 1)
-                    env_vars[key] = value
+        env_vars = container.attrs.get("Config", {}).get("Env", [])
+        proxy_user, proxy_password = extract_proxy_credentials_from_env(env_vars)
 
         status = "active" if container.status == "running" else "stopped"
         host = host_ip if container.status == "running" else ""
@@ -579,10 +561,10 @@ async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str,
             {
                 "host": host,
                 "port": container.labels.get("vpn.port", ""),
-                "username": env_vars.get("HTTPPROXY_USER", "")
+                "username": proxy_user or ""
                 if include_credentials
                 else "",
-                "password": env_vars.get("HTTPPROXY_PASSWORD", "")
+                "password": proxy_password or ""
                 if include_credentials
                 else "",
                 "location": container.labels.get("vpn.location", ""),
