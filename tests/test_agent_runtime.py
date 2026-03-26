@@ -1,4 +1,5 @@
 import asyncio
+from asyncio import threads as asyncio_threads
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -157,6 +158,35 @@ def test_agent_run_once_healthy_updates_snapshots_only(
     assert watchdog.store.state_file.exists()
     assert watchdog.store.load_incidents() == []
     assert calls["status"] == 1
+
+
+def test_agent_run_once_executes_sync_diagnostics_off_event_loop(
+    agent_compose_file, monkeypatch
+):
+    monkeypatch.setattr(agent_runtime.asyncio, "to_thread", asyncio_threads.to_thread)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+
+    def fake_analyze_container_logs(*args, **kwargs):
+        with pytest.raises(RuntimeError):
+            asyncio.get_running_loop()
+        return healthy_results()
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        fake_analyze_container_logs,
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+    state = asyncio.run(watchdog.run_once())
+
+    assert state.status.unhealthy_count == 0
+    assert state.services[0].health_score == 100
+    assert watchdog.store.load_incidents() == []
 
 
 def test_agent_first_unhealthy_cycle_restarts_tunnel(

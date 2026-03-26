@@ -276,12 +276,7 @@ class AgentWatchdog:
             container_status = getattr(container, "status", "unknown") or "unknown"
             if container_status == "running":
                 analyzer = DiagnosticAnalyzer()
-                results = docker_ops.analyze_container_logs(
-                    service.name,
-                    lines=20,
-                    analyzer=analyzer,
-                    timeout=5,
-                )
+                results = await self._analyze_service_logs(service.name, analyzer)
                 health_score = analyzer.health_score(results)
                 control_api_reachable = await self._control_api_reachable(service)
 
@@ -491,17 +486,29 @@ class AgentWatchdog:
             }
 
         analyzer = DiagnosticAnalyzer()
-        results = docker_ops.analyze_container_logs(
-            service.name,
-            lines=20,
-            analyzer=analyzer,
-            timeout=5,
-        )
+        results = await self._analyze_service_logs(service.name, analyzer)
         return {
             "container_status": container_status,
             "health_score": analyzer.health_score(results),
             "results": results,
         }
+
+    async def _analyze_service_logs(
+        self,
+        service_name: str,
+        analyzer: DiagnosticAnalyzer,
+        lines: int = 20,
+        timeout: int = 5,
+    ) -> list[DiagnosticResult]:
+        # Keep synchronous diagnostics off the watchdog event loop because
+        # connectivity checks use sync IP helpers that manage their own loop.
+        return await asyncio.to_thread(
+            docker_ops.analyze_container_logs,
+            service_name,
+            lines,
+            analyzer,
+            timeout,
+        )
 
     def _append_action(
         self,
