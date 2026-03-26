@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.17.0]
+
+### Bug fixes
+
+- Run agent health diagnostics in a worker thread so incident checks stop tripping the sync-only `fetch_ip()` helper. (#220)
+- Fixed fleet/server rotation to update VPN service locations through the mutable config model instead of assigning to the read-only `VPNService.location` property. (#222)
+- The watchdog now treats isolated auth failures on an otherwise healthy shared profile as service-specific and restarts the tunnel before opening an auth incident, while investigations degrade gracefully on peer probe failures and only use matching auth/config peer evidence for profile-wide conclusions. (#224)
+- Rotation now retries verification on the same candidate with `vpn test` semantics before switching cities, logs per-service rotation attempts and fails after three city attempts per server, tracks recently bad cities to avoid during the same run, defers daemon-triggered rotation escalation until a service stays degraded for more than five minutes, renames the compose service/container to match the new city, migrates other active incidents to the renamed service so watchdog resolution still works, records requested and final rotation changes for later agent investigation, only succeeds when the replacement endpoint becomes healthy with a verifiably new egress IP, and avoids showing a health score of 0 when connectivity is confirmed but stale logs still contain older failures. (#225)
+- Block `fleet deploy` while the local agent watchdog is running to avoid deployment-state races. (#226)
+- Isolate batch health assessment failures, improve country-scoped breaker parsing for multi-word countries, and clean up failed VPN starts so created containers do not linger on port conflicts. (#227)
+- Skip rollback cleanup for forced fleet deploy failures, since there is no prior working state to restore. (#228)
+- Fix fleet deploy summaries so forced parallel deploys report partial success and current fleet status correctly. (#229)
+- Proxy2VPN now emits the control auth file as a bind mount and validates compose files that accidentally treat it as a named volume. (#230)
+
+### Features
+
+- Add a local `proxy2vpn agent` watchdog with compose-root state, safe automatic remediation, and approval-based service rotation. (#215)
+- Add optional OpenAI-backed incident enrichment for the local agent using `gpt-5-nano` and structured responses. (#216)
+- Add detached `proxy2vpn agent run --daemon` and `proxy2vpn agent stop` commands with PID and log-file tracking. (#218)
+- Added `proxy2vpn agent investigate` to persist incident investigations and print operator action plans for watchdog incidents. (#221)
+- `system diagnose` now reports the Docker network interconnection state for `proxy2vpn_network` alongside per-container health. (#231)
+
+### Miscellaneous
+
+- Changed the GitHub release workflow to publish immediately instead of creating a draft release first. (#214)
+- Move watchdog settings into a dedicated `proxy2vpn.agent.config` module and centralize agent env overrides there. (#217)
+- Moved Gluetun control auth environment handling into a typed `pydantic-settings` config instead of parsing env vars directly in the HTTP client. (#223)
+
+
 ## [0.16.1]
 
 ### Bug fixes
