@@ -56,6 +56,29 @@ def test_init_requires_force(tmp_path):
     assert result.returncode == 0
 
 
+def test_system_validate_allows_profile_only_workspace(tmp_path):
+    cache_dir = tmp_path / ".cache" / "proxy2vpn"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "servers.json").write_text(
+        '{"version": 1, "expressvpn": {"servers": []}}'
+    )
+
+    env_file = tmp_path / "profiles" / "dev.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text(
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=test\nOPENVPN_PASSWORD=secret\n"
+    )
+
+    result = _run_proxy2vpn(["system", "init", "--skip-server-refresh"], tmp_path)
+    assert result.returncode == 0
+
+    result = _run_proxy2vpn(["profile", "add", "dev", str(env_file)], tmp_path)
+    assert result.returncode == 0
+
+    result = _run_proxy2vpn(["system", "validate"], tmp_path)
+    assert result.returncode == 0
+
+
 def test_system_init_updates_servers(tmp_path, monkeypatch):
     called = {}
 

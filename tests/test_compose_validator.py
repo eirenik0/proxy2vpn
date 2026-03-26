@@ -43,7 +43,7 @@ def test_valid_compose(tmp_path):
     assert validate_compose(compose) == []
 
 
-def test_orphaned_profile(tmp_path):
+def test_unused_profile_is_allowed(tmp_path):
     env = _env(tmp_path)
     compose = tmp_path / "compose.yml"
     compose.write_text(
@@ -72,7 +72,7 @@ def test_orphaned_profile(tmp_path):
         )
     )
     errors = validate_compose(compose)
-    assert any("not used" in e for e in errors)
+    assert errors == []
 
 
 def test_duplicate_ports(tmp_path):

@@ -90,7 +90,6 @@ def validate_compose(
             services_node = value_node
             break
     services_data = data.get("services", {})
-    used_profiles: set[str] = set()
     ports_seen: dict[int, str] = {}
 
     if services_node is not None:
@@ -113,7 +112,6 @@ def validate_compose(
                     errors.append(
                         f"Service '{svc_name}' references unknown profile '{profile_name}'"
                     )
-                used_profiles.add(profile_name)
 
             # required service fields
             for field in SERVICE_REQUIRED_FIELDS:
@@ -165,10 +163,5 @@ def validate_compose(
                     errors.append(
                         f"Service '{svc_name}' invalid location '{location}' for {provider}"
                     )
-
-    # Orphaned profiles
-    for name in profiles:
-        if name not in used_profiles:
-            errors.append(f"Profile '{name}' is not used by any service")
 
     return errors

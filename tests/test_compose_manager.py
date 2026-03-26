@@ -5,6 +5,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters import compose_manager as compose_manager_mod
+from proxy2vpn.adapters.compose_validator import validate_compose
 from proxy2vpn.core import config
 from proxy2vpn.core.models import Profile, VPNService
 
@@ -130,6 +131,7 @@ def test_add_service_after_init(tmp_path):
     loaded_service = manager.get_service("vpn1")
     assert loaded_service.port == 12345
     assert loaded_service.profile == "andr"
+    assert validate_compose(compose_path) == []
 
 
 def test_no_duplicate_profile_anchors(tmp_path):

@@ -126,34 +126,33 @@ class ComposeManager:
         prof = self.get_profile(svc.profile)
         return svc, prof
 
-    def add_service(self, service: VPNService) -> None:
-        services = self.data.setdefault("services", {})
-        if service.name in services:
-            raise ValueError(f"Service '{service.name}' already exists")
-
-        # Simple approach: merge profile and service config directly
-        profile_key = f"x-vpn-base-{service.profile}"
+    def _profile_map_for_service(self, profile_name: str) -> CommentedMap:
+        profile_key = f"x-vpn-base-{profile_name}"
         if profile_key not in self.data:
-            raise KeyError(f"Profile '{service.profile}' not found")
+            raise KeyError(f"Profile '{profile_name}' not found")
 
         profile_map = self.data[profile_key]
-        # Build minimal service config and merge with profile via YAML merge key
-        service_config = CommentedMap(service.to_compose_service())
-        merged_config = CommentedMap()
-        # Ensure profile has expected anchor without forcing duplicate dumps
-        expected_anchor = f"vpn-base-{service.profile}"
+        expected_anchor = f"vpn-base-{profile_name}"
         try:
             anchor = profile_map.yaml_anchor()
             if not anchor or anchor.value != expected_anchor:
                 profile_map.yaml_set_anchor(expected_anchor)
         except Exception:
             pass
-        # Use explicit merge key to ensure broad ruamel.yaml compatibility
-        merged_config["<<"] = profile_map
-        # Then apply/override service-specific keys
-        merged_config.update(service_config)
+        return profile_map
 
-        services[service.name] = merged_config
+    def _merged_service_config(self, service: VPNService) -> CommentedMap:
+        profile_map = self._profile_map_for_service(service.profile)
+        merged_config = CommentedMap()
+        merged_config.add_yaml_merge([(0, profile_map)])
+        merged_config.update(CommentedMap(service.to_compose_service()))
+        return merged_config
+
+    def add_service(self, service: VPNService) -> None:
+        services = self.data.setdefault("services", {})
+        if service.name in services:
+            raise ValueError(f"Service '{service.name}' already exists")
+        services[service.name] = self._merged_service_config(service)
         self.save()
 
     def remove_service(self, name: str) -> None:
@@ -173,25 +172,7 @@ class ComposeManager:
         services = self.data.get("services", {})
         if service.name not in services:
             raise KeyError(f"Service '{service.name}' not found")
-
-        # Rebuild service entry using YAML merge with profile
-        profile_key = f"x-vpn-base-{service.profile}"
-        if profile_key not in self.data:
-            raise KeyError(f"Profile '{service.profile}' not found")
-
-        profile_map = self.data[profile_key]
-        expected_anchor = f"vpn-base-{service.profile}"
-        try:
-            anchor = profile_map.yaml_anchor()
-            if not anchor or anchor.value != expected_anchor:
-                profile_map.yaml_set_anchor(expected_anchor)
-        except Exception:
-            pass
-        merged_config = CommentedMap()
-        merged_config["<<"] = profile_map
-        merged_config.update(CommentedMap(service.to_compose_service()))
-
-        services[service.name] = merged_config
+        services[service.name] = self._merged_service_config(service)
         self.save()
 
     # ------------------------------------------------------------------
