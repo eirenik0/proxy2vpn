@@ -1,0 +1,15 @@
+{
+  "status": {
+    "compose_path": "/Users/eirenik0/Projects/Fluxomnia/proxy2vpn/tests/test_fleet_compose.yml",
+    "daemon_mode": "inactive",
+    "started_at": null,
+    "last_loop_at": null,
+    "interval_seconds": 30,
+    "service_count": 0,
+    "unhealthy_count": 0,
+    "last_error": null,
+    "llm_mode": "disabled"
+  },
+  "services": [],
+  "actions": []
+}

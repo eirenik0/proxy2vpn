@@ -212,18 +212,78 @@ def recreate_vpn_container(service: VPNService, profile: Profile) -> Container:
     return create_vpn_container(service, profile)
 
 
+def _should_cleanup_failed_start(container: Container, exc: DockerException) -> bool:
+    """Return True when a failed start should remove the container."""
+
+    error_text = str(exc).lower()
+    if "port is already allocated" in error_text:
+        return True
+    if "address already in use" in error_text:
+        return True
+    if "failed to create endpoint" in error_text:
+        return True
+
+    try:
+        container.reload()
+    except DockerException:
+        pass
+
+    state = {}
+    try:
+        state = container.attrs.get("State", {})
+    except Exception:
+        state = {}
+
+    status = str(state.get("Status") or getattr(container, "status", "")).lower()
+    return status == "created"
+
+
+def _cleanup_failed_start(container: Container, exc: DockerException) -> None:
+    """Remove a container that failed to start cleanly."""
+
+    if not _should_cleanup_failed_start(container, exc):
+        return
+
+    container_name = getattr(container, "name", "<unknown>")
+    try:
+        container.remove(force=True)
+        logger.warning(
+            "container_start_failed_cleanup",
+            extra={"container_name": container_name, "error": str(exc)},
+        )
+        console.print(f"[yellow]🧹 Removed failed container:[/yellow] {container_name}")
+    except DockerException as cleanup_exc:
+        logger.warning(
+            "container_start_cleanup_failed",
+            extra={
+                "container_name": container_name,
+                "error": str(exc),
+                "cleanup_error": str(cleanup_exc),
+            },
+        )
+
+
 def start_container(name: str) -> Container:
     """Start an existing container by name."""
     client = _client()
     try:
         container = client.containers.get(name)
+    except DockerException as exc:
+        logger.error(
+            "container_start_failed", extra={"container_name": name, "error": str(exc)}
+        )
+        raise  # Let the original exception propagate to preserve NotFound type
+
+    try:
         container.start()
         logger.info("container_started", extra={"container_name": name})
         console.print(f"[green]🚀 Started container:[/green] {name}")
         return container
     except DockerException as exc:
+        _cleanup_failed_start(container, exc)
         logger.error(
-            "container_start_failed", extra={"container_name": name, "error": str(exc)}
+            "container_start_failed",
+            extra={"container_name": name, "error": str(exc)},
         )
         raise  # Let the original exception propagate to preserve NotFound type
 
@@ -232,16 +292,14 @@ def start_vpn_service(service: VPNService, profile: Profile, force: bool) -> Con
     """Ensure a VPN service container exists and is running."""
 
     if force:
-        container = recreate_vpn_container(service, profile)
-        container.start()
-        return container
+        recreate_vpn_container(service, profile)
+        return start_container(service.name)
 
     try:
         return start_container(service.name)
     except NotFound:
-        container = create_vpn_container(service, profile)
-        container.start()
-        return container
+        create_vpn_container(service, profile)
+        return start_container(service.name)
     except DockerException:
         raise
 

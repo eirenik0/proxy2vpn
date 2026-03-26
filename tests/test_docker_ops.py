@@ -441,25 +441,38 @@ def test_start_vpn_service_force_recreates(monkeypatch):
         name="p", env_file="", image="alpine", cap_add=[], devices=[]
     )
 
-    calls = {"recreate": 0, "start": 0}
+    calls = {"recreate": 0, "start_container": 0}
 
     class DummyContainer:
+        status = "created"
+        attrs = {"State": {"Status": "created"}}
+
+        def reload(self):
+            return None
+
         def start(self):
-            calls["start"] += 1
+            calls["start_container"] += 1
+            return self
+
+    class DummyContainers:
+        def get(self, name):
+            return DummyContainer()
+
+    class DummyClient:
+        containers = DummyContainers()
 
     def fake_recreate(service, profile):
         calls["recreate"] += 1
-        return DummyContainer()
 
     def should_not_be_called(*args, **kwargs):  # pragma: no cover - fails if called
         raise AssertionError("should not be called")
 
+    monkeypatch.setattr(docker_ops, "_client", lambda: DummyClient())
     monkeypatch.setattr(docker_ops, "recreate_vpn_container", fake_recreate)
     monkeypatch.setattr(docker_ops, "create_vpn_container", should_not_be_called)
-    monkeypatch.setattr(docker_ops, "start_container", should_not_be_called)
 
     docker_ops.start_vpn_service(svc, profile, force=True)
-    assert calls == {"recreate": 1, "start": 1}
+    assert calls == {"recreate": 1, "start_container": 1}
 
 
 def test_start_vpn_service_creates_when_missing(monkeypatch):
@@ -479,29 +492,77 @@ def test_start_vpn_service_creates_when_missing(monkeypatch):
         name="p", env_file="", image="alpine", cap_add=[], devices=[]
     )
 
-    calls = {"start_container": 0, "create": 0, "start": 0}
-
-    def fake_start_container(name):
-        calls["start_container"] += 1
-        raise NotFound("missing")
+    calls = {"get": 0, "create": 0, "start": 0}
 
     class DummyContainer:
+        status = "created"
+        attrs = {"State": {"Status": "created"}}
+
+        def reload(self):
+            return None
+
         def start(self):
             calls["start"] += 1
+            return self
+
+    dummy = DummyContainer()
+
+    class DummyContainers:
+        def get(self, name):
+            calls["get"] += 1
+            if calls["get"] == 1:
+                raise NotFound("missing")
+            return dummy
+
+    class DummyClient:
+        containers = DummyContainers()
 
     def fake_create(service, profile):
         calls["create"] += 1
-        return DummyContainer()
+        return dummy
 
     def should_not_be_called(*args, **kwargs):  # pragma: no cover - fails if called
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(docker_ops, "start_container", fake_start_container)
+    monkeypatch.setattr(docker_ops, "_client", lambda: DummyClient())
     monkeypatch.setattr(docker_ops, "create_vpn_container", fake_create)
     monkeypatch.setattr(docker_ops, "recreate_vpn_container", should_not_be_called)
 
     docker_ops.start_vpn_service(svc, profile, force=False)
-    assert calls == {"start_container": 1, "create": 1, "start": 1}
+    assert calls == {"get": 2, "create": 1, "start": 1}
+
+
+def test_start_container_removes_created_container_on_failed_start(monkeypatch):
+    calls = {"start": 0, "remove": 0}
+
+    class DummyContainer:
+        name = "svc"
+        status = "created"
+        attrs = {"State": {"Status": "created"}}
+
+        def reload(self):
+            return None
+
+        def start(self):
+            calls["start"] += 1
+            raise docker_ops.DockerException("port is already allocated")
+
+        def remove(self, force=False):
+            calls["remove"] += 1
+
+    class DummyContainers:
+        def get(self, name):
+            return DummyContainer()
+
+    class DummyClient:
+        containers = DummyContainers()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda: DummyClient())
+
+    with pytest.raises(docker_ops.DockerException, match="port is already allocated"):
+        docker_ops.start_container("svc")
+
+    assert calls == {"start": 1, "remove": 1}
 
 
 def test_start_vpn_service_starts_existing(monkeypatch):
