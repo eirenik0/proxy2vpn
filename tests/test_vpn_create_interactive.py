@@ -13,7 +13,7 @@ def _create_compose(tmp_path: pathlib.Path) -> pathlib.Path:
     return compose_path
 
 
-def test_vpn_create_interactive(tmp_path):
+def test_vpn_add_interactive(tmp_path):
     compose_path = _create_compose(tmp_path)
     env_file = tmp_path / "env.test"
     env_file.write_text("VPN_SERVICE_PROVIDER=prov\n")
@@ -23,7 +23,7 @@ def test_vpn_create_interactive(tmp_path):
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["--compose-file", str(compose_path), "vpn", "create"],
+        ["--compose-file", str(compose_path), "vpn", "add", "--interactive"],
         input="svc\ntest\n0\n0\n\n",
     )
     assert result.exit_code == 0

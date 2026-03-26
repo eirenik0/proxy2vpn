@@ -8,13 +8,13 @@ from proxy2vpn.core import config
 from proxy2vpn.cli.typer_ext import HelpfulTyper
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.display_utils import console
-from proxy2vpn.core.models import Profile, ServiceCredentials
+from proxy2vpn.core.models import Profile
 from proxy2vpn.common import abort
 from proxy2vpn.adapters.validators import sanitize_name
 from proxy2vpn.adapters.logging_utils import get_logger
 from proxy2vpn.adapters import server_manager
 
-app = HelpfulTyper(help="Manage VPN profiles and apply them to services")
+app = HelpfulTyper(help="Manage VPN profiles")
 logger = get_logger(__name__)
 
 
@@ -65,7 +65,10 @@ def _validate_and_add_profile(
     console.print(f"[blue]📋 Using provider: {profile.provider}[/blue]")
 
     manager = ComposeManager.from_ctx(ctx)
-    manager.add_profile(profile)
+    try:
+        manager.add_profile(profile)
+    except ValueError as exc:
+        abort(str(exc))
     logger.info("profile_added", extra={"profile_name": name})
     console.print(f"[green]✓[/green] Profile '{name}' added.")
 
@@ -244,102 +247,3 @@ def delete(
         )
     env_file_path.unlink()
     console.print(f"[green]✓[/green] Environment file '{env_file_path}' deleted.")
-
-
-@app.command("apply")
-def apply(
-    ctx: typer.Context,
-    profile: str,
-    service: str,
-    port: int = typer.Option(0, help="Host port to expose; 0 for auto"),
-    control_port: int = typer.Option(0, help="Control port; 0 for auto"),
-    httpproxy_user: str = typer.Option(
-        None, "--httpproxy-user", help="Override HTTP proxy username"
-    ),
-    httpproxy_password: str = typer.Option(
-        None, "--httpproxy-password", help="Override HTTP proxy password"
-    ),
-):
-    """Create a VPN service from a profile."""
-    manager = ComposeManager.from_ctx(ctx)
-    try:
-        resolved_profile = manager.get_profile(profile)
-    except KeyError:
-        abort(
-            f"Profile '{profile}' not found",
-            "Create it with 'proxy2vpn profile create'",
-        )
-    try:
-        provider = resolved_profile.provider
-    except ValueError as exc:
-        abort(str(exc))
-    if port == 0:
-        port = manager.next_available_port(config.DEFAULT_PORT_START)
-    if control_port == 0:
-        control_port = manager.next_available_control_port(
-            config.DEFAULT_CONTROL_PORT_START
-        )
-    env = {"VPN_SERVICE_PROVIDER": provider}
-    labels = {
-        "vpn.type": "vpn",
-        "vpn.port": str(port),
-        "vpn.control_port": str(control_port),
-        "vpn.provider": provider,
-        "vpn.profile": profile,
-        "vpn.location": "",
-    }
-    from proxy2vpn.core.models import VPNService
-
-    # Create service credentials if overrides are provided
-    credentials = None
-    if httpproxy_user is not None or httpproxy_password is not None:
-        credentials = ServiceCredentials(
-            httpproxy_user=httpproxy_user,
-            httpproxy_password=httpproxy_password,
-        )
-        console.print(
-            f"[blue]🔑 Using custom HTTP proxy credentials for service '{service}'[/blue]"
-        )
-
-    svc = VPNService.create(
-        name=service,
-        port=port,
-        control_port=control_port,
-        provider=provider,
-        profile=profile,
-        location="",
-        environment=env,
-        labels=labels,
-        credentials=credentials,
-    )
-
-    # Validate HTTP proxy configuration at service level
-    proxy_errors = svc.validate_httpproxy_config()
-    if proxy_errors:
-        console.print(
-            f"[red]❌ HTTP proxy validation failed for service '{service}':[/red]"
-        )
-        for error in proxy_errors:
-            console.print(f"[red]  • {error}[/red]")
-        console.print("\n[yellow]💡 Fix by either:[/yellow]")
-        console.print(
-            "[green]  1. Adding --httpproxy-user and --httpproxy-password options[/green]"
-        )
-        console.print(
-            "[green]  2. Setting HTTPPROXY_USER and HTTPPROXY_PASSWORD in profile env file[/green]"
-        )
-        console.print(
-            "[green]  3. Disabling HTTP proxy by removing HTTPPROXY=on from profile[/green]"
-        )
-        abort("Fix the HTTP proxy configuration and try again")
-
-    manager.add_service(svc)
-
-    if credentials:
-        console.print(
-            f"[green]✓[/green] Service '{service}' created from profile '{profile}' on port {port} (control {control_port}) with custom HTTP proxy credentials.",
-        )
-    else:
-        console.print(
-            f"[green]✓[/green] Service '{service}' created from profile '{profile}' on port {port} (control {control_port}).",
-        )

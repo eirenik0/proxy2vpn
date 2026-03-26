@@ -36,7 +36,7 @@ def test_vpn_create_location_validation(tmp_path, monkeypatch):
 
     result = runner.invoke(
         app,
-        ["--compose-file", str(compose_path), "vpn", "create"],
+        ["--compose-file", str(compose_path), "vpn", "add", "--interactive"],
         input="vpn3\n1\n7777\n0\nToronto,CA\n\n",
     )
     assert result.exit_code == 0
@@ -57,14 +57,14 @@ def test_vpn_create_location_validation(tmp_path, monkeypatch):
 
     result = runner.invoke(
         app,
-        ["--compose-file", str(compose_path), "vpn", "create"],
+        ["--compose-file", str(compose_path), "vpn", "add", "--interactive"],
         input="vpn4\n1\n7778\n0\nAtlantis\nn\n",
     )
     assert result.exit_code != 0
 
     result = runner.invoke(
         app,
-        ["--compose-file", str(compose_path), "vpn", "create"],
+        ["--compose-file", str(compose_path), "vpn", "add", "--interactive"],
         input="vpn4\n1\n7778\n0\nAtlantis\ny\n",
     )
     assert result.exit_code == 0

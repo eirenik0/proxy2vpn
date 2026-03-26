@@ -20,7 +20,7 @@ from proxy2vpn.adapters.display_utils import (
     format_success_message,
     format_bulk_success_message,
 )
-from proxy2vpn.core.models import VPNService
+from proxy2vpn.core.models import VPNService, ServiceCredentials
 from proxy2vpn.adapters.validators import (
     validate_all_name_args,
     validate_service_exists,
@@ -54,7 +54,7 @@ def _resolve_service_name(ctx: typer.Context, service: str | None) -> str:
     if not services:
         abort(
             "No VPN services found.",
-            "Create one with 'proxy2vpn vpn create'.",
+            "Define one with 'proxy2vpn vpn add --interactive'.",
         )
     if len(services) == 1:
         return services[0].name
@@ -80,17 +80,17 @@ def _validate_service_locations(services: list[VPNService], force: bool) -> None
             )
 
 
-@app.command("create")
-def create(ctx: typer.Context) -> None:
-    """Interactively create a VPN service entry in the compose file."""
-
-    manager = ComposeManager.from_ctx(ctx)
-
+def _resolve_profile(manager: ComposeManager, profile_name: str):
     try:
-        name = sanitize_name(typer.prompt("Service name"))
-    except typer.BadParameter as exc:
-        abort(str(exc))
+        return manager.get_profile(profile_name)
+    except KeyError:
+        abort(
+            f"Profile '{profile_name}' not found",
+            "Create one with 'proxy2vpn profile create'",
+        )
 
+
+def _prompt_for_profile(manager: ComposeManager) -> str:
     profiles = manager.list_profiles()
     if not profiles:
         abort(
@@ -103,7 +103,6 @@ def create(ctx: typer.Context) -> None:
         console.print(f"{idx}. {p.name}")
 
     selected = typer.prompt("Select profile", default="1").strip()
-
     if selected.isdigit():
         idx = int(selected)
         if not 1 <= idx <= len(profiles):
@@ -111,86 +110,254 @@ def create(ctx: typer.Context) -> None:
                 f"Invalid selection {selected}",
                 f"Select a number between 1 and {len(profiles)}",
             )
-        prof = profiles[idx - 1]
-    else:
-        try:
-            selected = sanitize_name(selected)
-        except typer.BadParameter as exc:
-            abort(str(exc))
-        prof_map = {p.name: p for p in profiles}
-        if selected not in prof_map:
-            abort(
-                f"Profile '{selected}' not found",
-                "Create one with 'proxy2vpn profile create'",
-            )
-        prof = prof_map[selected]
+        return profiles[idx - 1].name
 
-    profile = prof.name
-    provider = prof.provider
-
-    port = typer.prompt("Host port to expose (0 for auto)", default=0, type=int)
     try:
-        port = validate_port(port)
+        cleaned = sanitize_name(selected)
     except typer.BadParameter as exc:
         abort(str(exc))
 
-    control_port = typer.prompt("Control port (0 for auto)", default=0, type=int)
-    try:
-        control_port = validate_port(control_port)
-    except typer.BadParameter as exc:
-        abort(str(exc))
-
-    location = typer.prompt("Location (optional)", default="").strip()
-    force = False
-    if location:
-        force = typer.confirm("Ignore location validation?", default=False)
-
-    if port == 0:
-        port = manager.next_available_port(config.DEFAULT_PORT_START)
-    if control_port == 0:
-        control_port = manager.next_available_control_port(
-            config.DEFAULT_CONTROL_PORT_START
+    if cleaned not in {p.name for p in profiles}:
+        abort(
+            f"Profile '{cleaned}' not found",
+            "Create one with 'proxy2vpn profile create'",
         )
+    return cleaned
 
-    env = {"VPN_SERVICE_PROVIDER": provider}
-    if location:
-        # Import via adapters module so tests can monkeypatch ServerManager
-        from proxy2vpn.adapters import server_manager
 
-        mgr = server_manager.ServerManager()
-        if not force and not mgr.validate_location(provider, location):
-            abort(
-                f"Invalid location '{location}' for {provider}",
-                "Use --force to override",
-            )
-        city, country = mgr.parse_location(provider, location)
-        if city:
-            env["SERVER_CITIES"] = city
-        if country:
-            env["SERVER_COUNTRIES"] = country
+def _location_environment(provider: str, location: str, force: bool) -> dict[str, str]:
+    env: dict[str, str] = {}
+    if not location:
+        return env
 
-    labels = {
-        "vpn.type": "vpn",
-        "vpn.port": str(port),
-        "vpn.control_port": str(control_port),
-        "vpn.provider": provider,
-        "vpn.profile": profile,
-        "vpn.location": location,
-    }
-    svc = VPNService.create(
-        name=name,
+    from proxy2vpn.adapters import server_manager
+
+    mgr = server_manager.ServerManager()
+    if not force and not mgr.validate_location(provider, location):
+        abort(
+            f"Invalid location '{location}' for {provider}",
+            "Use --force to override",
+        )
+    city, country = mgr.parse_location(provider, location)
+    if city:
+        env["SERVER_CITIES"] = city
+    if country:
+        env["SERVER_COUNTRIES"] = country
+    return env
+
+
+def _validate_proxy_configuration(
+    profile,
+    service_name: str,
+    port: int,
+    control_port: int,
+    provider: str,
+    profile_name: str,
+    location: str,
+    environment: dict[str, str],
+    labels: dict[str, str],
+    credentials: ServiceCredentials | None,
+) -> None:
+    from proxy2vpn.adapters.docker_ops import _load_env_file
+
+    effective_env = _load_env_file(str(profile._resolve_env_path()))
+    effective_env.update(environment)
+    validation_service = VPNService.create(
+        name=service_name,
         port=port,
         control_port=control_port,
         provider=provider,
-        profile=profile,
+        profile=profile_name,
         location=location,
-        environment=env,
+        environment=effective_env,
         labels=labels,
+        credentials=credentials,
     )
-    manager.add_service(svc)
-    console.print(
-        f"[green]✓[/green] Service '{name}' created on port {port} (control {control_port})."
+    proxy_errors = validation_service.validate_httpproxy_config()
+    if proxy_errors:
+        console.print(
+            f"[red]❌ HTTP proxy validation failed for service '{service_name}':[/red]"
+        )
+        for error in proxy_errors:
+            console.print(f"[red]  • {error}[/red]")
+        console.print("\n[yellow]💡 Fix by either:[/yellow]")
+        console.print(
+            "[green]  1. Adding --httpproxy-user and --httpproxy-password options[/green]"
+        )
+        console.print(
+            "[green]  2. Setting HTTPPROXY_USER and HTTPPROXY_PASSWORD in profile env file[/green]"
+        )
+        console.print(
+            "[green]  3. Disabling HTTP proxy by removing HTTPPROXY=on from profile[/green]"
+        )
+        abort("Fix the HTTP proxy configuration and try again")
+
+
+def _build_service_definition(
+    manager: ComposeManager,
+    name: str,
+    profile_name: str,
+    port: int,
+    control_port: int,
+    location: str,
+    httpproxy_user: str | None,
+    httpproxy_password: str | None,
+    force: bool,
+) -> tuple[VPNService, bool]:
+    profile = _resolve_profile(manager, profile_name)
+    try:
+        provider = profile.provider
+    except ValueError as exc:
+        abort(str(exc))
+
+    resolved_port = port or manager.next_available_port(config.DEFAULT_PORT_START)
+    resolved_control_port = control_port or manager.next_available_control_port(
+        config.DEFAULT_CONTROL_PORT_START
     )
+    environment = {"VPN_SERVICE_PROVIDER": provider}
+    environment.update(_location_environment(provider, location, force))
+    labels = {
+        "vpn.type": "vpn",
+        "vpn.port": str(resolved_port),
+        "vpn.control_port": str(resolved_control_port),
+        "vpn.provider": provider,
+        "vpn.profile": profile_name,
+        "vpn.location": location,
+    }
+
+    credentials = None
+    if httpproxy_user is not None or httpproxy_password is not None:
+        credentials = ServiceCredentials(
+            httpproxy_user=httpproxy_user,
+            httpproxy_password=httpproxy_password,
+        )
+        console.print(
+            f"[blue]🔑 Using custom HTTP proxy credentials for service '{name}'[/blue]"
+        )
+
+    _validate_proxy_configuration(
+        profile=profile,
+        service_name=name,
+        port=resolved_port,
+        control_port=resolved_control_port,
+        provider=provider,
+        profile_name=profile_name,
+        location=location,
+        environment=environment,
+        labels=labels,
+        credentials=credentials,
+    )
+
+    svc = VPNService.create(
+        name=name,
+        port=resolved_port,
+        control_port=resolved_control_port,
+        provider=provider,
+        profile=profile_name,
+        location=location,
+        environment=environment,
+        labels=labels,
+        credentials=credentials,
+    )
+    return svc, credentials is not None
+
+
+@app.command("add")
+def add(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
+    profile: str | None = typer.Option(
+        None, "--profile", help="Profile to use for this service"
+    ),
+    port: int = typer.Option(
+        0,
+        "--port",
+        help="Host port to expose; 0 for auto",
+        callback=validate_port,
+    ),
+    control_port: int = typer.Option(
+        0,
+        "--control-port",
+        help="Control port; 0 for auto",
+        callback=validate_port,
+    ),
+    location: str = typer.Option("", "--location", help="Location (optional)"),
+    httpproxy_user: str | None = typer.Option(
+        None, "--httpproxy-user", help="Override HTTP proxy username"
+    ),
+    httpproxy_password: str | None = typer.Option(
+        None, "--httpproxy-password", help="Override HTTP proxy password"
+    ),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Prompt for service definition values"
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Ignore location validation"
+    ),
+) -> None:
+    """Add a VPN service entry to the compose file."""
+
+    manager = ComposeManager.from_ctx(ctx)
+    if interactive:
+        if name is not None or profile is not None:
+            abort("Do not specify NAME or --profile when using --interactive")
+        try:
+            resolved_name = sanitize_name(typer.prompt("Service name"))
+        except typer.BadParameter as exc:
+            abort(str(exc))
+        resolved_profile = _prompt_for_profile(manager)
+        resolved_port = typer.prompt("Host port to expose (0 for auto)", default=0, type=int)
+        try:
+            resolved_port = validate_port(resolved_port)
+        except typer.BadParameter as exc:
+            abort(str(exc))
+        resolved_control_port = typer.prompt("Control port (0 for auto)", default=0, type=int)
+        try:
+            resolved_control_port = validate_port(resolved_control_port)
+        except typer.BadParameter as exc:
+            abort(str(exc))
+        resolved_location = typer.prompt("Location (optional)", default="").strip()
+        resolved_force = force
+        if resolved_location:
+            resolved_force = typer.confirm("Ignore location validation?", default=False)
+    else:
+        if name is None:
+            abort("Specify a service NAME or use --interactive")
+        if profile is None:
+            abort("Specify --profile or use --interactive")
+        resolved_name = name
+        resolved_profile = profile
+        resolved_port = port
+        resolved_control_port = control_port
+        resolved_location = location.strip()
+        resolved_force = force
+
+    svc, has_custom_credentials = _build_service_definition(
+        manager=manager,
+        name=resolved_name,
+        profile_name=resolved_profile,
+        port=resolved_port,
+        control_port=resolved_control_port,
+        location=resolved_location,
+        httpproxy_user=httpproxy_user,
+        httpproxy_password=httpproxy_password,
+        force=resolved_force,
+    )
+    try:
+        manager.add_service(svc)
+    except ValueError as exc:
+        abort(str(exc))
+
+    if has_custom_credentials:
+        console.print(
+            f"[green]✓[/green] Service '{svc.name}' added from profile '{svc.profile}' on port {svc.port} (control {svc.control_port}) with custom HTTP proxy credentials."
+        )
+    else:
+        console.print(
+            f"[green]✓[/green] Service '{svc.name}' added from profile '{svc.profile}' on port {svc.port} (control {svc.control_port})."
+        )
 
 
 @app.command("list")

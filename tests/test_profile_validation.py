@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import pytest
 import typer
 from click.exceptions import Exit
+from typer.testing import CliRunner
 
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.cli.main import app
@@ -217,3 +218,24 @@ def test_profile_create_fails_with_invalid_vpn_type(tmp_path):
     with _cli_ctx(compose_path) as ctx:
         with pytest.raises(Exit):
             profile_add(ctx, "bad-profile", env_file)
+
+
+def test_profile_add_duplicate_exits_cleanly(tmp_path):
+    compose_path = _create_test_compose(tmp_path)
+    env_file = tmp_path / "valid_profile.env"
+    env_file.write_text(
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=test_user\nOPENVPN_PASSWORD=test_pass\n"
+    )
+
+    runner = CliRunner()
+    first = runner.invoke(
+        app, ["--compose-file", str(compose_path), "profile", "add", "test", str(env_file)]
+    )
+    assert first.exit_code == 0
+
+    second = runner.invoke(
+        app, ["--compose-file", str(compose_path), "profile", "add", "test", str(env_file)]
+    )
+    assert second.exit_code == 1
+    assert "Profile 'test' already exists" in second.output
+    assert "Traceback" not in second.output
