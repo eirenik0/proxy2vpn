@@ -95,6 +95,7 @@ class AgentWatchdog:
         """Run until interrupted."""
 
         state = self._load_state(daemon_mode, refresh_started_at=True)
+        self.store.write_state(state)
         while True:
             state = await self.run_cycle(state)
             await asyncio.sleep(self.interval_seconds)

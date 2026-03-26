@@ -337,6 +337,25 @@ def test_agent_run_once_executes_sync_diagnostics_off_event_loop(
     assert watchdog.store.load_incidents() == []
 
 
+def test_agent_run_forever_persists_daemon_mode_immediately(
+    agent_compose_file, monkeypatch
+):
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    async def fake_run_cycle(state):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(watchdog, "run_cycle", fake_run_cycle)
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(watchdog.run_forever("daemon"))
+
+    persisted = watchdog.store.read_state()
+    assert persisted is not None
+    assert persisted.status.daemon_mode == "daemon"
+    assert persisted.status.started_at is not None
+
+
 def test_agent_first_unhealthy_cycle_restarts_tunnel(
     agent_compose_file, monkeypatch, control_client_factory
 ):
