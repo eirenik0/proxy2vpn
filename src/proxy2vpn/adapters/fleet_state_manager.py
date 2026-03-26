@@ -72,6 +72,7 @@ class OperationConfig:
     max_parallel: int = 5
     rollback_on_failure: bool = True
     health_check_timeout: int = 30
+    rotation_attempt_limit: int = 3
     rotation_verification_attempts: int = 3
     rotation_verification_delay_seconds: int = 10
     bad_city_cooldown_seconds: int = 3600
@@ -866,12 +867,37 @@ class FleetStateManager:
         candidate_locations = rotation_plan.candidate_locations or [
             rotation_plan.new_location
         ]
+        attempt_limit = max(1, config_obj.rotation_attempt_limit)
         attempted_locations: List[str] = []
         failures: List[str] = []
 
-        for candidate_location in candidate_locations:
+        for attempt_number, candidate_location in enumerate(
+            candidate_locations, start=1
+        ):
+            if attempt_number > attempt_limit:
+                failures.append(
+                    f"stopped after {attempt_limit} rotation attempts for {service_name}"
+                )
+                logger.warning(
+                    "rotation_attempt_limit_reached",
+                    extra={
+                        "service_name": service_name,
+                        "attempt_limit": attempt_limit,
+                        "attempted_locations": attempted_locations,
+                    },
+                )
+                break
             try:
                 attempted_locations.append(candidate_location)
+                logger.info(
+                    "rotation_attempt_started",
+                    extra={
+                        "service_name": service_name,
+                        "attempt": attempt_number,
+                        "attempt_limit": attempt_limit,
+                        "candidate_location": candidate_location,
+                    },
+                )
                 active_name = await self._apply_rotation_location(
                     service, candidate_location
                 )
@@ -889,12 +915,32 @@ class FleetStateManager:
                     failures.append(
                         f"{candidate_location}: {' | '.join(verification_failures)}"
                     )
+                    logger.warning(
+                        "rotation_attempt_failed",
+                        extra={
+                            "service_name": service_name,
+                            "attempt": attempt_number,
+                            "attempt_limit": attempt_limit,
+                            "candidate_location": candidate_location,
+                            "verification_failures": verification_failures,
+                        },
+                    )
                     continue
 
                 self._clear_bad_rotation_city(
                     service.provider,
                     country,
                     candidate_location,
+                )
+                logger.info(
+                    "rotation_attempt_succeeded",
+                    extra={
+                        "service_name": service_name,
+                        "attempt": attempt_number,
+                        "attempt_limit": attempt_limit,
+                        "candidate_location": candidate_location,
+                        "final_service_name": active_name,
+                    },
                 )
 
                 return RotationChange(
@@ -910,6 +956,8 @@ class FleetStateManager:
                     "rotation_candidate_failed",
                     extra={
                         "service_name": service.name,
+                        "attempt": attempt_number,
+                        "attempt_limit": attempt_limit,
                         "candidate_location": candidate_location,
                         "error": str(exc),
                     },
