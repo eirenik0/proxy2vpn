@@ -1,0 +1,120 @@
+name: Prepare GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v (for example 0.16.0)
+        required: true
+        type: string
+      prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Require default branch
+        if: ${{ github.ref_name != github.event.repository.default_branch }}
+        run: |
+          echo "Run this workflow from ${DEFAULT_BRANCH}."
+          exit 1
+
+      - name: Checkout default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.11'
+
+      - name: Validate release version
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          version = os.environ["VERSION"]
+          if not re.fullmatch(r"\d+\.\d+\.\d+(?:[A-Za-z0-9.-]+)?", version):
+              sys.exit("VERSION must look like 1.2.3 or 1.2.3rc1")
+          print(f"Preparing release {version}")
+          PY
+
+      - name: Ensure tag and release do not already exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${VERSION}"
+          git fetch --force --tags origin
+
+          if git show-ref --verify --quiet "refs/tags/${tag}"; then
+            echo "Tag ${tag} already exists."
+            exit 1
+          fi
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists."
+            exit 1
+          fi
+
+      - name: Run release checks
+        run: |
+          make fmt-check
+          make lint
+          make changelog-check
+          make test
+
+      - name: Build release commit
+        run: |
+          uv run --with towncrier python scripts/bump_version.py "${VERSION}"
+          uv run --with towncrier towncrier build --yes --version "${VERSION}"
+
+      - name: Ensure release files changed
+        run: |
+          if git diff --quiet -- pyproject.toml CHANGELOG.md news; then
+            echo "Release preparation produced no changes."
+            exit 1
+          fi
+
+      - name: Commit release changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A pyproject.toml CHANGELOG.md news
+          git commit -m "Release ${VERSION}"
+          git tag -a "v${VERSION}" -m "Release ${VERSION}"
+
+      - name: Push release commit and tag
+        run: git push --follow-tags origin "HEAD:${DEFAULT_BRANCH}"
+
+      - name: Extract release notes
+        run: python scripts/extract_release_notes.py "${VERSION}" > release-notes.md
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          args=(release create "v${VERSION}" --draft --title "v${VERSION}" --notes-file release-notes.md)
+
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+
+          gh "${args[@]}"

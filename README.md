@@ -468,6 +468,15 @@ make changelog-draft
 make changelog VERSION=x.y.z
 ```
 
+### Maintainer Releases
+Maintainers can cut a release entirely from GitHub:
+
+1. Run the `Prepare GitHub Release` workflow from the Actions tab on `main`.
+2. Enter the target version without the leading `v` (for example `0.16.0`).
+3. The workflow runs checks, bumps `pyproject.toml`, builds `CHANGELOG.md`, pushes the release commit and tag, and creates a draft GitHub Release with the matching notes.
+4. Review the draft in GitHub Releases and click `Publish release`.
+5. Publishing the GitHub Release triggers the PyPI publish workflow.
+
 Recent highlights (see CHANGELOG.md for details):
 - `vpn add` is the single compose-only service-definition command.
 - `vpn update` is the explicit recreate-and-refresh command for VPN containers.

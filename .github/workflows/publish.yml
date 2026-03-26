@@ -1,10 +1,15 @@
 name: Publish to PyPI
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types:
+      - published
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to publish (for example v0.15.0)
+        required: true
+        type: string
 
 jobs:
   publish:
@@ -16,8 +21,31 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Checkout repository
+      - name: Resolve release tag
+        id: release_tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$EVENT_NAME" = "release" ]; then
+            tag="$RELEASE_TAG"
+          else
+            tag="$INPUT_TAG"
+          fi
+
+          case "$tag" in
+            v*) ;;
+            *) tag="v$tag" ;;
+          esac
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
         uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release_tag.outputs.tag }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6

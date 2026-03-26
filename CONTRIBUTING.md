@@ -41,6 +41,12 @@ We use [Towncrier](https://towncrier.readthedocs.io/) for the changelog.
 3. Supported types: `feature`, `bugfix`, `doc`, `removal`, `misc`.
 4. Preview with `make changelog-draft`. Maintainers build on release with `make changelog VERSION=x.y.z`.
 
+## Maintainer Releases
+- Preferred path: run the `Prepare GitHub Release` workflow from GitHub Actions on the default branch.
+- The workflow validates the branch, runs checks, bumps `pyproject.toml`, builds `CHANGELOG.md`, tags the release commit, and creates a draft GitHub Release.
+- Publishing that GitHub Release triggers the PyPI publish workflow.
+- `make release VERSION=x.y.z` remains available as a local fallback.
+
 ## Security
 - Do not commit secrets or personal `.env` files. Keep credentials in `profiles/*.env` locally.
 - Avoid committing host-specific compose changes; generate via `proxy2vpn system init`.
