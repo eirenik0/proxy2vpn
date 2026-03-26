@@ -28,6 +28,22 @@ def test_temporal_analysis_prefers_latest_log_lines():
     ]
 
 
+def test_openvpn_server_selection_failure_is_detected():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    logs = [
+        "2026-03-26T21:21:20Z ERROR [vpn] finding a valid server connection: filtering servers: no server found: for VPN openvpn; protocol udp; country united states; city dallas; hostname us10562.nordvpn.com; target ip address 0.0.0.0",
+        "2026-03-26T21:21:20Z INFO [vpn] retrying in 15s",
+        "2026-03-26T21:21:35Z ERROR [vpn] finding a valid server connection: filtering servers: no server found: for VPN openvpn; protocol udp; country united states; city dallas; hostname us10562.nordvpn.com; target ip address 0.0.0.0",
+    ]
+
+    results = analyzer.analyze_logs(logs)
+    failure = next(r for r in results if r.check == "config_error")
+    assert failure.passed is False
+    assert failure.persistent is True
+    assert "server matching the configured country/city" in failure.message
+    assert "SERVER_COUNTRIES/SERVER_CITIES" in failure.recommendation
+
+
 def test_connectivity(monkeypatch):
     def fake_fetch_ip(proxies=None, timeout=5):
         if proxies:
