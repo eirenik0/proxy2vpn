@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 IncidentSeverity = Literal["low", "medium", "high"]
 IncidentStatus = Literal["open", "approved", "resolved", "dismissed", "failed"]
-DaemonMode = Literal["inactive", "once", "foreground"]
+DaemonMode = Literal["inactive", "once", "foreground", "daemon"]
 
 
 class AgentStatus(BaseModel):

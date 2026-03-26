@@ -14,6 +14,7 @@ from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.cli.main import app
 from proxy2vpn.core import config
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
+import proxy2vpn.cli.commands.agent as agent_commands
 import proxy2vpn.agent.runtime as agent_runtime
 
 
@@ -179,7 +180,7 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
     status_payload = json.loads(status_result.output)
     incidents_payload = json.loads(incidents_result.output)
 
-    assert set(status_payload.keys()) == {"status", "services", "actions"}
+    assert set(status_payload.keys()) == {"status", "services", "actions", "daemon"}
     assert set(status_payload["status"].keys()) == {
         "compose_path",
         "daemon_mode",
@@ -191,5 +192,83 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
         "last_error",
         "llm_mode",
     }
+    assert set(status_payload["daemon"].keys()) == {"running", "pid", "log_file"}
+    assert status_payload["daemon"]["running"] is False
     assert set(incidents_payload.keys()) == {"incidents"}
     assert incidents_payload["incidents"][0]["recommended_action"] == "rotate"
+
+
+def test_agent_run_daemon_spawns_detached_child(tmp_path, monkeypatch):
+    compose_file = _write_agent_compose(tmp_path)
+    captured = {}
+
+    class DummyProcess:
+        pid = 43210
+
+        def poll(self):
+            return None
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return DummyProcess()
+
+    monkeypatch.setattr(agent_commands.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(agent_commands.time, "sleep", lambda *_args, **_kwargs: None)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["--compose-file", str(compose_file), "agent", "run", "--daemon"]
+    )
+
+    store = AgentStateStore(compose_file)
+    assert result.exit_code == 0
+    assert "Agent daemon started" in result.output
+    assert "Log file:" in result.output
+    assert store.daemon_log_path.name in result.output
+    assert store.read_daemon_pid() is None
+    assert captured["command"][:3] == [agent_commands.sys.executable, "-m", "proxy2vpn"]
+    assert "--daemon-child" in captured["command"]
+
+
+def test_agent_stop_terminates_daemon_process(tmp_path, monkeypatch):
+    compose_file = _write_agent_compose(tmp_path)
+    store = AgentStateStore(compose_file)
+    store.write_daemon_pid(54321)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(compose_file),
+                daemon_mode="daemon",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            )
+        )
+    )
+    calls = {"terminate": 0, "kill": 0}
+
+    class DummyProcess:
+        pid = 54321
+
+        def terminate(self):
+            calls["terminate"] += 1
+
+        def wait(self, timeout):
+            return 0
+
+        def kill(self):
+            calls["kill"] += 1
+
+    monkeypatch.setattr(AgentStateStore, "daemon_process", lambda self: DummyProcess())
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["--compose-file", str(compose_file), "agent", "stop"])
+
+    updated_state = store.read_state()
+    assert result.exit_code == 0
+    assert "Stopped agent daemon" in result.output
+    assert calls["terminate"] == 1
+    assert calls["kill"] == 0
+    assert store.read_daemon_pid() is None
+    assert updated_state is not None
+    assert updated_state.status.daemon_mode == "inactive"

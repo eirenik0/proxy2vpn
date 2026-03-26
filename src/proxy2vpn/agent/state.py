@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path
 
 from filelock import FileLock
+import psutil
 
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import AgentIncident, AgentState
@@ -25,6 +27,8 @@ class AgentStateStore:
         self.state_file = self.agent_dir / self.settings.state_file
         self.incidents_file = self.agent_dir / self.settings.incidents_file
         self.runtime_lock_path = self.agent_dir / self.settings.runtime_lock_file
+        self.daemon_pid_path = self.agent_dir / self.settings.daemon_pid_file
+        self.daemon_log_path = self.agent_dir / self.settings.daemon_log_file
 
     def ensure_dir(self) -> None:
         self.agent_dir.mkdir(parents=True, exist_ok=True)
@@ -32,6 +36,54 @@ class AgentStateStore:
     def runtime_lock(self) -> FileLock:
         self.ensure_dir()
         return FileLock(str(self.runtime_lock_path))
+
+    def write_daemon_pid(self, pid: int) -> None:
+        self.ensure_dir()
+        self.daemon_pid_path.write_text(f"{pid}\n", encoding="utf-8")
+
+    def read_daemon_pid(self) -> int | None:
+        if not self.daemon_pid_path.exists():
+            return None
+        try:
+            return int(self.daemon_pid_path.read_text(encoding="utf-8").strip())
+        except ValueError:
+            return None
+
+    def clear_daemon_pid(self, pid: int | None = None) -> None:
+        if not self.daemon_pid_path.exists():
+            return
+        if pid is not None:
+            current = self.read_daemon_pid()
+            if current is not None and current != pid:
+                return
+        with suppress(FileNotFoundError):
+            self.daemon_pid_path.unlink()
+
+    def daemon_process(self) -> psutil.Process | None:
+        pid = self.read_daemon_pid()
+        if pid is None:
+            return None
+        try:
+            process = psutil.Process(pid)
+        except psutil.Error:
+            self.clear_daemon_pid(pid)
+            return None
+        if not process.is_running():
+            self.clear_daemon_pid(pid)
+            return None
+        with suppress(psutil.Error):
+            if process.status() == psutil.STATUS_ZOMBIE:
+                self.clear_daemon_pid(pid)
+                return None
+        with suppress(psutil.Error):
+            cmdline = process.cmdline()
+            if cmdline and not ("proxy2vpn" in cmdline and "--daemon-child" in cmdline):
+                self.clear_daemon_pid(pid)
+                return None
+        return process
+
+    def daemon_is_running(self) -> bool:
+        return self.daemon_process() is not None
 
     def read_state(self) -> AgentState | None:
         if not self.state_file.exists():

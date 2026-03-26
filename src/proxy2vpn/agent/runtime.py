@@ -13,6 +13,7 @@ from proxy2vpn.agent.models import (
     AgentIncident,
     AgentState,
     AgentStatus,
+    DaemonMode,
     IncidentStatus,
     ServiceSnapshot,
 )
@@ -76,10 +77,10 @@ class AgentWatchdog:
             )
         )
 
-    async def run_forever(self) -> AgentState:
+    async def run_forever(self, daemon_mode: DaemonMode = "foreground") -> AgentState:
         """Run until interrupted."""
 
-        state = self._load_state("foreground", refresh_started_at=True)
+        state = self._load_state(daemon_mode, refresh_started_at=True)
         while True:
             state = await self.run_cycle(state)
             await asyncio.sleep(self.interval_seconds)
@@ -241,7 +242,9 @@ class AgentWatchdog:
         self.store.append_incident(dismissed)
         return dismissed
 
-    def _load_state(self, daemon_mode: str, refresh_started_at: bool) -> AgentState:
+    def _load_state(
+        self, daemon_mode: DaemonMode, refresh_started_at: bool
+    ) -> AgentState:
         state = self.store.read_state() or self.empty_state()
         state.status.compose_path = str(self.compose_file)
         state.status.daemon_mode = daemon_mode

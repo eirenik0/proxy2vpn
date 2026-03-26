@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
 
 from filelock import Timeout
+import psutil
 import typer
 from rich.table import Table
 
@@ -20,6 +27,88 @@ app = HelpfulTyper(help="Run the local service watchdog")
 DEFAULT_AGENT_SETTINGS = AgentSettings()
 
 
+def _mark_agent_inactive(store: AgentStateStore) -> None:
+    state = store.read_state()
+    if state is None:
+        return
+    state.status.daemon_mode = "inactive"
+    store.write_state(state)
+
+
+def _daemon_payload(store: AgentStateStore) -> dict[str, object]:
+    process = store.daemon_process()
+    return {
+        "running": process is not None,
+        "pid": process.pid if process is not None else store.read_daemon_pid(),
+        "log_file": str(store.daemon_log_path),
+    }
+
+
+def _install_termination_handlers() -> None:
+    def _handle_stop(_signum, _frame):
+        raise KeyboardInterrupt()
+
+    for signame in ("SIGTERM", "SIGINT"):
+        signum = getattr(signal, signame, None)
+        if signum is not None:
+            signal.signal(signum, _handle_stop)
+
+
+def _spawn_daemon_process(
+    compose_file: Path, interval: int, store: AgentStateStore
+) -> tuple[int, Path]:
+    lock = store.runtime_lock()
+    acquired = False
+    try:
+        lock.acquire(timeout=0)
+        acquired = True
+    except Timeout:
+        abort(
+            f"Agent is already running for '{compose_file}'",
+            "Use 'proxy2vpn agent status' to inspect the current watchdog state.",
+        )
+    finally:
+        if acquired:
+            lock.release()
+
+    command = [
+        sys.executable,
+        "-m",
+        "proxy2vpn",
+        "--compose-file",
+        str(compose_file),
+        "--log-file",
+        str(store.daemon_log_path),
+        "agent",
+        "run",
+        "--interval",
+        str(interval),
+        "--daemon-child",
+    ]
+    kwargs: dict[str, object] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "cwd": str(Path.cwd()),
+        "env": os.environ.copy(),
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        ) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    else:
+        kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(command, **kwargs)
+    time.sleep(0.2)
+    if process.poll() is not None:
+        abort(
+            f"Agent daemon for '{compose_file}' exited before startup completed.",
+            f"Inspect logs in '{store.daemon_log_path}'.",
+        )
+    return process.pid, store.daemon_log_path
+
+
 @app.command("run")
 @run_async
 async def run(
@@ -27,16 +116,31 @@ async def run(
     once: bool = typer.Option(
         False, "--once", help="Run one monitoring cycle and exit"
     ),
+    daemon: bool = typer.Option(
+        False, "--daemon", help="Run in the background as a detached daemon"
+    ),
     interval: int = typer.Option(
         DEFAULT_AGENT_SETTINGS.interval_seconds,
         "--interval",
         help="Polling interval in seconds for foreground mode",
     ),
+    daemon_child: bool = typer.Option(False, "--daemon-child", hidden=True),
 ):
     """Run the local watchdog for the active compose root."""
 
+    if once and daemon:
+        abort("Cannot combine '--once' with '--daemon'")
+
     compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     watchdog = AgentWatchdog(compose_file, interval_seconds=interval)
+    if daemon:
+        pid, log_path = _spawn_daemon_process(compose_file, interval, watchdog.store)
+        console.print(
+            f"[green]✓[/green] Agent daemon started for '{compose_file}' with PID {pid}."
+        )
+        console.print(f"Log file: {log_path}")
+        return
+
     lock = watchdog.store.runtime_lock()
     try:
         lock.acquire(timeout=0)
@@ -47,6 +151,10 @@ async def run(
         )
 
     try:
+        if daemon_child:
+            watchdog.store.write_daemon_pid(os.getpid())
+            _install_termination_handlers()
+
         if once:
             state = await watchdog.run_once()
             console.print(
@@ -54,14 +162,21 @@ async def run(
             )
             return
 
-        console.print(
-            f"[green]✓[/green] Agent running for '{compose_file}' every {interval}s. Press Ctrl+C to stop."
-        )
+        if not daemon_child:
+            console.print(
+                f"[green]✓[/green] Agent running for '{compose_file}' every {interval}s. Press Ctrl+C to stop."
+            )
         try:
-            await watchdog.run_forever()
+            await watchdog.run_forever(
+                daemon_mode="daemon" if daemon_child else "foreground"
+            )
         except KeyboardInterrupt:
-            console.print("[yellow]Agent stopped.[/yellow]")
+            if not daemon_child:
+                console.print("[yellow]Agent stopped.[/yellow]")
     finally:
+        if daemon_child:
+            watchdog.store.clear_daemon_pid(os.getpid())
+            _mark_agent_inactive(watchdog.store)
         lock.release()
 
 
@@ -75,15 +190,24 @@ def status(
     compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     watchdog = AgentWatchdog(compose_file)
     state = watchdog.store.read_state() or watchdog.empty_state()
+    daemon_data = _daemon_payload(watchdog.store)
 
     payload = state.model_dump(mode="json")
+    payload["daemon"] = daemon_data
     if json_output:
         typer.echo(json.dumps(payload, indent=2))
         return
 
     status_data = state.status
+    daemon_status = "running" if daemon_data["running"] else "stopped"
+    daemon_pid = daemon_data["pid"]
+    daemon_line = (
+        f"{daemon_status} (pid {daemon_pid})"
+        if daemon_pid is not None
+        else daemon_status
+    )
     console.print(
-        f"Compose: {status_data.compose_path}\nMode: {status_data.daemon_mode}\nLast loop: {status_data.last_loop_at or 'never'}\nServices: {status_data.service_count}\nUnhealthy: {status_data.unhealthy_count}\nLLM: {status_data.llm_mode}"
+        f"Compose: {status_data.compose_path}\nMode: {status_data.daemon_mode}\nDaemon: {daemon_line}\nLog file: {daemon_data['log_file']}\nLast loop: {status_data.last_loop_at or 'never'}\nServices: {status_data.service_count}\nUnhealthy: {status_data.unhealthy_count}\nLLM: {status_data.llm_mode}"
     )
     if status_data.last_error:
         console.print(f"[red]Last error:[/red] {status_data.last_error}")
@@ -222,4 +346,40 @@ def dismiss(
 
     console.print(
         f"[green]✓[/green] Dismissed incident '{incident.id}' for service '{incident.service_name}'."
+    )
+
+
+@app.command("stop")
+def stop(ctx: typer.Context):
+    """Stop the detached watchdog daemon for the active compose root."""
+
+    compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    store = AgentStateStore(compose_file)
+    pid = store.read_daemon_pid()
+    if pid is None:
+        abort(
+            f"Agent daemon is not running for '{compose_file}'",
+            "Use 'proxy2vpn agent run --daemon' to start it.",
+        )
+
+    process = store.daemon_process()
+    if process is None:
+        store.clear_daemon_pid(pid)
+        _mark_agent_inactive(store)
+        console.print(
+            "[yellow]No running agent daemon was found. Cleared the stale PID file.[/yellow]"
+        )
+        return
+
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except psutil.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+    store.clear_daemon_pid(pid)
+    _mark_agent_inactive(store)
+    console.print(
+        f"[green]✓[/green] Stopped agent daemon for '{compose_file}' (PID {pid})."
     )

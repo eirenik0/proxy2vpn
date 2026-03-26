@@ -12,6 +12,8 @@ class AgentSettings(BaseSettings):
     state_file: str = "state.json"
     incidents_file: str = "incidents.jsonl"
     runtime_lock_file: str = "runtime.lock"
+    daemon_pid_file: str = "daemon.pid"
+    daemon_log_file: str = "daemon.log"
     interval_seconds: int = 30
     health_threshold: int = 60
     recheck_delay_seconds: int = 15
