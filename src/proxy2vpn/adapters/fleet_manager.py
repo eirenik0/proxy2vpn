@@ -2,8 +2,10 @@
 
 import asyncio
 
+from filelock import Timeout
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from proxy2vpn.agent.state import AgentStateStore
 from .compose_manager import ComposeManager
 from .display_utils import console
 from .docker_ops import ensure_network, remove_container, stop_container
@@ -163,6 +165,30 @@ class FleetManager:
         from .profile_allocator import ProfileAllocator
 
         self.profile_allocator = ProfileAllocator()
+
+    def _reset_agent_monitoring_state(self) -> None:
+        """Drop persisted watchdog history so a new deployment starts clean."""
+
+        store = AgentStateStore(self.compose_manager.compose_path)
+        store.reset_monitoring_state()
+        logger.info(
+            "fleet_deploy_agent_state_reset",
+            extra={"compose_path": str(self.compose_manager.compose_path)},
+        )
+
+    def _acquire_agent_runtime_lock(self):
+        """Block deployments while the watchdog is already running."""
+
+        store = AgentStateStore(self.compose_manager.compose_path)
+        lock = store.runtime_lock()
+        try:
+            lock.acquire(timeout=0)
+        except Timeout as exc:
+            raise RuntimeError(
+                f"Agent is already running for '{self.compose_manager.compose_path}'. "
+                "Stop the agent before deploying."
+            ) from exc
+        return lock
 
     def plan_deployment(self, config: FleetConfig) -> DeploymentPlan:
         """Create deployment plan with multi-provider orchestration based on profile providers."""
@@ -508,53 +534,58 @@ class FleetManager:
         force: bool = False,
     ) -> DeploymentResult:
         """Execute bulk deployment with server validation"""
-        # Handle server validation
-        valid_services, skipped, errors = self._handle_server_validation(
-            plan, validate_servers
-        )
-
-        if not valid_services:
-            return DeploymentResult(
-                deployed=0,
-                failed=skipped,
-                errors=errors,
-            )
-
-        console.print(
-            f"[green]🚀 Deploying {len(valid_services)} VPN services...[/green]"
-        )
-
-        added_services: list[str] = []
-        deployed = 0
-
+        agent_lock = self._acquire_agent_runtime_lock()
         try:
-            # Create service definitions
-            await self._create_service_definitions(
-                valid_services, force, added_services
+            # Handle server validation
+            valid_services, skipped, errors = self._handle_server_validation(
+                plan, validate_servers
             )
 
-            # Deploy containers
-            await self._deploy_containers(added_services, parallel, force)
+            if not valid_services:
+                return DeploymentResult(
+                    deployed=0,
+                    failed=skipped,
+                    errors=errors,
+                )
 
-            deployed = len(added_services)
+            console.print(
+                f"[green]🚀 Deploying {len(valid_services)} VPN services...[/green]"
+            )
 
-        except Exception as e:
-            error_msg = await self._handle_deployment_failure(added_services, e)
-            errors.append(error_msg)
+            added_services: list[str] = []
+            deployed = 0
+
+            try:
+                # Create service definitions
+                await self._create_service_definitions(
+                    valid_services, force, added_services
+                )
+
+                # Deploy containers
+                await self._deploy_containers(added_services, parallel, force)
+
+                deployed = len(added_services)
+                self._reset_agent_monitoring_state()
+
+            except Exception as e:
+                error_msg = await self._handle_deployment_failure(added_services, e)
+                errors.append(error_msg)
+                return DeploymentResult(
+                    deployed=0,
+                    failed=len(valid_services) + skipped,
+                    services=[],
+                    errors=errors,
+                )
+
+            failed = len(valid_services) - deployed + skipped
             return DeploymentResult(
-                deployed=0,
-                failed=len(valid_services) + skipped,
-                services=[],
+                deployed=deployed,
+                failed=failed,
+                services=[s.name for s in valid_services],
                 errors=errors,
             )
-
-        failed = len(valid_services) - deployed + skipped
-        return DeploymentResult(
-            deployed=deployed,
-            failed=failed,
-            services=[s.name for s in valid_services],
-            errors=errors,
-        )
+        finally:
+            agent_lock.release()
 
     async def _start_services_parallel(self, service_names: list[str], force: bool):
         """Start services in parallel with limited concurrency"""
