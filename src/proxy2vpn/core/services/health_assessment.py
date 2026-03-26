@@ -9,8 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from proxy2vpn.adapters import docker_ops, ip_utils
 from proxy2vpn.adapters.http_client import GluetunControlClient
+from proxy2vpn.adapters.logging_utils import get_logger
 from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
+
+
+logger = get_logger(__name__)
 
 
 class PeerEvidence(BaseModel):
@@ -141,15 +145,30 @@ class HealthAssessmentService:
     ) -> dict[str, HealthAssessment]:
         """Assess a batch of services and enrich each result with peer evidence."""
 
-        assessments_list = await asyncio.gather(
-            *[
-                self.assess_service(service, lines=lines, timeout=timeout)
-                for service in services
-            ]
-        )
-        assessments = {
-            assessment.service_name: assessment for assessment in assessments_list
-        }
+        assessment_tasks = [
+            self.assess_service(service, lines=lines, timeout=timeout)
+            for service in services
+        ]
+        results = await asyncio.gather(*assessment_tasks, return_exceptions=True)
+        assessments: dict[str, HealthAssessment] = {}
+        for service, result in zip(services, results, strict=True):
+            if isinstance(result, HealthAssessment):
+                assessments[result.service_name] = result
+                continue
+
+            logger.warning(
+                "health_assessment_failed",
+                extra={"service_name": service.name, "error": str(result)},
+            )
+            assessments[service.name] = HealthAssessment(
+                service_name=service.name,
+                assessed_at=datetime.now(timezone.utc),
+                container_status="unknown",
+                health_score=0,
+                health_class="assessment_failed",
+                failing_checks=["assessment_error"],
+                control_api_reachable=False,
+            )
         enriched = {
             name: assessment.model_copy(
                 update={

@@ -263,15 +263,37 @@ class ServerMonitor:
 
     def _extract_country_from_service(self, service: VPNService) -> str:
         """Extract country from service name or location"""
-        # Try to extract country from service name if it follows naming convention
-        # Format: provider-country-city
-        name_parts = service.name.split("-")
-        if len(name_parts) >= 3:
-            country = name_parts[1].replace("-", " ").title()
-            return country
+        country = service.environment.get("SERVER_COUNTRIES", "").strip()
+        if country:
+            return country.replace("-", " ").title()
 
-        # Fallback: use location as country (works for country-level locations)
-        return service.location
+        label_country = (
+            service.labels.get("vpn.country", "").strip()
+            if hasattr(service, "labels")
+            else ""
+        )
+        if label_country:
+            return label_country.replace("-", " ").title()
+
+        provider = (
+            service.provider.replace(" ", "-").lower() if service.provider else ""
+        )
+        location = (
+            service.location.replace(" ", "-").lower() if service.location else ""
+        )
+        name = service.name.lower()
+
+        if provider and name.startswith(provider + "-"):
+            name = name[len(provider) + 1 :]
+
+        if name.rsplit("-", 1)[-1].isdigit():
+            name = name.rsplit("-", 1)[0]
+
+        if location and name.endswith("-" + location):
+            name = name[: -(len(location) + 1)]
+
+        normalized = name.replace("-", " ").strip()
+        return normalized.title() if normalized else service.location
 
     def _slug_location(self, value: str) -> str:
         """Normalize a location segment to the service-name slug format."""

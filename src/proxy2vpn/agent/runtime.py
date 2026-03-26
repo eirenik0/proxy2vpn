@@ -1089,11 +1089,34 @@ class AgentWatchdog:
     def _service_country(self, service: VPNService) -> str:
         country = service.environment.get("SERVER_COUNTRIES", "").strip()
         if country:
-            return country
-        parts = service.name.split("-")
-        if len(parts) >= 3:
-            return parts[1].replace("-", " ").title()
-        return service.location
+            return country.replace("-", " ").title()
+        label_country = (
+            service.labels.get("vpn.country", "").strip()
+            if hasattr(service, "labels")
+            else ""
+        )
+        if label_country:
+            return label_country.replace("-", " ").title()
+
+        provider = (
+            service.provider.replace(" ", "-").lower() if service.provider else ""
+        )
+        location = (
+            service.location.replace(" ", "-").lower() if service.location else ""
+        )
+        name = service.name.lower()
+
+        if provider and name.startswith(provider + "-"):
+            name = name[len(provider) + 1 :]
+
+        if name.rsplit("-", 1)[-1].isdigit():
+            name = name.rsplit("-", 1)[0]
+
+        if location and name.endswith("-" + location):
+            name = name[: -(len(location) + 1)]
+
+        normalized = name.replace("-", " ").strip()
+        return normalized.title() if normalized else service.location
 
     def _find_active_scope_incident(
         self,

@@ -22,6 +22,7 @@ from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.fleet_state_manager import RotationChange
 from proxy2vpn.core import config
 from proxy2vpn.core.models import ServiceCredentials
+from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
 import proxy2vpn.core.services.health_assessment as health_assessment
 import proxy2vpn.agent.runtime as agent_runtime
@@ -824,6 +825,23 @@ def test_investigation_validation_honors_service_proxy_overrides(
 
     assert "HTTPPROXY_USER is required when HTTPPROXY=on." not in errors
     assert "HTTPPROXY_PASSWORD is required when HTTPPROXY=on." not in errors
+
+
+def test_service_country_fallback_uses_full_country_slug(agent_compose_file):
+    service = VPNService.create(
+        name="protonvpn-united-kingdom-london",
+        port=8080,
+        control_port=30000,
+        provider="protonvpn",
+        profile="test",
+        location="London",
+        environment={},
+        labels={},
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    assert watchdog._service_country(service) == "United Kingdom"
 
 
 def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeypatch):
