@@ -14,6 +14,20 @@ def test_temporal_analysis():
     assert auth.persistent is True
 
 
+def test_temporal_analysis_prefers_latest_log_lines():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    logs = ["AUTH_FAILED", "AUTH_FAILED"] + ["Initialization complete"] * 10
+    results = analyzer.analyze_logs(logs)
+    assert results == [
+        diagnostics.DiagnosticResult(
+            check="logs",
+            passed=True,
+            message="No critical log errors",
+            recommendation="",
+        )
+    ]
+
+
 def test_connectivity(monkeypatch):
     def fake_fetch_ip(proxies=None, timeout=5):
         if proxies:
@@ -94,3 +108,24 @@ def test_health_score_connectivity_failure():
     ]
     # Connectivity failure should result in health score 0 regardless of other checks
     assert analyzer.health_score(results) == 0
+
+
+def test_health_score_prefers_confirmed_connectivity_over_stale_log_errors():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    results = [
+        diagnostics.DiagnosticResult(
+            check="auth_failure",
+            passed=False,
+            message="Recent authentication failure detected",
+            recommendation="Verify credentials",
+            persistent=True,
+        ),
+        diagnostics.DiagnosticResult(
+            check="connectivity",
+            passed=True,
+            message="VPN working: real=2.2.2.2 vpn=1.1.1.1",
+            recommendation="",
+        ),
+    ]
+
+    assert analyzer.health_score(results) == 85
