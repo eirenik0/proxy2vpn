@@ -10,7 +10,7 @@ from filelock import FileLock
 import psutil
 
 from proxy2vpn.agent.config import AgentSettings
-from proxy2vpn.agent.models import AgentIncident, AgentState
+from proxy2vpn.agent.models import AgentIncident, AgentState, AgentStatus
 from proxy2vpn.core import config
 
 
@@ -95,6 +95,36 @@ class AgentStateStore:
         tmp_file = self.state_file.with_suffix(".tmp")
         tmp_file.write_text(json.dumps(state.model_dump(mode="json"), indent=2))
         tmp_file.replace(self.state_file)
+
+    def reset_monitoring_state(self) -> None:
+        """Clear persisted incidents and service history while preserving runtime metadata."""
+
+        self.ensure_dir()
+        previous_state = None
+        with suppress(Exception):
+            previous_state = self.read_state()
+
+        if previous_state is not None:
+            status = previous_state.status.model_copy(
+                update={
+                    "compose_path": str(self.compose_file),
+                    "service_count": 0,
+                    "unhealthy_count": 0,
+                    "last_error": None,
+                    "last_loop_at": None,
+                }
+            )
+        else:
+            status = AgentStatus(
+                compose_path=str(self.compose_file),
+                daemon_mode="daemon" if self.daemon_is_running() else "inactive",
+                interval_seconds=self.settings.interval_seconds,
+                llm_mode=self.settings.llm_mode,
+            )
+
+        self.write_state(AgentState(status=status))
+        with suppress(FileNotFoundError):
+            self.incidents_file.unlink()
 
     def load_incidents(self) -> list[AgentIncident]:
         if not self.incidents_file.exists():
