@@ -189,7 +189,7 @@ def fleet_status(
                 health_results = asyncio.run(server_monitor.check_fleet_health())
             finally:
                 asyncio.run(http_client.close())
-            _display_health_results(health_results)
+            _display_health_results(server_monitor.last_assessments or health_results)
 
         _display_fleet_services(fleet_status_data, format)
 
@@ -202,7 +202,7 @@ def fleet_rotate(
     ctx: typer.Context,
     country: str = typer.Option(None, help="Rotate servers in specific country"),
     provider: str = typer.Option("protonvpn", help="VPN provider"),
-    criteria: str = typer.Option("random", help="random|performance|load"),
+    criteria: str = typer.Option("performance", help="random|performance|load"),
     dry_run: bool = typer.Option(False, help="Show rotation plan only"),
 ):
     """Rotate VPN servers for better availability"""
@@ -409,14 +409,55 @@ def _display_allocation_table(allocation_status: dict[str, dict]):
     console.print(table)
 
 
-def _display_health_results(health_results: dict[str, bool]):
+def _display_health_results(health_results: dict[str, object]):
     """Display health check results"""
+    if not health_results:
+        console.print("Health: 0/0 services healthy")
+        return
+
+    first_value = next(iter(health_results.values()))
+    if hasattr(first_value, "health_score"):
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Service", style="green")
+        table.add_column("Healthy")
+        table.add_column("Score")
+        table.add_column("Class")
+        table.add_column("Control API")
+        table.add_column("Egress IP")
+        table.add_column("Peers")
+
+        healthy = 0
+        for name, assessment in health_results.items():
+            score = getattr(assessment, "health_score", 0)
+            class_name = getattr(assessment, "health_class", "unknown")
+            control_api = (
+                "yes" if getattr(assessment, "control_api_reachable", False) else "no"
+            )
+            egress_ip = getattr(assessment, "current_egress_ip", None) or "-"
+            peer_evidence = getattr(assessment, "peer_evidence", None)
+            peers = []
+            if peer_evidence is not None:
+                peers = getattr(peer_evidence, "healthy", [])
+            is_healthy = score >= 60
+            if is_healthy:
+                healthy += 1
+            table.add_row(
+                name,
+                "yes" if is_healthy else "no",
+                str(score),
+                class_name,
+                control_api,
+                egress_ip,
+                ", ".join(peers) if peers else "-",
+            )
+
+        console.print(f"Health: {healthy}/{len(health_results)} services healthy")
+        console.print(table)
+        return
 
     healthy = sum(1 for h in health_results.values() if h)
     total = len(health_results)
-
     console.print(f"Health: {healthy}/{total} services healthy")
-
     if total - healthy > 0:
         unhealthy_services = [
             name for name, healthy in health_results.items() if not healthy

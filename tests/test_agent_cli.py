@@ -15,6 +15,7 @@ from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.cli.main import app
 from proxy2vpn.core import config
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
+import proxy2vpn.core.services.health_assessment as health_assessment
 import proxy2vpn.cli.commands.agent as agent_commands
 import proxy2vpn.agent.runtime as agent_runtime
 
@@ -102,6 +103,7 @@ def test_agent_run_once_cli_creates_state(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_runtime.asyncio, "sleep", _sleep)
     monkeypatch.setattr(agent_runtime.asyncio, "to_thread", _to_thread)
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", DummyControlClient)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", DummyControlClient)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
@@ -123,7 +125,7 @@ def test_agent_run_once_cli_creates_state(tmp_path, monkeypatch):
     assert AgentStateStore(compose_file).state_file.exists()
 
 
-def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
+def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypatch):
     compose_file = _write_agent_compose(tmp_path)
     store = AgentStateStore(compose_file)
     state = AgentState(
@@ -151,11 +153,31 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
         ],
     )
     store.write_state(state)
+
+    class DummyControlClient:
+        def __init__(self, base_url):
+            self.base_url = base_url
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def status(self):
+            return {"status": "running"}
+
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", DummyControlClient)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: None,
+    )
     store.append_incident(
         AgentIncident(
             id="incident123",
             service_name="protonvpn-united-states-new-york",
-            type="rotation_required",
+            type="rotation_exhausted",
             severity="medium",
             status="open",
             created_at=utc_now(),
@@ -163,7 +185,7 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
             failure_count=2,
             summary="Needs rotation",
             recommended_action="rotate",
-            approval_required=True,
+            approval_required=False,
         )
     )
 
@@ -181,7 +203,13 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
     status_payload = json.loads(status_result.output)
     incidents_payload = json.loads(incidents_result.output)
 
-    assert set(status_payload.keys()) == {"status", "services", "actions", "daemon"}
+    assert set(status_payload.keys()) == {
+        "status",
+        "services",
+        "actions",
+        "daemon",
+        "remediation",
+    }
     assert set(status_payload["status"].keys()) == {
         "compose_path",
         "daemon_mode",
@@ -193,6 +221,7 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
         "last_error",
         "llm_mode",
     }
+    assert set(status_payload["remediation"].keys()) == {"blocked", "services"}
     assert set(status_payload["daemon"].keys()) == {"running", "pid", "log_file"}
     assert status_payload["daemon"]["running"] is False
     assert set(incidents_payload.keys()) == {"incidents"}

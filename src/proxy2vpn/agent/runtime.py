@@ -38,6 +38,10 @@ from proxy2vpn.adapters.http_client import GluetunControlClient
 from proxy2vpn.adapters.logging_utils import get_logger
 from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
+from proxy2vpn.core.services.health_assessment import (
+    HealthAssessment,
+    HealthAssessmentService,
+)
 
 logger = get_logger(__name__)
 
@@ -70,6 +74,7 @@ class AgentWatchdog:
         )
         self.llm_mode = (llm_mode or self.settings.llm_mode).strip() or "disabled"
         self.store = store or AgentStateStore(self.compose_file, settings=self.settings)
+        self._health_assessor = HealthAssessmentService(self.settings.health_threshold)
         self._incident_enricher = self._build_incident_enricher()
         self._incident_investigator = self._build_incident_investigator()
         self._llm_warning_emitted = False
@@ -104,6 +109,7 @@ class AgentWatchdog:
 
         manager = ComposeManager(self.compose_file)
         services = manager.list_services()
+        assessments = await self._health_assessor.assess_services(services)
         snapshots_by_name = {
             snapshot.service_name: snapshot for snapshot in state.services
         }
@@ -125,6 +131,8 @@ class AgentWatchdog:
                     previous=snapshots_by_name.get(service.name),
                     state=state,
                     incidents=incidents,
+                    assessment=assessments.get(service.name),
+                    assessment_map=assessments,
                 )
                 updated_snapshots.append(snapshot)
         except Exception as exc:
@@ -146,7 +154,7 @@ class AgentWatchdog:
         return state
 
     async def approve_incident(self, incident_id: str) -> AgentIncident:
-        """Approve one incident and execute its pending escalation exactly once."""
+        """Deprecated compatibility path for manually triggering a rotation."""
 
         incidents = self.store.load_incidents()
         incident = next((item for item in incidents if item.id == incident_id), None)
@@ -154,42 +162,24 @@ class AgentWatchdog:
             raise KeyError(f"Incident '{incident_id}' not found")
         if incident.status in {"resolved", "dismissed", "failed"}:
             raise RuntimeError(f"Incident '{incident_id}' is already closed")
-        if not incident.approval_required:
-            raise RuntimeError(f"Incident '{incident_id}' does not require approval")
-        if incident.approved_at is not None:
-            raise RuntimeError(f"Incident '{incident_id}' was already approved")
+        if incident.recommended_action != "rotate" and incident.type not in {
+            "rotation_exhausted",
+            "provider_outage_suspected",
+            "rotation_required",
+        }:
+            raise RuntimeError(f"Incident '{incident_id}' is not a rotation incident")
 
-        approved = incident.model_copy(
-            update={
-                "status": "approved",
-                "approved_at": utc_now(),
-                "updated_at": utc_now(),
-            }
-        )
-        self.store.append_incident(approved)
-
-        fleet_manager = FleetStateManager(self.compose_file)
-        try:
-            result = await fleet_manager.rotate_service(
-                approved.service_name,
-                OperationConfig(
-                    dry_run=False,
-                    criteria=RotationCriteria.PERFORMANCE,
-                    rollback_on_failure=True,
-                ),
-            )
-        finally:
-            await fleet_manager.close()
+        result = await self._rotate_service_via_fleet(incident.service_name)
 
         state = self.store.read_state() or self.empty_state()
         action_result = "success" if result.success else "failed"
         action_details = self._build_rotation_action_details(
-            incident_id=approved.id,
-            requested_service_name=approved.service_name,
+            incident_id=incident.id,
+            requested_service_name=incident.service_name,
             result=result,
         )
         action_service_name = action_details.get(
-            "final_service_name", approved.service_name
+            "final_service_name", incident.service_name
         )
         self._append_action(
             state,
@@ -201,49 +191,49 @@ class AgentWatchdog:
         )
         self._update_snapshot_action(
             state,
-            approved.service_name,
+            incident.service_name,
             last_action="rotate",
             last_action_result=action_result,
             new_service_name=action_details.get("final_service_name"),
         )
         self.store.write_state(state)
         final_service_name = action_details.get("final_service_name")
-        if result.success and final_service_name not in {None, approved.service_name}:
+        if result.success and final_service_name not in {None, incident.service_name}:
             self._migrate_active_incidents(
-                old_service_name=approved.service_name,
+                old_service_name=incident.service_name,
                 new_service_name=final_service_name,
-                exclude_incident_ids={approved.id},
+                exclude_incident_ids={incident.id},
             )
 
         terminal_status: IncidentStatus = "resolved" if result.success else "failed"
         summary_text = (
-            approved.summary
+            incident.summary
             if result.success
-            else f"{approved.summary} Rotation failed: {' | '.join(result.errors)}"
+            else f"{incident.summary} Rotation failed: {' | '.join(result.errors)}"
         )
         summary, human_explanation = self._enrich_summary(
             IncidentContext(
-                service_name=approved.service_name,
+                service_name=incident.service_name,
                 fallback_summary=summary_text,
-                recommended_action=approved.recommended_action,
-                failure_count=approved.failure_count,
+                recommended_action=incident.recommended_action,
+                failure_count=incident.failure_count,
                 issues=[],
                 recent_actions=[
                     action
                     for action in self._recent_actions_for_service(
                         state.actions,
-                        approved.service_name,
+                        incident.service_name,
                     )
                 ],
             )
         )
-        terminal = approved.model_copy(
+        terminal = incident.model_copy(
             update={
                 "status": terminal_status,
                 "resolved_at": utc_now() if result.success else None,
                 "updated_at": utc_now(),
                 "summary": summary,
-                "human_explanation": human_explanation or approved.human_explanation,
+                "human_explanation": human_explanation or incident.human_explanation,
             }
         )
         self.store.append_incident(terminal)
@@ -318,24 +308,18 @@ class AgentWatchdog:
         previous: ServiceSnapshot | None,
         state: AgentState,
         incidents: list[AgentIncident],
+        assessment: HealthAssessment | None,
+        assessment_map: dict[str, HealthAssessment] | None,
     ) -> ServiceSnapshot:
-        container = docker_ops.get_container_by_service_name(service.name)
-        container_status = "missing"
-        results: list[DiagnosticResult] = []
-        health_score = 0
-        control_api_reachable = False
+        if assessment is None:
+            assessment = await self._health_assessor.assess_service(
+                service, peer_assessments=assessment_map
+            )
 
-        if container is not None:
-            try:
-                container.reload()
-            except Exception:
-                pass
-            container_status = getattr(container, "status", "unknown") or "unknown"
-            if container_status == "running":
-                analyzer = DiagnosticAnalyzer()
-                results = await self._analyze_service_logs(service.name, analyzer)
-                health_score = analyzer.health_score(results)
-                control_api_reachable = await self._control_api_reachable(service)
+        container_status = assessment.container_status
+        results = assessment.results
+        health_score = assessment.health_score
+        control_api_reachable = assessment.control_api_reachable
 
         failure_count = (
             0
@@ -368,12 +352,10 @@ class AgentWatchdog:
 
         if self._has_persistent_auth_or_config_failure(results):
             auth_restart = await self._attempt_isolated_auth_restart(
-                manager=manager,
                 state=state,
                 incidents=incidents,
                 service=service,
-                results=results,
-                control_api_reachable=control_api_reachable,
+                assessment=assessment,
             )
             if auth_restart is not None:
                 restart_result, post_restart = auth_restart
@@ -396,6 +378,8 @@ class AgentWatchdog:
                     self._resolve_active_incidents(service.name, incidents)
                     return snapshot
                 results = post_restart["results"]
+                health_score = post_restart["health_score"]
+                container_status = post_restart["container_status"]
 
             summary, human_explanation = self._format_issue_summary(
                 service.name,
@@ -413,7 +397,6 @@ class AgentWatchdog:
                 summary=summary,
                 human_explanation=human_explanation,
                 recommended_action="investigate",
-                approval_required=False,
                 failure_count=failure_count,
             )
             if incident is not None:
@@ -453,6 +436,8 @@ class AgentWatchdog:
                 return snapshot
 
             results = post_restart["results"]
+            health_score = post_restart["health_score"]
+            container_status = post_restart["container_status"]
 
         if self._can_restore(service.name, state.actions):
             restore_result, post_restore = await self._restore_service(
@@ -501,10 +486,72 @@ class AgentWatchdog:
             )
             return snapshot
 
+        auto_rotation_block = self._auto_rotation_block_reason(
+            service=service,
+            assessment=assessment,
+            assessment_map=assessment_map or {},
+            incidents=incidents,
+            state=state,
+        )
+        if auto_rotation_block is not None:
+            summary, human_explanation = self._format_issue_summary(
+                service.name,
+                results,
+                fallback=auto_rotation_block,
+                recommended_action="rotate"
+                if auto_rotation_block == "Rotation budget exhausted."
+                else "investigate",
+                recent_actions=state.actions,
+                failure_count=failure_count,
+            )
+            incident_type = self._incident_type_for_block(auto_rotation_block)
+            self._upsert_scope_incident(
+                incidents=incidents,
+                service=service,
+                incident_type=incident_type,
+                severity="medium" if incident_type == "rotation_exhausted" else "high",
+                summary=summary,
+                human_explanation=human_explanation,
+                recommended_action="rotate"
+                if incident_type == "rotation_exhausted"
+                else "investigate",
+                failure_count=failure_count,
+            )
+            return snapshot
+
+        rotate_result = await self._rotate_service_via_fleet(service.name)
+        snapshot.last_action = "rotate"
+        snapshot.last_action_result = "success" if rotate_result.success else "failed"
+        action_details = self._build_rotation_action_details_from_result(
+            service.name, rotate_result
+        )
+        self._append_action(
+            state,
+            service_name=action_details.get("final_service_name", service.name),
+            action="rotate",
+            trigger="automatic_remediation",
+            result="success" if rotate_result.success else "failed",
+            details=action_details,
+        )
+        if rotate_result.rotation_changes:
+            change = rotate_result.rotation_changes[0]
+            snapshot.service_name = change.final_service_name
+            snapshot.container_status = "running"
+            snapshot.health_score = self.settings.health_threshold
+            snapshot.consecutive_failures = 0
+            snapshot.degraded_since = None
+            self._migrate_active_incidents(
+                old_service_name=service.name,
+                new_service_name=change.final_service_name,
+            )
+        if rotate_result.success:
+            self._resolve_active_incidents(service.name, incidents)
+            return snapshot
+
         summary, human_explanation = self._format_issue_summary(
             service.name,
             results,
-            fallback="Service remains unhealthy after automatic remediation. Rotation approval is required.",
+            fallback="Automatic rotation failed after the grace period.",
             recommended_action="rotate",
             recent_actions=state.actions,
             failure_count=failure_count,
@@ -512,12 +559,11 @@ class AgentWatchdog:
         self._upsert_incident(
             incidents=incidents,
             service_name=service.name,
-            incident_type="rotation_required",
+            incident_type="rotation_exhausted",
             severity="medium",
             summary=summary,
             human_explanation=human_explanation,
             recommended_action="rotate",
-            approval_required=True,
             failure_count=failure_count,
         )
         return snapshot
@@ -604,27 +650,11 @@ class AgentWatchdog:
             }
 
     async def _evaluate_health(self, service: VPNService) -> dict[str, object]:
-        container = docker_ops.get_container_by_service_name(service.name)
-        if container is None:
-            return {"container_status": "missing", "health_score": 0, "results": []}
-        try:
-            container.reload()
-        except Exception:
-            pass
-        container_status = getattr(container, "status", "unknown") or "unknown"
-        if container_status != "running":
-            return {
-                "container_status": container_status,
-                "health_score": 0,
-                "results": [],
-            }
-
-        analyzer = DiagnosticAnalyzer()
-        results = await self._analyze_service_logs(service.name, analyzer)
+        assessment = await self._health_assessor.assess_service(service)
         return {
-            "container_status": container_status,
-            "health_score": analyzer.health_score(results),
-            "results": results,
+            "container_status": assessment.container_status,
+            "health_score": assessment.health_score,
+            "results": assessment.results,
         }
 
     async def _analyze_service_logs(
@@ -722,6 +752,40 @@ class AgentWatchdog:
             details["attempted_locations"] = ", ".join(attempted_locations)
         return details
 
+    def _build_rotation_action_details_from_result(
+        self, requested_service_name: str, result: Any
+    ) -> dict[str, str]:
+        details = {
+            "requested_service_name": requested_service_name,
+        }
+        errors = [
+            error.strip()
+            for error in getattr(result, "errors", [])
+            if isinstance(error, str) and error.strip()
+        ]
+        if errors:
+            details["errors"] = " | ".join(errors)
+
+        rotation_changes = getattr(result, "rotation_changes", []) or []
+        if not rotation_changes:
+            return details
+
+        change = rotation_changes[0]
+        details["final_service_name"] = getattr(
+            change,
+            "final_service_name",
+            requested_service_name,
+        )
+        details["old_location"] = getattr(change, "old_location", "")
+        details["new_location"] = getattr(change, "new_location", "")
+        candidate_locations = getattr(change, "candidate_locations", []) or []
+        attempted_locations = getattr(change, "attempted_locations", []) or []
+        if candidate_locations:
+            details["candidate_locations"] = ", ".join(candidate_locations)
+        if attempted_locations:
+            details["attempted_locations"] = ", ".join(attempted_locations)
+        return details
+
     def _action_matches_service(
         self,
         action: ActionRecord,
@@ -803,32 +867,27 @@ class AgentWatchdog:
 
     async def _attempt_isolated_auth_restart(
         self,
-        manager: ComposeManager,
         state: AgentState,
         incidents: list[AgentIncident],
         service: VPNService,
-        results: list[DiagnosticResult],
-        control_api_reachable: bool,
+        assessment: HealthAssessment,
     ) -> tuple[str, dict[str, object]] | None:
-        if not control_api_reachable:
+        if not assessment.control_api_reachable:
             return None
         if self._find_active_incident(incidents, service.name, "auth_config_failure"):
             return None
         if any(
-            result.check == "config_error" and not result.passed for result in results
+            result.check == "config_error" and not result.passed
+            for result in assessment.results
         ):
             return None
         if not any(
-            result.check == "auth_failure" and not result.passed for result in results
+            result.check == "auth_failure" and not result.passed
+            for result in assessment.results
         ):
             return None
 
-        peer_evidence = await self._collect_shared_profile_peer_evidence(
-            manager=manager,
-            state=state,
-            service=service,
-        )
-        if not peer_evidence["healthy"]:
+        if not assessment.peer_evidence.healthy:
             return None
 
         restart_result = await self._restart_tunnel(
@@ -839,6 +898,340 @@ class AgentWatchdog:
         await asyncio.sleep(self.settings.recheck_delay_seconds)
         post_restart = await self._evaluate_health(service)
         return restart_result, post_restart
+
+    def _incident_type_for_block(self, block_reason: str) -> str:
+        if block_reason == "Rotation budget exhausted.":
+            return "rotation_exhausted"
+        if block_reason == "Provider/country degradation breaker is active.":
+            return "provider_outage_suspected"
+        if block_reason == "Profile auth/config breaker is active.":
+            return "profile_auth_config_failure"
+        return "rotation_exhausted"
+
+    def _upsert_scope_incident(
+        self,
+        incidents: list[AgentIncident],
+        service: VPNService,
+        incident_type: str,
+        severity: str,
+        summary: str,
+        human_explanation: str | None,
+        recommended_action: str,
+        failure_count: int,
+    ) -> AgentIncident | None:
+        now = utc_now()
+        if incident_type == "profile_auth_config_failure":
+            existing = next(
+                (
+                    item
+                    for item in incidents
+                    if item.type == incident_type
+                    and item.status not in {"resolved", "dismissed", "failed"}
+                    and self._same_profile(service, item.service_name)
+                    and item.updated_at >= now - timedelta(hours=1)
+                ),
+                None,
+            )
+        elif incident_type == "provider_outage_suspected":
+            existing = next(
+                (
+                    item
+                    for item in incidents
+                    if item.type == incident_type
+                    and item.status not in {"resolved", "dismissed", "failed"}
+                    and self._same_provider_country(service, item.service_name)
+                    and item.updated_at >= now - timedelta(minutes=30)
+                ),
+                None,
+            )
+        else:
+            existing = None
+
+        if existing is not None:
+            updated = existing.model_copy(
+                update={
+                    "severity": severity,
+                    "summary": summary,
+                    "human_explanation": human_explanation,
+                    "recommended_action": recommended_action,
+                    "failure_count": failure_count,
+                    "updated_at": now,
+                }
+            )
+            self.store.append_incident(updated)
+            incidents[:] = [item for item in incidents if item.id != updated.id]
+            incidents.insert(0, updated)
+            return updated
+
+        return self._upsert_incident(
+            incidents=incidents,
+            service_name=service.name,
+            incident_type=incident_type,
+            severity=severity,
+            summary=summary,
+            human_explanation=human_explanation,
+            recommended_action=recommended_action,
+            failure_count=failure_count,
+        )
+
+    def _auto_rotation_block_reason(
+        self,
+        service: VPNService,
+        assessment: HealthAssessment,
+        assessment_map: dict[str, HealthAssessment],
+        incidents: list[AgentIncident],
+        state: AgentState,
+    ) -> str | None:
+        if self._has_persistent_auth_or_config_failure(assessment.results):
+            return "Service still shows auth/config failure."
+
+        if self._profile_auth_config_breaker_active(service, assessment_map, incidents):
+            return "Profile auth/config breaker is active."
+
+        if self._provider_country_breaker_active(service, assessment_map, incidents):
+            return "Provider/country degradation breaker is active."
+
+        if self._service_rotation_budget_exhausted(service.name, state.actions):
+            return "Rotation budget exhausted."
+
+        return None
+
+    def _service_rotation_budget_exhausted(
+        self, service_name: str, actions: list[ActionRecord]
+    ) -> bool:
+        now = utc_now()
+        recent_rotations = [
+            action
+            for action in actions
+            if action.action == "rotate"
+            and action.result == "success"
+            and action.trigger in {"automatic_remediation", "auto_rotation"}
+            and self._action_matches_service(action, service_name)
+            and action.ts >= now - timedelta(minutes=30)
+        ]
+        if recent_rotations:
+            return True
+        window_rotations = [
+            action
+            for action in actions
+            if action.action == "rotate"
+            and action.result == "success"
+            and action.trigger in {"automatic_remediation", "auto_rotation"}
+            and self._action_matches_service(action, service_name)
+            and action.ts >= now - timedelta(hours=6)
+        ]
+        return len(window_rotations) >= 2
+
+    def _profile_auth_config_breaker_active(
+        self,
+        service: VPNService,
+        assessment_map: dict[str, HealthAssessment],
+        incidents: list[AgentIncident],
+    ) -> bool:
+        matching = [
+            assessment
+            for assessment in assessment_map.values()
+            if assessment.health_class == "auth_config"
+            and self._same_profile(service, assessment.service_name)
+        ]
+        if len(matching) >= 2:
+            return True
+        return self._find_active_scope_incident(
+            incidents,
+            "profile_auth_config_failure",
+            service,
+            cooldown_seconds=60 * 60,
+        )
+
+    def _provider_country_breaker_active(
+        self,
+        service: VPNService,
+        assessment_map: dict[str, HealthAssessment],
+        incidents: list[AgentIncident],
+    ) -> bool:
+        matching = [
+            assessment
+            for assessment in assessment_map.values()
+            if assessment.service_name != service.name
+            and self._same_provider_country(service, assessment.service_name)
+            and assessment.health_score < self.settings.health_threshold
+            and assessment.health_class != "auth_config"
+        ]
+        if len(matching) >= 2:
+            return True
+        return self._find_active_scope_incident(
+            incidents,
+            "provider_outage_suspected",
+            service,
+            cooldown_seconds=30 * 60,
+        )
+
+    def _same_profile(self, service: VPNService, other_service_name: str) -> bool:
+        manager = ComposeManager(self.compose_file)
+        try:
+            other_service = manager.get_service(other_service_name)
+        except Exception:
+            return False
+        return other_service.profile == service.profile
+
+    def _same_provider_country(
+        self, service: VPNService, other_service_name: str
+    ) -> bool:
+        manager = ComposeManager(self.compose_file)
+        try:
+            other_service = manager.get_service(other_service_name)
+        except Exception:
+            return False
+        return other_service.provider == service.provider and self._service_country(
+            service
+        ) == self._service_country(other_service)
+
+    def _service_country(self, service: VPNService) -> str:
+        country = service.environment.get("SERVER_COUNTRIES", "").strip()
+        if country:
+            return country
+        parts = service.name.split("-")
+        if len(parts) >= 3:
+            return parts[1].replace("-", " ").title()
+        return service.location
+
+    def _find_active_scope_incident(
+        self,
+        incidents: list[AgentIncident],
+        incident_type: str,
+        service: VPNService,
+        cooldown_seconds: int,
+    ) -> bool:
+        cutoff = utc_now() - timedelta(seconds=cooldown_seconds)
+        for incident in incidents:
+            if incident.type != incident_type or incident.status in {
+                "resolved",
+                "dismissed",
+                "failed",
+            }:
+                continue
+            if incident.updated_at < cutoff:
+                continue
+            if self._same_scope_incident(incident, service, incident_type):
+                return True
+        return False
+
+    def _same_scope_incident(
+        self,
+        incident: AgentIncident,
+        service: VPNService,
+        incident_type: str,
+    ) -> bool:
+        manager = ComposeManager(self.compose_file)
+        try:
+            incident_service = manager.get_service(incident.service_name)
+        except Exception:
+            return False
+        if incident_type == "profile_auth_config_failure":
+            return incident_service.profile == service.profile
+        if incident_type == "provider_outage_suspected":
+            return (
+                incident_service.provider == service.provider
+                and self._service_country(incident_service)
+                == self._service_country(service)
+            )
+        return incident.service_name == service.name
+
+    async def _rotate_service_via_fleet(self, service_name: str) -> Any:
+        fleet_manager = FleetStateManager(self.compose_file)
+        try:
+            result = await fleet_manager.rotate_service(
+                service_name,
+                OperationConfig(
+                    dry_run=False,
+                    criteria=RotationCriteria.PERFORMANCE,
+                    rollback_on_failure=True,
+                ),
+            )
+        finally:
+            await fleet_manager.close()
+        return result
+
+    async def build_remediation_overview(self, state: AgentState) -> dict[str, Any]:
+        """Return live remediation status for the current compose root."""
+
+        manager = ComposeManager(self.compose_file)
+        services = manager.list_services()
+        assessments = await self._health_assessor.assess_services(services)
+        incidents = self.store.load_incidents()
+        snapshots_by_name = {
+            snapshot.service_name: snapshot for snapshot in state.services
+        }
+        entries: list[dict[str, Any]] = []
+
+        for service in services:
+            assessment = assessments[service.name]
+            blocks: list[dict[str, str]] = []
+            if assessment.health_score >= self.settings.health_threshold:
+                entries.append(
+                    {
+                        "service_name": service.name,
+                        "healthy": True,
+                        "suppressed": False,
+                        "blocks": [],
+                    }
+                )
+                continue
+
+            if self._has_persistent_auth_or_config_failure(assessment.results):
+                blocks.append(
+                    {
+                        "type": "manual",
+                        "reason": "auth/config failure requires investigation",
+                    }
+                )
+            snapshot = snapshots_by_name.get(service.name)
+            if snapshot is not None and not self._rotation_grace_elapsed(snapshot):
+                blocks.append(
+                    {
+                        "type": "cooldown",
+                        "reason": "rotation grace period has not elapsed",
+                    }
+                )
+            if self._service_rotation_budget_exhausted(service.name, state.actions):
+                blocks.append(
+                    {
+                        "type": "service_budget",
+                        "reason": "rotation budget exhausted",
+                    }
+                )
+            if self._profile_auth_config_breaker_active(
+                service, assessments, incidents
+            ):
+                blocks.append(
+                    {
+                        "type": "profile_breaker",
+                        "reason": "profile auth/config breaker is active",
+                    }
+                )
+            if self._provider_country_breaker_active(service, assessments, incidents):
+                blocks.append(
+                    {
+                        "type": "provider_country_breaker",
+                        "reason": "provider/country degradation breaker is active",
+                    }
+                )
+
+            entries.append(
+                {
+                    "service_name": service.name,
+                    "healthy": False,
+                    "suppressed": bool(blocks),
+                    "blocks": blocks,
+                    "health_class": assessment.health_class,
+                    "health_score": assessment.health_score,
+                }
+            )
+
+        return {
+            "blocked": any(entry.get("suppressed") for entry in entries),
+            "services": entries,
+        }
 
     def _has_persistent_auth_or_config_failure(
         self, results: list[DiagnosticResult]
@@ -1315,7 +1708,10 @@ class AgentWatchdog:
                 f"Recent action: {self._describe_recent_action(action)}",
             )
 
-        if context.incident_type == "auth_config_failure":
+        if context.incident_type in {
+            "auth_config_failure",
+            "profile_auth_config_failure",
+        }:
             if context.profile_validation_errors or "config_error" in issues_by_check:
                 summary = (
                     f"{context.service_name}: configuration for the VPN profile or "
@@ -1352,7 +1748,11 @@ class AgentWatchdog:
                     "manual review before more automation."
                 )
                 action_plan = self._auth_config_action_plan(context)
-        elif context.incident_type == "rotation_required":
+        elif context.incident_type in {
+            "rotation_required",
+            "rotation_exhausted",
+            "provider_outage_suspected",
+        }:
             summary = (
                 f"{context.service_name}: automatic remediation did not recover the "
                 "service, so a supervised rotation is the next step."
@@ -1498,7 +1898,6 @@ class AgentWatchdog:
         summary: str,
         human_explanation: str | None,
         recommended_action: str,
-        approval_required: bool,
         failure_count: int,
     ) -> AgentIncident | None:
         now = utc_now()
@@ -1513,7 +1912,7 @@ class AgentWatchdog:
                     "summary": summary,
                     "human_explanation": human_explanation,
                     "recommended_action": recommended_action,
-                    "approval_required": approval_required,
+                    "approval_required": False,
                     "failure_count": failure_count,
                     "updated_at": now,
                 }
@@ -1535,7 +1934,7 @@ class AgentWatchdog:
             summary=summary,
             human_explanation=human_explanation,
             recommended_action=recommended_action,
-            approval_required=approval_required,
+            approval_required=False,
         )
         self.store.append_incident(incident)
         incidents.insert(0, incident)
