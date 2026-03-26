@@ -153,14 +153,14 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
             pass
 
         client.images.pull(profile.image)
-        env = _load_env_file(profile.env_file)
+        env = _load_env_file(str(profile._resolve_env_path()))
         env.update(service.environment)
         ensure_network()
         port_bindings = {
             "8888/tcp": service.port,
             "8000/tcp": ("127.0.0.1", service.control_port),
         }
-        auth_config = config.CONTROL_AUTH_CONFIG_FILE
+        auth_config = config.resolve_control_auth_config(compose_root=profile._base_dir)
         if not auth_config.exists():
             raise RuntimeError(
                 f"Missing '{auth_config}'. Run 'proxy2vpn system init' to create required files."

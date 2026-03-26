@@ -183,6 +183,66 @@ def test_analyze_container_logs_redacts_proxy_error_messages(monkeypatch):
     assert all("user:pass" not in result.message for result in results)
 
 
+def test_create_vpn_container_resolves_files_from_compose_root(tmp_path, monkeypatch):
+    compose_root = tmp_path / "state"
+    compose_root.mkdir()
+    env_file = compose_root / "profiles" / "test.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("FOO=bar\n")
+    auth_config = compose_root / docker_ops.config.CONTROL_AUTH_CONFIG_FILE
+    auth_config.write_text('[[roles]]\nname = "proxy2vpn"\nauth = "none"\n')
+
+    profile = docker_ops.Profile(
+        name="test",
+        env_file="profiles/test.env",
+        image="alpine",
+        cap_add=[],
+        devices=[],
+    )
+    profile._base_dir = compose_root
+    service = docker_ops.VPNService.create(
+        name="vpn-test",
+        port=12345,
+        control_port=30000,
+        provider="",
+        profile="test",
+        location="",
+        environment={"VAR": "override"},
+        labels={"vpn.type": "vpn", "vpn.port": "12345"},
+    )
+
+    created: dict[str, object] = {}
+
+    class DummyContainers:
+        def get(self, name):
+            raise docker_ops.NotFound("missing")
+
+        def create(self, image, **kwargs):
+            created["image"] = image
+            created["kwargs"] = kwargs
+            return type("Container", (), {"name": kwargs["name"]})()
+
+    class DummyImages:
+        def pull(self, image):
+            created["pulled"] = image
+
+    class DummyClient:
+        containers = DummyContainers()
+        images = DummyImages()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda timeout=docker_ops.DEFAULT_TIMEOUT: DummyClient())
+    monkeypatch.setattr(docker_ops, "ensure_network", lambda recreate=False: None)
+    monkeypatch.chdir(tmp_path)
+
+    docker_ops.create_vpn_container(service, profile)
+
+    kwargs = created["kwargs"]
+    assert created["pulled"] == "alpine"
+    assert kwargs["environment"]["FOO"] == "bar"
+    assert kwargs["environment"]["VAR"] == "override"
+    assert str(auth_config.resolve()) in kwargs["volumes"]
+
+
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
 def test_restart_and_logs():
     name = "proxy2vpn-test-logs"

@@ -56,6 +56,31 @@ def test_init_requires_force(tmp_path):
     assert result.returncode == 0
 
 
+def test_init_writes_auth_config_next_to_custom_compose_file(tmp_path):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    compose_file = state_dir / "compose.yml"
+
+    cache_dir = tmp_path / ".cache" / "proxy2vpn"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "servers.json").write_text("{}")
+
+    result = _run_proxy2vpn(
+        [
+            "--compose-file",
+            str(compose_file),
+            "system",
+            "init",
+            "--skip-server-refresh",
+        ],
+        tmp_path,
+    )
+    assert result.returncode == 0
+    assert compose_file.exists()
+    assert (state_dir / "control-server-auth.toml").exists()
+    assert not (tmp_path / "control-server-auth.toml").exists()
+
+
 def test_system_validate_allows_profile_only_workspace(tmp_path):
     cache_dir = tmp_path / ".cache" / "proxy2vpn"
     cache_dir.mkdir(parents=True)

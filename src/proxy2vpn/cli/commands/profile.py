@@ -10,12 +10,64 @@ from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.display_utils import console
 from proxy2vpn.core.models import Profile, ServiceCredentials
 from proxy2vpn.common import abort
-from proxy2vpn.adapters.validators import sanitize_name, sanitize_path
+from proxy2vpn.adapters.validators import sanitize_name
 from proxy2vpn.adapters.logging_utils import get_logger
 from proxy2vpn.adapters import server_manager
 
 app = HelpfulTyper(help="Manage VPN profiles and apply them to services")
 logger = get_logger(__name__)
+
+
+def _compose_file_from_ctx(ctx: typer.Context) -> Path:
+    return (ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)
+
+
+def _profile_env_file_paths(ctx: typer.Context, env_file: Path) -> tuple[Path, str]:
+    compose_file = _compose_file_from_ctx(ctx)
+    target = env_file.expanduser()
+    if target.is_absolute():
+        resolved = target.resolve()
+        stored = str(resolved)
+    else:
+        resolved = (Path.cwd() / target).resolve()
+        stored = config.relativize_path_for_compose(
+            target, compose_file=compose_file, cwd=Path.cwd()
+        )
+    return resolved, stored
+
+
+def _validate_and_add_profile(
+    ctx: typer.Context,
+    name: str,
+    resolved_env_file: Path,
+    stored_env_file: str,
+) -> None:
+    profile = Profile(name=name, env_file=stored_env_file)
+    profile._base_dir = config.resolve_compose_root(_compose_file_from_ctx(ctx))
+    validation_errors = profile.validate_env_file()
+
+    if validation_errors:
+        console.print(
+            f"[red]❌ Profile validation failed for {resolved_env_file}:[/red]"
+        )
+        for error in validation_errors:
+            console.print(f"[red]  • {error}[/red]")
+        console.print("\n[yellow]💡 Example valid profile:[/yellow]")
+        console.print("[green]VPN_TYPE=openvpn[/green]")
+        console.print("[green]VPN_SERVICE_PROVIDER=expressvpn[/green]")
+        console.print("[green]OPENVPN_USER=your_username[/green]")
+        console.print("[green]OPENVPN_PASSWORD=your_password[/green]")
+        console.print("[green]HTTPPROXY=on[/green]")
+        console.print("[green]HTTPPROXY_USER=proxy_user[/green]")
+        console.print("[green]HTTPPROXY_PASSWORD=proxy_pass[/green]")
+        abort("Fix the environment file and try again")
+
+    console.print(f"[blue]📋 Using provider: {profile.provider}[/blue]")
+
+    manager = ComposeManager.from_ctx(ctx)
+    manager.add_profile(profile)
+    logger.info("profile_added", extra={"profile_name": name})
+    console.print(f"[green]✓[/green] Profile '{name}' added.")
 
 
 @app.command("create")
@@ -25,7 +77,11 @@ def create(
 ):
     """Create a new environment file interactively."""
 
-    env_file_path = Path("profiles") / f"{name}.env"
+    compose_root = config.resolve_compose_root(_compose_file_from_ctx(ctx))
+    env_file_path = compose_root / "profiles" / f"{name}.env"
+    stored_env_file = config.relativize_path_for_compose(
+        env_file_path, compose_file=_compose_file_from_ctx(ctx), cwd=compose_root
+    )
 
     if env_file_path.exists():
         if not typer.confirm(
@@ -98,14 +154,14 @@ def create(
 
     console.print(f"[green]✓[/green] Environment file created at '{env_file_path}'")
     console.print(
-        f"[blue]💡 Next: Create a profile with 'proxy2vpn profile add {name} {env_file_path}'[/blue]"
+        f"[blue]💡 Next: Create a profile with 'proxy2vpn profile add {name} {stored_env_file}'[/blue]"
     )
     add_profile = typer.confirm(
         f"Should we add profile with with {name}?", default=False
     )
     if add_profile:
-        add(ctx=ctx, name=name, env_file=env_file_path)
-        compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+        _validate_and_add_profile(ctx, name, env_file_path, stored_env_file)
+        compose_file = _compose_file_from_ctx(ctx)
         console.print(f"[green]✓[/green] Profile has been added into '{compose_file}'")
 
 
@@ -113,40 +169,18 @@ def create(
 def add(
     ctx: typer.Context,
     name: str = typer.Argument(..., callback=sanitize_name),
-    env_file: Path = typer.Argument(..., callback=sanitize_path),
+    env_file: Path = typer.Argument(...),
 ):
     """Add an existing environment file as a VPN profile."""
 
-    if not env_file.exists():
+    resolved_env_file, stored_env_file = _profile_env_file_paths(ctx, env_file)
+    if not resolved_env_file.exists():
         abort(
             f"Environment file '{env_file}' not found",
             "Create the file with 'proxy2vpn profile create' or manually",
         )
 
-    # Validate profile has all required fields
-    profile = Profile(name=name, env_file=str(env_file))
-    validation_errors = profile.validate_env_file()
-
-    if validation_errors:
-        console.print(f"[red]❌ Profile validation failed for {env_file}:[/red]")
-        for error in validation_errors:
-            console.print(f"[red]  • {error}[/red]")
-        console.print("\n[yellow]💡 Example valid profile:[/yellow]")
-        console.print("[green]VPN_TYPE=openvpn[/green]")
-        console.print("[green]VPN_SERVICE_PROVIDER=expressvpn[/green]")
-        console.print("[green]OPENVPN_USER=your_username[/green]")
-        console.print("[green]OPENVPN_PASSWORD=your_password[/green]")
-        console.print("[green]HTTPPROXY=on[/green]")
-        console.print("[green]HTTPPROXY_USER=proxy_user[/green]")
-        console.print("[green]HTTPPROXY_PASSWORD=proxy_pass[/green]")
-        abort("Fix the environment file and try again")
-
-    console.print(f"[blue]📋 Using provider: {profile.provider}[/blue]")
-
-    manager = ComposeManager.from_ctx(ctx)
-    manager.add_profile(profile)
-    logger.info("profile_added", extra={"profile_name": name})
-    console.print(f"[green]✓[/green] Profile '{name}' added.")
+    _validate_and_add_profile(ctx, name, resolved_env_file, stored_env_file)
 
 
 @app.command("list")

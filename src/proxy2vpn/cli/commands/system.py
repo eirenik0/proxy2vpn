@@ -53,7 +53,7 @@ async def init(
         logger.info("compose_kept_existing", extra={"file": str(compose_file)})
 
     # Create or update control server auth config only during system init
-    auth_config = config.CONTROL_AUTH_CONFIG_FILE
+    auth_config = config.resolve_control_auth_config(compose_file)
     created = False
     updated = False
     try:

@@ -7,6 +7,7 @@ by :data:`COMPOSE_FILE`.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # Path to the docker compose file that acts as the single source of truth
@@ -89,3 +90,41 @@ routes = [
   "GET /v1/publicip/ip",
 ]
 """
+
+
+def resolve_compose_root(compose_file: Path | None = None) -> Path:
+    """Return the resolved directory that owns compose-managed state."""
+    target = (compose_file or COMPOSE_FILE).expanduser()
+    if not target.is_absolute():
+        target = (Path.cwd() / target).resolve()
+    else:
+        target = target.resolve()
+    return target.parent
+
+
+def resolve_control_auth_config(
+    compose_file: Path | None = None, compose_root: Path | None = None
+) -> Path:
+    """Return the resolved auth config path for the active compose file."""
+    if compose_root is not None:
+        return compose_root.expanduser().resolve() / CONTROL_AUTH_CONFIG_FILE
+    return resolve_compose_root(compose_file) / CONTROL_AUTH_CONFIG_FILE
+
+
+def relativize_path_for_compose(
+    path: Path, compose_file: Path | None = None, cwd: Path | None = None
+) -> str:
+    """Return PATH relative to the compose root.
+
+    Relative user input is first resolved against ``cwd`` (default: current
+    working directory) so CLI invocations behave like normal shell paths.
+    Absolute input is preserved as-is by the caller by not using this helper.
+    """
+
+    base_cwd = (cwd or Path.cwd()).expanduser().resolve()
+    target = path.expanduser()
+    if not target.is_absolute():
+        target = (base_cwd / target).resolve()
+    else:
+        target = target.resolve()
+    return os.path.relpath(target, start=resolve_compose_root(compose_file))

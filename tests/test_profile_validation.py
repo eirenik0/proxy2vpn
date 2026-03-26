@@ -68,6 +68,24 @@ def test_profile_create_with_valid_env_file(tmp_path):
             pytest.fail("Profile creation should not fail with valid env file")
 
 
+def test_profile_add_preserves_relative_env_path(tmp_path, monkeypatch):
+    compose_path = _create_test_compose(tmp_path)
+    env_file = tmp_path / "profiles" / "relative.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text(
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=test_user\nOPENVPN_PASSWORD=test_pass\n"
+    )
+
+    monkeypatch.chdir(tmp_path)
+    with _cli_ctx(compose_path) as ctx:
+        profile_add(ctx, "relative-profile", pathlib.Path("profiles/relative.env"))
+
+    manager = ComposeManager(compose_path)
+    profile = manager.get_profile("relative-profile")
+    assert profile.env_file == "profiles/relative.env"
+    assert profile._resolve_env_path() == env_file.resolve()
+
+
 def test_profile_create_fails_with_missing_vpn_service_provider(tmp_path):
     """Test profile creation fails with missing VPN_SERVICE_PROVIDER."""
     compose_path = _create_test_compose(tmp_path)

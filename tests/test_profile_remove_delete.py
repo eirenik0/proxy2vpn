@@ -50,3 +50,20 @@ def test_profile_delete_env(tmp_path, monkeypatch):
     with _cli_ctx(compose_path) as ctx:
         profile_delete(ctx, "test", force=True)
     assert not env_file.exists()
+
+
+def test_profile_delete_env_resolves_relative_to_compose_root(tmp_path, monkeypatch):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    compose_path = state_dir / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    env_file = state_dir / "profiles" / "custom-location.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("KEY=value\n")
+    manager = ComposeManager(compose_path)
+    manager.add_profile(Profile(name="test", env_file="profiles/custom-location.env"))
+
+    monkeypatch.chdir(tmp_path)
+    with _cli_ctx(compose_path) as ctx:
+        profile_delete(ctx, "test", force=True)
+    assert not env_file.exists()

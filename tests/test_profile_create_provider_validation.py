@@ -32,7 +32,7 @@ def test_profile_create_rejects_unknown_provider(tmp_path, monkeypatch):
             input="bad\n",
         )
         assert result.exit_code != 0
-        assert not pathlib.Path("profiles/test.env").exists()
+        assert not (compose_path.parent / "profiles" / "test.env").exists()
 
 
 def test_profile_create_accepts_supported_provider(tmp_path, monkeypatch):
@@ -54,7 +54,7 @@ def test_profile_create_accepts_supported_provider(tmp_path, monkeypatch):
             input="prov\n\nuser\npass\nn\nn\n",
         )
         assert result.exit_code == 0
-        env_file = pathlib.Path("profiles/test.env")
+        env_file = compose_path.parent / "profiles" / "test.env"
         assert env_file.exists()
         content = env_file.read_text()
         assert "VPN_TYPE=openvpn" in content
