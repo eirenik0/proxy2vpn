@@ -1372,6 +1372,97 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
         asyncio.run(watchdog.approve_incident("incident123"))
 
 
+def test_approve_incident_migrates_other_open_incidents_after_service_rename(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    last_check_at=utc_now(),
+                )
+            ],
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="rotation_required",
+            severity="medium",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=2,
+            summary="Needs rotation",
+            recommended_action="rotate",
+            approval_required=True,
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident456",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Auth issue still open",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    class DummyFleetManager:
+        def __init__(self, compose_file):
+            self.compose_file = compose_file
+
+        async def rotate_service(self, service_name, config_obj):
+            return SimpleNamespace(
+                success=True,
+                errors=[],
+                rotation_changes=[
+                    RotationChange(
+                        requested_service_name=service_name,
+                        final_service_name="protonvpn-united-states-boston",
+                        old_location="New York",
+                        new_location="Boston",
+                        candidate_locations=["Boston"],
+                        attempted_locations=["Boston"],
+                    )
+                ],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", DummyFleetManager)
+
+    asyncio.run(watchdog.approve_incident("incident123"))
+    incidents = store.load_incidents()
+    migrated_incident = next(item for item in incidents if item.id == "incident456")
+    rotation_incident = next(item for item in incidents if item.id == "incident123")
+
+    assert migrated_incident.service_name == "protonvpn-united-states-boston"
+    assert migrated_incident.status == "open"
+    assert rotation_incident.service_name == "protonvpn-united-states-new-york"
+    assert rotation_incident.status == "resolved"
+
+
 def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkeypatch):
     store = AgentStateStore(agent_compose_file)
     store.write_state(

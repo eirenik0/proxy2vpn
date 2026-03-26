@@ -207,6 +207,13 @@ class AgentWatchdog:
             new_service_name=action_details.get("final_service_name"),
         )
         self.store.write_state(state)
+        final_service_name = action_details.get("final_service_name")
+        if result.success and final_service_name not in {None, approved.service_name}:
+            self._migrate_active_incidents(
+                old_service_name=approved.service_name,
+                new_service_name=final_service_name,
+                exclude_incident_ids={approved.id},
+            )
 
         terminal_status: IncidentStatus = "resolved" if result.success else "failed"
         summary_text = (
@@ -1549,6 +1556,27 @@ class AgentWatchdog:
             self.store.append_incident(resolved)
             incidents.remove(incident)
             incidents.insert(0, resolved)
+
+    def _migrate_active_incidents(
+        self,
+        old_service_name: str,
+        new_service_name: str,
+        exclude_incident_ids: set[str] | None = None,
+    ) -> None:
+        exclude_ids = exclude_incident_ids or set()
+        now = utc_now()
+        incidents = self.store.load_incidents()
+        for incident in incidents:
+            if incident.id in exclude_ids:
+                continue
+            if incident.service_name != old_service_name:
+                continue
+            if incident.status in {"resolved", "dismissed", "failed"}:
+                continue
+            migrated = incident.model_copy(
+                update={"service_name": new_service_name, "updated_at": now}
+            )
+            self.store.append_incident(migrated)
 
     def _find_active_incident(
         self,
