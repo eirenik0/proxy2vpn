@@ -77,6 +77,10 @@ AGENT_RECHECK_DELAY_SECONDS = 15
 AGENT_RESTORE_COOLDOWN_SECONDS = 600
 AGENT_INCIDENT_COOLDOWN_SECONDS = 1800
 AGENT_ACTION_HISTORY_LIMIT = 100
+AGENT_OPENAI_MODEL = "gpt-5-nano"
+AGENT_OPENAI_TIMEOUT_SECONDS = 10
+AGENT_OPENAI_MAX_OUTPUT_TOKENS = 220
+AGENT_OPENAI_REASONING_EFFORT = "minimal"
 
 # Default content of the control server authentication configuration.
 # It declares a single role allowing access to the endpoints required by

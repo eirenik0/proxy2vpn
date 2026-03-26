@@ -151,6 +151,7 @@ def incidents(
     table.add_column("Severity")
     table.add_column("Status")
     table.add_column("Action")
+    table.add_column("Summary")
     table.add_column("Updated")
 
     for incident in incident_list:
@@ -161,10 +162,16 @@ def incidents(
             incident.severity,
             incident.status,
             incident.recommended_action,
+            incident.summary,
             str(incident.updated_at),
         )
 
     console.print(table)
+    if any(incident.human_explanation for incident in incident_list):
+        console.print("\nExplanations:")
+        for incident in incident_list:
+            if incident.human_explanation:
+                console.print(f"- {incident.id}: {incident.human_explanation}")
 
 
 @app.command("approve")

@@ -16,6 +16,7 @@ from proxy2vpn.agent.models import (
     IncidentStatus,
     ServiceSnapshot,
 )
+from proxy2vpn.agent.llm import IncidentContext, OpenAIIncidentEnricher
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.adapters import docker_ops
 from proxy2vpn.adapters.compose_manager import ComposeManager
@@ -55,6 +56,7 @@ class AgentWatchdog:
             llm_mode or os.getenv("PROXY2VPN_AGENT_LLM_MODE") or "disabled"
         ).strip() or "disabled"
         self.store = store or AgentStateStore(self.compose_file)
+        self._incident_enricher = self._build_incident_enricher()
         self._llm_warning_emitted = False
 
     def empty_state(self) -> AgentState:
@@ -183,16 +185,36 @@ class AgentWatchdog:
         self.store.write_state(state)
 
         terminal_status: IncidentStatus = "resolved" if result.success else "failed"
+        summary_text = (
+            approved.summary
+            if result.success
+            else f"{approved.summary} Rotation failed: {' | '.join(result.errors)}"
+        )
+        summary, human_explanation = self._enrich_summary(
+            IncidentContext(
+                service_name=approved.service_name,
+                fallback_summary=summary_text,
+                recommended_action=approved.recommended_action,
+                failure_count=approved.failure_count,
+                issues=[],
+                recent_actions=[
+                    {
+                        "action": action.action,
+                        "result": action.result,
+                        "trigger": action.trigger,
+                    }
+                    for action in state.actions[-5:]
+                    if action.service_name == approved.service_name
+                ],
+            )
+        )
         terminal = approved.model_copy(
             update={
                 "status": terminal_status,
                 "resolved_at": utc_now() if result.success else None,
                 "updated_at": utc_now(),
-                "summary": self._enrich_summary(
-                    approved.summary
-                    if result.success
-                    else f"{approved.summary} Rotation failed: {' | '.join(result.errors)}"
-                )[0],
+                "summary": summary,
+                "human_explanation": human_explanation or approved.human_explanation,
             }
         )
         self.store.append_incident(terminal)
@@ -275,16 +297,21 @@ class AgentWatchdog:
             return snapshot
 
         if self._has_persistent_auth_or_config_failure(results):
+            summary, human_explanation = self._format_issue_summary(
+                service.name,
+                results,
+                fallback="Persistent authentication or configuration failure detected.",
+                recommended_action="investigate",
+                recent_actions=state.actions,
+                failure_count=failure_count,
+            )
             incident = self._upsert_incident(
                 incidents=incidents,
                 service_name=service.name,
                 incident_type="auth_config_failure",
                 severity="high",
-                summary=self._format_issue_summary(
-                    service.name,
-                    results,
-                    fallback="Persistent authentication or configuration failure detected.",
-                ),
+                summary=summary,
+                human_explanation=human_explanation,
                 recommended_action="investigate",
                 approval_required=False,
                 failure_count=failure_count,
@@ -342,16 +369,21 @@ class AgentWatchdog:
                 self._resolve_active_incidents(service.name, incidents)
                 return snapshot
 
+        summary, human_explanation = self._format_issue_summary(
+            service.name,
+            results,
+            fallback="Service remains unhealthy after automatic remediation. Rotation approval is required.",
+            recommended_action="rotate",
+            recent_actions=state.actions,
+            failure_count=failure_count,
+        )
         self._upsert_incident(
             incidents=incidents,
             service_name=service.name,
             incident_type="rotation_required",
             severity="medium",
-            summary=self._format_issue_summary(
-                service.name,
-                results,
-                fallback="Service remains unhealthy after automatic remediation. Rotation approval is required.",
-            ),
+            summary=summary,
+            human_explanation=human_explanation,
             recommended_action="rotate",
             approval_required=True,
             failure_count=failure_count,
@@ -518,23 +550,92 @@ class AgentWatchdog:
         service_name: str,
         results: list[DiagnosticResult],
         fallback: str,
-    ) -> str:
+        recommended_action: str,
+        recent_actions: list[ActionRecord],
+        failure_count: int,
+    ) -> tuple[str, str | None]:
         messages = [result.message for result in results if not result.passed]
+        recommendations = [
+            result.recommendation
+            for result in results
+            if not result.passed and result.recommendation
+        ]
+        recent_service_actions = [
+            {
+                "action": action.action,
+                "result": action.result,
+                "trigger": action.trigger,
+            }
+            for action in recent_actions[-5:]
+            if action.service_name == service_name
+        ]
         if not messages:
-            return self._enrich_summary(f"{service_name}: {fallback}")[0]
+            return self._enrich_summary(
+                IncidentContext(
+                    service_name=service_name,
+                    fallback_summary=f"{service_name}: {fallback}",
+                    recommended_action=recommended_action,
+                    failure_count=failure_count,
+                    issues=[],
+                    recent_actions=recent_service_actions,
+                )
+            )
         summary = f"{service_name}: {'; '.join(messages[:2])}"
-        return self._enrich_summary(summary)[0]
+        return self._enrich_summary(
+            IncidentContext(
+                service_name=service_name,
+                fallback_summary=summary,
+                recommended_action=recommended_action,
+                failure_count=failure_count,
+                issues=[
+                    {
+                        "check": result.check,
+                        "message": result.message,
+                        "recommendation": result.recommendation,
+                        "persistent": result.persistent,
+                    }
+                    for result in results
+                    if not result.passed
+                ]
+                or [
+                    {
+                        "check": "unknown",
+                        "message": summary,
+                        "recommendation": recommendations[0] if recommendations else "",
+                        "persistent": False,
+                    }
+                ],
+                recent_actions=recent_service_actions,
+            )
+        )
 
-    def _enrich_summary(self, summary: str) -> tuple[str, str | None]:
+    def _enrich_summary(self, context: IncidentContext) -> tuple[str, str | None]:
+        if self._incident_enricher is None:
+            return context.fallback_summary, None
+        try:
+            enrichment = self._incident_enricher.enrich(context)
+            summary = enrichment.summary.strip() or context.fallback_summary
+            human_explanation = enrichment.human_explanation.strip() or None
+            return summary, human_explanation
+        except Exception as exc:
+            if not self._llm_warning_emitted:
+                logger.warning(
+                    "agent_llm_unavailable",
+                    extra={"llm_mode": self.llm_mode, "error": str(exc)},
+                )
+                self._llm_warning_emitted = True
+            return context.fallback_summary, None
+
+    def _build_incident_enricher(self) -> OpenAIIncidentEnricher | None:
         if self.llm_mode == "disabled":
-            return summary, None
-        if not self._llm_warning_emitted:
+            return None
+        if self.llm_mode != "openai":
             logger.warning(
-                "agent_llm_unavailable",
+                "agent_llm_mode_unsupported",
                 extra={"llm_mode": self.llm_mode},
             )
-            self._llm_warning_emitted = True
-        return summary, None
+            return None
+        return OpenAIIncidentEnricher()
 
     def _upsert_incident(
         self,
@@ -543,6 +644,7 @@ class AgentWatchdog:
         incident_type: str,
         severity: str,
         summary: str,
+        human_explanation: str | None,
         recommended_action: str,
         approval_required: bool,
         failure_count: int,
@@ -557,6 +659,7 @@ class AgentWatchdog:
                 update={
                     "severity": severity,
                     "summary": summary,
+                    "human_explanation": human_explanation,
                     "recommended_action": recommended_action,
                     "approval_required": approval_required,
                     "failure_count": failure_count,
@@ -578,6 +681,7 @@ class AgentWatchdog:
             updated_at=now,
             failure_count=failure_count,
             summary=summary,
+            human_explanation=human_explanation,
             recommended_action=recommended_action,
             approval_required=approval_required,
         )

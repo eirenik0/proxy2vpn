@@ -7,12 +7,20 @@ from proxy2vpn.agent.models import (
     AgentStatus,
     ServiceSnapshot,
 )
+from proxy2vpn.agent.llm import (
+    IncidentContext,
+    IncidentEnrichment,
+    OpenAIIncidentEnricher,
+)
 from proxy2vpn.agent.runtime import AgentWatchdog
 from proxy2vpn.agent.state import AgentStateStore
 
 __all__ = [
     "ActionRecord",
     "AgentIncident",
+    "IncidentContext",
+    "IncidentEnrichment",
+    "OpenAIIncidentEnricher",
     "AgentState",
     "AgentStateStore",
     "AgentStatus",

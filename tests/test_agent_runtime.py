@@ -11,6 +11,7 @@ from proxy2vpn.agent.models import (
     AgentStatus,
     ServiceSnapshot,
 )
+from proxy2vpn.agent.llm import IncidentEnrichment
 from proxy2vpn.agent.runtime import AgentWatchdog, utc_now
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.core import config
@@ -322,6 +323,48 @@ def test_agent_persistent_auth_failure_creates_high_severity_incident(
     assert incidents[0].type == "auth_config_failure"
     assert incidents[0].severity == "high"
     assert incidents[0].approval_required is False
+
+
+def test_agent_openai_enrichment_populates_human_explanation(
+    agent_compose_file, monkeypatch, control_client_factory
+):
+    dummy_client, _ = control_client_factory
+    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            )
+        ],
+    )
+
+    class DummyEnricher:
+        def enrich(self, context):
+            return IncidentEnrichment(
+                summary=f"{context.service_name}: credentials are rejected by provider",
+                human_explanation="The VPN provider is rejecting the configured credentials. Automatic restart is unlikely to help.",
+            )
+
+    watchdog = AgentWatchdog(agent_compose_file, llm_mode="openai")
+    monkeypatch.setattr(watchdog, "_incident_enricher", DummyEnricher())
+
+    asyncio.run(watchdog.run_once())
+    incidents = watchdog.store.load_incidents()
+
+    assert incidents[0].summary.endswith("credentials are rejected by provider")
+    assert incidents[0].human_explanation is not None
+    assert "rejecting" in incidents[0].human_explanation
 
 
 def test_agent_restore_failure_creates_rotation_incident(
