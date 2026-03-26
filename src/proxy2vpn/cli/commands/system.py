@@ -183,7 +183,7 @@ def diagnose(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
-    """Diagnose VPN containers and report health."""
+    """Diagnose VPN containers and the Docker interconnection network."""
 
     # Configure verbose logging if requested
     if verbose:
@@ -195,15 +195,24 @@ def diagnose(
         get_vpn_containers,
         get_container_diagnostics,
         analyze_container_logs,
+        get_network_interconnection_diagnostics,
     )
     from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     analyzer = DiagnosticAnalyzer()
     if name and all_containers:
         abort("Cannot specify NAME when using --all")
+    all_vpn_containers: list = []
+    if name or all_containers:
+        all_vpn_containers = get_vpn_containers(all=True)
+    else:
+        try:
+            all_vpn_containers = get_vpn_containers(all=True)
+        except RuntimeError:
+            all_vpn_containers = []
     if name:
         logger.debug("analyzing_single_container", extra={"container_name": name})
-        vpn_containers = {c.name: c for c in get_vpn_containers(all=True)}
+        vpn_containers = {c.name: c for c in all_vpn_containers}
         container = vpn_containers.get(name)
         if not container:
             abort(f"Container '{name}' not found")
@@ -223,7 +232,11 @@ def diagnose(
             },
         )
 
+    network_entry = get_network_interconnection_diagnostics(
+        expected_containers=[c.name for c in all_vpn_containers if c.name]
+    )
     summary: list[dict[str, object]] = []
+    summary.append(network_entry)
     for container in containers:
         if container is None or container.name is None:
             continue
@@ -270,9 +283,26 @@ def diagnose(
         if not summary:
             console.print("[yellow]⚠[/yellow] No containers to diagnose.")
         for entry in summary:
-            typer.echo(
-                f"{entry['container']}: status={entry['status']} health={entry['health']}"
-            )
+            if entry.get("kind") == "network":
+                network_name = entry.get("network", "proxy2vpn_network")
+                connected = entry.get("connected", [])
+                missing = entry.get("missing", [])
+                connected_count = len(connected) if isinstance(connected, list) else 0
+                expected_count = len(entry.get("expected", []))
+                status_line = (
+                    f"{network_name}: status={entry['status']} "
+                    f"health={entry['health']} "
+                    f"attached={connected_count}"
+                )
+                if expected_count:
+                    status_line += f"/{expected_count}"
+                if isinstance(missing, list) and missing:
+                    status_line += f" missing={', '.join(missing)}"
+                typer.echo(status_line)
+            else:
+                typer.echo(
+                    f"{entry['container']}: status={entry['status']} health={entry['health']}"
+                )
             if verbose or entry["issues"]:
                 issues = entry["issues"] if isinstance(entry["issues"], list) else []
                 recommendations = (

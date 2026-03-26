@@ -153,6 +153,57 @@ def test_collect_proxy_info(monkeypatch):
     assert result_no_auth[0]["password"] == ""
 
 
+def test_get_network_interconnection_diagnostics_detects_missing_members(monkeypatch):
+    class Network:
+        attrs = {
+            "Containers": {
+                "id-1": {"Name": "vpn1"},
+            }
+        }
+
+        def reload(self):
+            return None
+
+    class Networks:
+        def get(self, name):
+            assert name == "proxy2vpn_network"
+            return Network()
+
+    class Client:
+        networks = Networks()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda: Client())
+
+    result = docker_ops.get_network_interconnection_diagnostics(
+        expected_containers=["vpn1", "vpn2"]
+    )
+
+    assert result["kind"] == "network"
+    assert result["status"] == "degraded"
+    assert result["health"] == 0
+    assert result["missing"] == ["vpn2"]
+    assert "vpn2" in result["issues"][0]
+
+
+def test_get_network_interconnection_diagnostics_handles_missing_network(monkeypatch):
+    class Networks:
+        def get(self, name):
+            raise docker_ops.NotFound("missing")
+
+    class Client:
+        networks = Networks()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda: Client())
+
+    result = docker_ops.get_network_interconnection_diagnostics(
+        expected_containers=["vpn1"]
+    )
+
+    assert result["status"] == "missing"
+    assert result["health"] == 0
+    assert result["missing"] == ["vpn1"]
+
+
 def test_analyze_container_logs_redacts_proxy_error_messages(monkeypatch):
     class DummyContainer:
         name = "vpn-test"

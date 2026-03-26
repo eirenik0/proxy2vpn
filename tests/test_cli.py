@@ -34,7 +34,23 @@ def test_system_diagnose_specific_container(monkeypatch):
     monkeypatch.setattr(
         diagnostics.DiagnosticAnalyzer, "control_api_checks", lambda self, base_url: []
     )
+    monkeypatch.setattr(
+        docker_ops,
+        "get_network_interconnection_diagnostics",
+        lambda expected_containers=None, network_name="proxy2vpn_network": {
+            "kind": "network",
+            "network": network_name,
+            "status": "healthy",
+            "health": 100,
+            "issues": [],
+            "recommendations": [],
+            "connected": ["vpn1"],
+            "expected": expected_containers or ["vpn1"],
+            "missing": [],
+        },
+    )
 
     result = runner.invoke(app, ["system", "diagnose", "vpn1"])
     assert result.exit_code == 0
+    assert "proxy2vpn_network: status=healthy health=100 attached=1/1" in result.stdout
     assert "vpn1: status=running health=100" in result.stdout

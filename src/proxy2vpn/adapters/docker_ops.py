@@ -474,6 +474,114 @@ def get_problematic_containers(all: bool = False) -> list[Container]:
     return problematic
 
 
+def _network_container_names(network) -> list[str]:
+    """Return container names attached to a Docker network."""
+
+    names: list[str] = []
+    network_attrs = getattr(network, "attrs", {}) or {}
+    raw_containers = network_attrs.get("Containers", {}) or {}
+    if isinstance(raw_containers, dict):
+        for container_info in raw_containers.values():
+            if not isinstance(container_info, dict):
+                continue
+            name = container_info.get("Name")
+            if name:
+                names.append(str(name))
+
+    if names:
+        return sorted(set(names))
+
+    containers = getattr(network, "containers", None) or []
+    for container in containers:
+        name = getattr(container, "name", None)
+        if name:
+            names.append(str(name))
+    return sorted(set(names))
+
+
+def get_network_interconnection_diagnostics(
+    expected_containers: Iterable[str] | None = None,
+    network_name: str = "proxy2vpn_network",
+) -> dict[str, object]:
+    """Inspect the proxy2vpn Docker network and report attached containers.
+
+    The returned mapping is designed for human-readable CLI output and JSON
+    output alike.  It reports whether the network exists, which VPN containers
+    are attached to it, and which expected containers are missing.
+    """
+
+    client = _client()
+    expected = sorted({name for name in expected_containers or [] if name})
+    try:
+        network = client.networks.get(network_name)
+        try:
+            network.reload()
+        except DockerException:
+            pass
+    except NotFound:
+        return {
+            "kind": "network",
+            "network": network_name,
+            "status": "missing",
+            "health": 0,
+            "issues": [f"Docker network '{network_name}' not found"],
+            "recommendations": [
+                "Run 'proxy2vpn system init' to create the proxy2vpn network."
+            ],
+            "connected": [],
+            "expected": expected,
+            "missing": expected,
+        }
+    except DockerException as exc:
+        return {
+            "kind": "network",
+            "network": network_name,
+            "status": "unavailable",
+            "health": 0,
+            "issues": [f"Failed to inspect Docker network '{network_name}': {exc}"],
+            "recommendations": ["Check Docker daemon access and network permissions."],
+            "connected": [],
+            "expected": expected,
+            "missing": expected,
+        }
+
+    connected = _network_container_names(network)
+    connected_set = set(connected)
+    missing = [name for name in expected if name not in connected_set]
+
+    issues: list[str] = []
+    recommendations: list[str] = []
+    if expected and missing:
+        issues.append(
+            f"Containers not attached to '{network_name}': {', '.join(missing)}"
+        )
+        recommendations.append(
+            "Recreate or start the missing containers so they join the shared network."
+        )
+    elif not connected:
+        issues.append(f"No containers are attached to '{network_name}'")
+        recommendations.append(
+            "Create or start VPN containers so the interconnection network is populated."
+        )
+
+    health = 100 if not issues else 0
+    status = "healthy" if not issues else "degraded"
+    if connected and not expected:
+        recommendations.append("Pass expected container names to verify full topology.")
+
+    return {
+        "kind": "network",
+        "network": network_name,
+        "status": status,
+        "health": health,
+        "issues": issues,
+        "recommendations": recommendations,
+        "connected": connected,
+        "expected": expected,
+        "missing": missing,
+    }
+
+
 def get_container_diagnostics(container: Container) -> dict:
     """Return diagnostic information for a container."""
 
