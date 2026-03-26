@@ -81,7 +81,7 @@ def test_add_and_remove_service(tmp_path):
     assert "vpn3:" in compose_text
     assert "<<: *vpn-base-test" in compose_text
     assert (
-        f"{config.CONTROL_AUTH_CONFIG_FILE}:/gluetun/auth/config.toml:ro"
+        f"./{config.CONTROL_AUTH_CONFIG_FILE.as_posix()}:/gluetun/auth/config.toml:ro"
         in compose_text
     )
     manager.remove_service("vpn3")
@@ -123,7 +123,7 @@ def test_add_service_after_init(tmp_path):
     assert "0.0.0.0:12345:8888/tcp" in compose_text  # from service
     assert "127.0.0.1:30003:8000/tcp" in compose_text  # from service
     assert (
-        f"{config.CONTROL_AUTH_CONFIG_FILE}:/gluetun/auth/config.toml:ro"
+        f"./{config.CONTROL_AUTH_CONFIG_FILE.as_posix()}:/gluetun/auth/config.toml:ro"
         in compose_text
     )
 
@@ -131,6 +131,8 @@ def test_add_service_after_init(tmp_path):
     loaded_service = manager.get_service("vpn1")
     assert loaded_service.port == 12345
     assert loaded_service.profile == "andr"
+    auth_config = tmp_path / config.CONTROL_AUTH_CONFIG_FILE
+    auth_config.write_text('[[roles]]\nname = "proxy2vpn"\nauth = "none"\n')
     assert validate_compose(compose_path) == []
 
 

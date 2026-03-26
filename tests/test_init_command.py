@@ -104,6 +104,48 @@ def test_system_validate_allows_profile_only_workspace(tmp_path):
     assert result.returncode == 0
 
 
+def test_system_validate_rejects_named_auth_volume(tmp_path):
+    env_file = tmp_path / "profiles" / "dev.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text(
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=test\nOPENVPN_PASSWORD=secret\n"
+    )
+
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        f"""
+x-vpn-base-dev: &vpn-base-dev
+  image: qmcgaw/gluetun
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  env_file: {env_file}
+services:
+  devvpn:
+    <<: *vpn-base-dev
+    ports:
+      - "0.0.0.0:20000:8888/tcp"
+      - "127.0.0.1:30000:8000/tcp"
+    environment:
+      - VPN_SERVICE_PROVIDER=expressvpn
+      - SERVER_CITIES=Toronto
+    labels:
+      vpn.type: vpn
+      vpn.port: "20000"
+      vpn.control_port: "30000"
+      vpn.profile: dev
+    volumes:
+      - control-server-auth.toml:/gluetun/auth/config.toml:ro
+"""
+    )
+
+    result = _run_proxy2vpn(["system", "validate"], tmp_path)
+    assert result.returncode == 1
+    assert "named volume" in result.stderr
+    assert "control-server-auth.toml" in result.stderr
+
+
 def test_system_init_updates_servers(tmp_path, monkeypatch):
     called = {}
 

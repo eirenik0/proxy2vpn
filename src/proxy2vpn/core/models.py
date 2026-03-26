@@ -230,7 +230,7 @@ class VPNService(BaseModel):
         labels.setdefault("vpn.control_port", str(self.container.control_port))
 
         volumes = [
-            f"{config.CONTROL_AUTH_CONFIG_FILE}:/gluetun/auth/config.toml:ro",
+            f"./{config.CONTROL_AUTH_CONFIG_FILE.as_posix()}:/gluetun/auth/config.toml:ro",
         ]
         return {
             "ports": ports,

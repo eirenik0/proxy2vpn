@@ -92,6 +92,60 @@ def iter_port_mappings(ports: Any) -> Iterator[Tuple[int, int]]:
         yield host, cont
 
 
+def iter_volume_mappings_with_issues(
+    volumes: Any,
+) -> tuple[list[Tuple[str, str, str | None]], list[str]]:
+    """Parse compose ``volumes`` entries and return parse issues.
+
+    Returns ``(parsed, issues)`` where ``parsed`` is a list of
+    ``(source, target, mode)`` tuples. The mode value is ``None`` when not
+    provided in the short syntax or long-form mapping.
+    """
+    if not volumes:
+        return [], []
+    if not isinstance(volumes, list):
+        return [], ["volumes must be a list"]
+
+    parsed: list[Tuple[str, str, str | None]] = []
+    issues: list[str] = []
+    for v in volumes:
+        try:
+            if isinstance(v, dict):
+                source = v.get("source") or v.get("src") or v.get("host")
+                target = v.get("target") or v.get("dst")
+                if source is None or target is None:
+                    issues.append(f"invalid volume mount: {v!r}")
+                    continue
+                mode = v.get("mode")
+                parsed.append(
+                    (str(source), str(target), str(mode) if mode is not None else None)
+                )
+                continue
+
+            s = str(v)
+            parts = s.split(":")
+            if len(parts) < 2:
+                issues.append(f"invalid volume mount: {v!r}")
+                continue
+            source = parts[0]
+            target = parts[1]
+            if not source or not target:
+                issues.append(f"invalid volume mount: {v!r}")
+                continue
+            mode = ":".join(parts[2:]) if len(parts) > 2 else None
+            parsed.append((source, target, mode))
+        except Exception:
+            issues.append(f"invalid volume mount: {v!r}")
+    return parsed, issues
+
+
+def volume_source_is_path_like(source: str) -> bool:
+    """Return ``True`` when SOURCE should be treated as a bind-mount path."""
+    return (
+        source.startswith(("./", "../", "~/", "/")) or "/" in source or "\\" in source
+    )
+
+
 def iter_port_mappings_with_issues(
     ports: Any,
 ) -> tuple[list[Tuple[int, int]], list[str]]:

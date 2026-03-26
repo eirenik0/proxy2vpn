@@ -5,8 +5,14 @@ from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.nodes import MappingNode, ScalarNode
 
+from proxy2vpn.core import config
 from .server_manager import ServerManager
-from .compose_utils import iter_port_mappings_with_issues, parse_env_with_issues
+from .compose_utils import (
+    iter_port_mappings_with_issues,
+    iter_volume_mappings_with_issues,
+    parse_env_with_issues,
+    volume_source_is_path_like,
+)
 
 
 class ValidationError(Exception):
@@ -90,6 +96,9 @@ def validate_compose(
             services_node = value_node
             break
     services_data = data.get("services", {})
+    volumes_data = data.get("volumes", {})
+    if not isinstance(volumes_data, dict):
+        volumes_data = {}
     ports_seen: dict[int, str] = {}
 
     if services_node is not None:
@@ -141,6 +150,24 @@ def validate_compose(
                     )
                 else:
                     ports_seen[host_port] = svc_name
+
+            raw_volumes = svc_data.get("volumes", []) or []
+            volume_mounts, volume_issues = iter_volume_mappings_with_issues(raw_volumes)
+            for issue in volume_issues:
+                errors.append(f"Service '{svc_name}' {issue}")
+            for source, _target, _mode in volume_mounts:
+                if volume_source_is_path_like(source):
+                    source_path = Path(source).expanduser()
+                    if not source_path.is_absolute():
+                        source_path = path.parent / source_path
+                    if not source_path.exists():
+                        errors.append(
+                            f"Service '{svc_name}' volume source '{source_path}' not found"
+                        )
+                elif source not in volumes_data:
+                    errors.append(
+                        f"Service '{svc_name}' volume source '{source}' is treated as a named volume; use './{config.CONTROL_AUTH_CONFIG_FILE.as_posix()}' or define a top-level volume"
+                    )
 
             if validate_locations and server_manager is not None:
                 provider = labels.get("vpn.provider") or env_dict.get(
