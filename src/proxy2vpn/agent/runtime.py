@@ -335,11 +335,21 @@ class AgentWatchdog:
             if health_score >= self.settings.health_threshold
             else (previous.consecutive_failures + 1 if previous else 1)
         )
+        degraded_since = (
+            None
+            if health_score >= self.settings.health_threshold
+            else (
+                previous.degraded_since
+                if previous is not None and previous.degraded_since is not None
+                else utc_now()
+            )
+        )
         snapshot = ServiceSnapshot(
             service_name=service.name,
             container_status=container_status,
             health_score=health_score,
             consecutive_failures=failure_count,
+            degraded_since=degraded_since,
             last_check_at=utc_now(),
             last_action=previous.last_action if previous else None,
             last_action_result=previous.last_action_result if previous else None,
@@ -369,6 +379,11 @@ class AgentWatchdog:
                     0
                     if post_restart["health_score"] >= self.settings.health_threshold
                     else failure_count
+                )
+                snapshot.degraded_since = (
+                    None
+                    if post_restart["health_score"] >= self.settings.health_threshold
+                    else degraded_since
                 )
                 if post_restart["health_score"] >= self.settings.health_threshold:
                     self._resolve_active_incidents(service.name, incidents)
@@ -420,6 +435,11 @@ class AgentWatchdog:
                 if post_restart["health_score"] >= self.settings.health_threshold
                 else failure_count
             )
+            snapshot.degraded_since = (
+                None
+                if post_restart["health_score"] >= self.settings.health_threshold
+                else degraded_since
+            )
 
             if post_restart["health_score"] >= self.settings.health_threshold:
                 self._resolve_active_incidents(service.name, incidents)
@@ -443,9 +463,36 @@ class AgentWatchdog:
                 if post_restore["health_score"] >= self.settings.health_threshold
                 else failure_count
             )
+            snapshot.degraded_since = (
+                None
+                if post_restore["health_score"] >= self.settings.health_threshold
+                else degraded_since
+            )
             if post_restore["health_score"] >= self.settings.health_threshold:
                 self._resolve_active_incidents(service.name, incidents)
                 return snapshot
+
+        if not self._rotation_grace_elapsed(snapshot):
+            grace_remaining = (
+                self.settings.rotation_grace_period_seconds
+                - int((utc_now() - snapshot.degraded_since).total_seconds())
+                if snapshot.degraded_since is not None
+                else self.settings.rotation_grace_period_seconds
+            )
+            logger.info(
+                "agent_rotation_deferred",
+                extra={
+                    "service_name": service.name,
+                    "degraded_since": (
+                        snapshot.degraded_since.isoformat()
+                        if snapshot.degraded_since is not None
+                        else None
+                    ),
+                    "grace_period_seconds": self.settings.rotation_grace_period_seconds,
+                    "grace_remaining_seconds": max(grace_remaining, 0),
+                },
+            )
+            return snapshot
 
         summary, human_explanation = self._format_issue_summary(
             service.name,
@@ -739,6 +786,13 @@ class AgentWatchdog:
             ):
                 return action.ts < cutoff
         return True
+
+    def _rotation_grace_elapsed(self, snapshot: ServiceSnapshot) -> bool:
+        if snapshot.degraded_since is None:
+            return False
+        return utc_now() - snapshot.degraded_since >= timedelta(
+            seconds=self.settings.rotation_grace_period_seconds
+        )
 
     async def _attempt_isolated_auth_restart(
         self,

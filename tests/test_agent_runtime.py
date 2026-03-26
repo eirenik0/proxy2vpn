@@ -1,5 +1,6 @@
 import asyncio
 from asyncio import threads as asyncio_threads
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1189,7 +1190,7 @@ def test_investigate_incident_does_not_infer_accountwide_auth_issue_from_generic
     )
 
 
-def test_agent_restore_failure_creates_rotation_incident(
+def test_agent_restore_failure_tracks_degradation_before_rotation_incident(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
@@ -1218,6 +1219,61 @@ def test_agent_restore_failure_creates_rotation_incident(
 
     assert state.actions[0].action == "restore"
     assert state.actions[0].result == "failed"
+    assert state.services[0].degraded_since is not None
+    assert incidents == []
+
+
+def test_agent_restore_failure_creates_rotation_incident_after_grace_period(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    degraded_since=utc_now() - timedelta(minutes=6),
+                    last_check_at=utc_now(),
+                )
+            ],
+        )
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: unhealthy_results(),
+    )
+
+    def fake_start(service, profile, force):
+        raise RuntimeError("restore failed")
+
+    async def fake_control_api(service):
+        return False
+
+    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+
+    state = asyncio.run(watchdog.run_once())
+    incidents = watchdog.store.load_incidents()
+
+    assert state.actions[0].action == "restore"
+    assert state.actions[0].result == "failed"
+    assert state.services[0].degraded_since is not None
     assert incidents[0].recommended_action == "rotate"
     assert incidents[0].approval_required is True
     assert incidents[0].status == "open"
@@ -1318,6 +1374,26 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
 
 def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkeypatch):
     store = AgentStateStore(agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    degraded_since=utc_now() - timedelta(minutes=6),
+                    last_check_at=utc_now(),
+                )
+            ],
+        )
+    )
     failed_incident = AgentIncident(
         id="incident123",
         service_name="protonvpn-united-states-new-york",
@@ -1444,7 +1520,9 @@ def test_investigation_context_keeps_rotation_history_after_service_rename(
     assert context.recent_actions[0]["attempted_locations"] == "Boston"
 
 
-def test_state_persists_across_watchdog_restarts(agent_compose_file, monkeypatch):
+def test_degraded_since_persists_across_watchdog_restarts(
+    agent_compose_file, monkeypatch
+):
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
@@ -1474,8 +1552,8 @@ def test_state_persists_across_watchdog_restarts(agent_compose_file, monkeypatch
 
     assert state is not None
     assert state.status.unhealthy_count == 1
-    assert len(incidents) == 1
-    assert incidents[0].status == "open"
+    assert state.services[0].degraded_since is not None
+    assert incidents == []
 
 
 def test_runtime_lock_prevents_duplicate_watchdogs(agent_compose_file):
