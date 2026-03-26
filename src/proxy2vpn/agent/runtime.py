@@ -174,7 +174,7 @@ class AgentWatchdog:
                 approved.service_name,
                 OperationConfig(
                     dry_run=False,
-                    criteria=RotationCriteria.RANDOM,
+                    criteria=RotationCriteria.PERFORMANCE,
                     rollback_on_failure=True,
                 ),
             )

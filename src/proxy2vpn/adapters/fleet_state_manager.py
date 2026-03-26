@@ -1,6 +1,8 @@
 """Fleet State Manager - Reliable singleton for managing VPN fleet operations."""
 
 import asyncio
+from collections import Counter
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,6 +17,7 @@ from .display_utils import console
 from .docker_ops import (
     ensure_network,
     get_container_by_service_name,
+    get_container_ip_async,
     recreate_vpn_container,
     remove_container,
     start_container,
@@ -81,6 +84,7 @@ class ServiceRotationPlan:
     old_location: str
     new_location: str
     reason: str
+    candidate_locations: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -401,9 +405,12 @@ class FleetStateManager:
                 available_cities = self.server_manager.list_cities(
                     service.provider, country
                 )
-                alternative_cities = [
-                    city for city in available_cities if city != service.location
-                ]
+                alternative_cities = self._rank_rotation_candidates(
+                    service=service,
+                    country=country,
+                    available_cities=available_cities,
+                    config=config,
+                )
 
                 if not alternative_cities:
                     logger.warning(
@@ -411,14 +418,10 @@ class FleetStateManager:
                     )
                     continue
 
-                # Select new location based on criteria
-                if config.criteria == RotationCriteria.RANDOM:
-                    import random
-
-                    new_location = random.choice(alternative_cities)
-                else:
-                    # For now, default to first available (can be enhanced)
-                    new_location = alternative_cities[0]
+                # Select the best candidate first, but keep the rest so execution
+                # can fall through if the first choice does not yield a healthy
+                # service with a genuinely new egress IP.
+                new_location = alternative_cities[0]
 
                 plan.append(
                     ServiceRotationPlan(
@@ -426,6 +429,7 @@ class FleetStateManager:
                         old_location=service.location,
                         new_location=new_location,
                         reason="health_check_failed",
+                        candidate_locations=alternative_cities,
                     )
                 )
 
@@ -448,6 +452,125 @@ class FleetStateManager:
 
         # Fallback to location
         return service.location
+
+    def _rank_rotation_candidates(
+        self,
+        service: VPNService,
+        country: str,
+        available_cities: List[str],
+        config: OperationConfig,
+    ) -> List[str]:
+        """Order candidate cities using fleet-aware heuristics."""
+
+        current_location = service.location.casefold()
+        seen: set[str] = set()
+        candidates: List[str] = []
+        for city in available_cities:
+            normalized = city.casefold()
+            if normalized == current_location or normalized in seen:
+                continue
+            seen.add(normalized)
+            candidates.append(city)
+
+        if not candidates:
+            return []
+
+        if config.criteria == RotationCriteria.RANDOM:
+            random.shuffle(candidates)
+            return candidates
+
+        usage_counts = self._city_usage_counts(
+            provider=service.provider,
+            country=country,
+            exclude_service=service.name,
+        )
+        capacity_counts = self._city_capacity_counts(service.provider, country)
+
+        if config.criteria == RotationCriteria.LOAD:
+            return sorted(
+                candidates,
+                key=lambda city: (
+                    usage_counts[city.casefold()],
+                    -capacity_counts[city.casefold()],
+                    city.casefold(),
+                ),
+            )
+
+        return sorted(
+            candidates,
+            key=lambda city: (
+                -capacity_counts[city.casefold()],
+                usage_counts[city.casefold()],
+                city.casefold(),
+            ),
+        )
+
+    def _city_usage_counts(
+        self, provider: str, country: str, exclude_service: str | None = None
+    ) -> Counter[str]:
+        """Count how many current services already use each city."""
+
+        counts: Counter[str] = Counter()
+        for service in self.services.values():
+            if exclude_service and service.name == exclude_service:
+                continue
+            if service.provider != provider:
+                continue
+            if self._extract_country_from_service(service) != country:
+                continue
+            if service.location:
+                counts[service.location.casefold()] += 1
+        return counts
+
+    def _city_capacity_counts(self, provider: str, country: str) -> Counter[str]:
+        """Count advertised servers per city to prefer broader pools."""
+
+        data = self.server_manager.data or {}
+        provider_data = data.get(provider, {})
+        counts: Counter[str] = Counter()
+
+        for server in provider_data.get("servers", []):
+            if server.get("country") != country:
+                continue
+            city = server.get("city")
+            if not city:
+                continue
+            ips = [ip for ip in (server.get("ips") or []) if isinstance(ip, str) and ip]
+            counts[city.casefold()] += max(1, len(ips))
+
+        return counts
+
+    async def _get_service_egress_ip(self, service_name: str) -> str | None:
+        """Return the current observed egress IP for a service, if it can be measured."""
+
+        container = get_container_by_service_name(service_name)
+        if not container:
+            return None
+        try:
+            container.reload()
+        except Exception:
+            pass
+        try:
+            ip_address = await get_container_ip_async(container)
+        except Exception as exc:
+            logger.warning(f"Failed to determine egress IP for {service_name}: {exc}")
+            return None
+        if not ip_address or ip_address == "N/A":
+            return None
+        return ip_address
+
+    async def _apply_rotation_location(
+        self, service: VPNService, location: str, settle_seconds: int = 10
+    ) -> None:
+        """Apply one candidate location and recreate the service container."""
+
+        profile = self.compose_manager.get_profile(service.profile)
+        service.set_location(location)
+        self.compose_manager.update_service(service)
+        self.services[service.name] = service
+        await asyncio.to_thread(recreate_vpn_container, service, profile)
+        await asyncio.to_thread(start_container, service.name)
+        await asyncio.sleep(settle_seconds)
 
     async def _execute_rotation_plan(
         self, plan: List[ServiceRotationPlan], config: OperationConfig
@@ -483,13 +606,13 @@ class FleetStateManager:
 
         async def rotate_single_service(
             rotation_plan: ServiceRotationPlan,
-        ) -> Tuple[str, bool, str]:
+        ) -> Tuple[str, bool, str, str]:
             async with semaphore:
                 try:
-                    await self._execute_single_rotation(rotation_plan)
-                    return rotation_plan.service_name, True, ""
+                    final_location = await self._execute_single_rotation(rotation_plan)
+                    return rotation_plan.service_name, True, final_location, ""
                 except Exception as e:
-                    return rotation_plan.service_name, False, str(e)
+                    return rotation_plan.service_name, False, "", str(e)
 
         # Execute all rotations in parallel
         tasks = [rotate_single_service(rp) for rp in plan]
@@ -503,11 +626,11 @@ class FleetStateManager:
                 failed_rotations.append(rotation_plan.service_name)
                 errors.append(f"{rotation_plan.service_name}: {result}")
             else:
-                service_name, success, error = result
+                service_name, success, final_location, error = result
                 if success:
                     successful_rotations.append(service_name)
                     console.print(
-                        f"[green]✓[/green] Rotated {service_name}: {rotation_plan.old_location} → {rotation_plan.new_location}"
+                        f"[green]✓[/green] Rotated {service_name}: {rotation_plan.old_location} → {final_location}"
                     )
                 else:
                     failed_rotations.append(service_name)
@@ -535,34 +658,65 @@ class FleetStateManager:
             execution_time=execution_time,
         )
 
-    async def _execute_single_rotation(self, rotation_plan: ServiceRotationPlan):
-        """Execute rotation for a single service."""
+    async def _execute_single_rotation(self, rotation_plan: ServiceRotationPlan) -> str:
+        """Execute rotation for a single service and return the final location."""
         service_name = rotation_plan.service_name
 
         # Get current service from compose manager
         service = self.compose_manager.get_service(service_name)
-        profile = self.compose_manager.get_profile(service.profile)
+        original_location = service.location
+        previous_ip = await self._get_service_egress_ip(service_name)
+        candidate_locations = rotation_plan.candidate_locations or [
+            rotation_plan.new_location
+        ]
+        failures: List[str] = []
 
-        # Update service configuration
-        service.set_location(rotation_plan.new_location)
+        for candidate_location in candidate_locations:
+            try:
+                await self._apply_rotation_location(service, candidate_location)
+                _, health = await self._check_service_health(service_name)
+                if not health.is_healthy:
+                    failures.append(
+                        f"{candidate_location}: service unhealthy after rotation"
+                    )
+                    continue
 
-        # Save updated service to compose file
-        self.compose_manager.update_service(service)
+                current_ip = await self._get_service_egress_ip(service_name)
+                if previous_ip:
+                    if not current_ip:
+                        failures.append(
+                            f"{candidate_location}: unable to verify new egress IP"
+                        )
+                        continue
+                    if current_ip == previous_ip:
+                        failures.append(
+                            f"{candidate_location}: egress IP did not change ({current_ip})"
+                        )
+                        continue
 
-        # Update local state
-        self.services[service_name] = service
+                return candidate_location
+            except Exception as exc:
+                logger.warning(
+                    "rotation_candidate_failed",
+                    extra={
+                        "service_name": service_name,
+                        "candidate_location": candidate_location,
+                        "error": str(exc),
+                    },
+                )
+                failures.append(f"{candidate_location}: {exc}")
 
-        # Recreate container with new configuration
-        await asyncio.to_thread(recreate_vpn_container, service, profile)
-        await asyncio.to_thread(start_container, service_name)
+        try:
+            await self._apply_rotation_location(service, original_location)
+        except Exception as exc:
+            failures.append(
+                f"rollback to {original_location} failed after exhausted candidates: {exc}"
+            )
 
-        # Wait for container to stabilize
-        await asyncio.sleep(10)
-
-        # Verify rotation worked
-        _, health = await self._check_service_health(service_name)
-        if not health.is_healthy:
-            raise Exception(f"Service {service_name} still unhealthy after rotation")
+        raise Exception(
+            "No rotation candidate restored healthy connectivity with a new egress IP. "
+            + " | ".join(failures)
+        )
 
     def _display_rotation_plan(self, plan: List[ServiceRotationPlan]):
         """Display rotation plan in formatted table."""

@@ -1215,12 +1215,14 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
         approval_required=True,
     )
     store.append_incident(incident)
+    captured_config = {}
 
     class DummyFleetManager:
         def __init__(self, compose_file):
             self.compose_file = compose_file
 
         async def rotate_service(self, service_name, config_obj):
+            captured_config["criteria"] = config_obj.criteria
             return SimpleNamespace(success=True, errors=[])
 
         async def close(self):
@@ -1237,6 +1239,7 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
     assert persisted is not None
     assert persisted.actions[-1].action == "rotate"
     assert persisted.actions[-1].result == "success"
+    assert captured_config["criteria"] == agent_runtime.RotationCriteria.PERFORMANCE
 
     with pytest.raises(RuntimeError):
         asyncio.run(watchdog.approve_incident("incident123"))
