@@ -95,7 +95,7 @@ def test_execute_single_rotation_updates_service_location(monkeypatch, tmp_path)
     monkeypatch.setattr(fleet_manager, "_get_service_egress_ip", fake_ip)
     monkeypatch.setattr(fleet_manager, "_check_service_health", fake_check)
 
-    final_name, final_location = asyncio.run(
+    change = asyncio.run(
         fleet_manager._execute_single_rotation(
             fleet_state_manager_mod.ServiceRotationPlan(
                 service_name="protonvpn-canada-toronto",
@@ -111,8 +111,9 @@ def test_execute_single_rotation_updates_service_location(monkeypatch, tmp_path)
     updated_service = fleet_manager.compose_manager.get_service(
         "protonvpn-canada-montreal"
     )
-    assert final_name == "protonvpn-canada-montreal"
-    assert final_location == "Montreal"
+    assert change.final_service_name == "protonvpn-canada-montreal"
+    assert change.new_location == "Montreal"
+    assert change.old_location == "Toronto"
     assert updated_service.name == "protonvpn-canada-montreal"
     assert updated_service.location == "Montreal"
     assert updated_service.environment["SERVER_CITIES"] == "Montreal"
@@ -189,7 +190,7 @@ def test_execute_single_rotation_retries_until_egress_ip_changes(monkeypatch, tm
     monkeypatch.setattr(fleet_manager, "_get_service_egress_ip", fake_ip)
     monkeypatch.setattr(fleet_manager, "_check_service_health", fake_check)
 
-    final_name, final_location = asyncio.run(
+    change = asyncio.run(
         fleet_manager._execute_single_rotation(
             fleet_state_manager_mod.ServiceRotationPlan(
                 service_name="protonvpn-canada-toronto",
@@ -206,8 +207,11 @@ def test_execute_single_rotation_retries_until_egress_ip_changes(monkeypatch, tm
     updated_service = fleet_manager.compose_manager.get_service(
         "protonvpn-canada-vancouver"
     )
-    assert final_name == "protonvpn-canada-vancouver"
-    assert final_location == "Vancouver"
+    assert change.final_service_name == "protonvpn-canada-vancouver"
+    assert change.new_location == "Vancouver"
+    assert change.old_location == "Toronto"
+    assert change.candidate_locations == ["Montreal", "Vancouver"]
+    assert change.attempted_locations == ["Montreal", "Vancouver"]
     assert updated_service.name == "protonvpn-canada-vancouver"
     assert updated_service.location == "Vancouver"
     assert applied_locations == ["Montreal", "Vancouver"]
@@ -373,7 +377,7 @@ def test_execute_single_rotation_preserves_port_suffix_when_renaming(
     monkeypatch.setattr(fleet_manager, "_get_service_egress_ip", fake_ip)
     monkeypatch.setattr(fleet_manager, "_check_service_health", fake_check)
 
-    final_name, final_location = asyncio.run(
+    change = asyncio.run(
         fleet_manager._execute_single_rotation(
             fleet_state_manager_mod.ServiceRotationPlan(
                 service_name="protonvpn-canada-toronto-20000",
@@ -389,6 +393,6 @@ def test_execute_single_rotation_preserves_port_suffix_when_renaming(
     updated_service = fleet_manager.compose_manager.get_service(
         "protonvpn-canada-montreal-20000"
     )
-    assert final_name == "protonvpn-canada-montreal-20000"
-    assert final_location == "Montreal"
+    assert change.final_service_name == "protonvpn-canada-montreal-20000"
+    assert change.new_location == "Montreal"
     assert updated_service.name == "protonvpn-canada-montreal-20000"

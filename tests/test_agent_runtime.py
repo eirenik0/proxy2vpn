@@ -8,6 +8,7 @@ import pytest
 
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import (
+    ActionRecord,
     AgentIncident,
     AgentState,
     AgentStatus,
@@ -17,6 +18,7 @@ from proxy2vpn.agent.llm import IncidentEnrichment, InvestigationPlan
 from proxy2vpn.agent.runtime import AgentWatchdog, utc_now
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.adapters.fleet_state_manager import RotationChange
 from proxy2vpn.core import config
 from proxy2vpn.core.models import ServiceCredentials
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
@@ -1223,7 +1225,20 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
 
         async def rotate_service(self, service_name, config_obj):
             captured_config["criteria"] = config_obj.criteria
-            return SimpleNamespace(success=True, errors=[])
+            return SimpleNamespace(
+                success=True,
+                errors=[],
+                rotation_changes=[
+                    RotationChange(
+                        requested_service_name=service_name,
+                        final_service_name="protonvpn-united-states-boston",
+                        old_location="New York",
+                        new_location="Boston",
+                        candidate_locations=["Boston", "Chicago"],
+                        attempted_locations=["Boston"],
+                    )
+                ],
+            )
 
         async def close(self):
             return None
@@ -1239,6 +1254,21 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
     assert persisted is not None
     assert persisted.actions[-1].action == "rotate"
     assert persisted.actions[-1].result == "success"
+    assert persisted.actions[-1].service_name == "protonvpn-united-states-boston"
+    assert (
+        persisted.actions[-1].details["requested_service_name"]
+        == "protonvpn-united-states-new-york"
+    )
+    assert (
+        persisted.actions[-1].details["final_service_name"]
+        == "protonvpn-united-states-boston"
+    )
+    assert persisted.actions[-1].details["old_location"] == "New York"
+    assert persisted.actions[-1].details["new_location"] == "Boston"
+    assert persisted.actions[-1].details["candidate_locations"] == "Boston, Chicago"
+    assert persisted.actions[-1].details["attempted_locations"] == "Boston"
+    assert persisted.services[0].service_name == "protonvpn-united-states-boston"
+    assert persisted.services[0].last_action == "rotate"
     assert captured_config["criteria"] == agent_runtime.RotationCriteria.PERFORMANCE
 
     with pytest.raises(RuntimeError):
@@ -1290,6 +1320,87 @@ def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkey
     assert incidents[0].id != failed_incident.id
     assert incidents[1].status == "failed"
     assert incidents[1].id == failed_incident.id
+
+
+def test_investigation_context_keeps_rotation_history_after_service_rename(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-boston",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    last_check_at=utc_now(),
+                    last_action="rotate",
+                    last_action_result="success",
+                )
+            ],
+            actions=[
+                ActionRecord(
+                    ts=utc_now(),
+                    service_name="protonvpn-united-states-new-york",
+                    action="rotate",
+                    trigger="manual_approval",
+                    result="success",
+                    details={
+                        "requested_service_name": "protonvpn-united-states-new-york",
+                        "final_service_name": "protonvpn-united-states-boston",
+                        "old_location": "New York",
+                        "new_location": "Boston",
+                        "candidate_locations": "Boston, Chicago",
+                        "attempted_locations": "Boston",
+                    },
+                )
+            ],
+        )
+    )
+    incident = AgentIncident(
+        id="incident123",
+        service_name="protonvpn-united-states-boston",
+        type="rotation_required",
+        severity="medium",
+        status="open",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=2,
+        summary="Service remained unhealthy after rotation.",
+        recommended_action="investigate",
+        approval_required=False,
+    )
+    store.append_incident(incident)
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: None,
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    context = asyncio.run(watchdog._build_investigation_context(incident))
+
+    assert len(context.recent_actions) == 1
+    assert (
+        context.recent_actions[0]["requested_service_name"]
+        == "protonvpn-united-states-new-york"
+    )
+    assert (
+        context.recent_actions[0]["final_service_name"]
+        == "protonvpn-united-states-boston"
+    )
+    assert context.recent_actions[0]["old_location"] == "New York"
+    assert context.recent_actions[0]["new_location"] == "Boston"
+    assert context.recent_actions[0]["candidate_locations"] == "Boston, Chicago"
+    assert context.recent_actions[0]["attempted_locations"] == "Boston"
 
 
 def test_state_persists_across_watchdog_restarts(agent_compose_file, monkeypatch):

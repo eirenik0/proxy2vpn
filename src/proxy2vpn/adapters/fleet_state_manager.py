@@ -88,6 +88,18 @@ class ServiceRotationPlan:
 
 
 @dataclass
+class RotationChange:
+    """Persistable description of one completed rotation."""
+
+    requested_service_name: str
+    final_service_name: str
+    old_location: str
+    new_location: str
+    candidate_locations: List[str] = field(default_factory=list)
+    attempted_locations: List[str] = field(default_factory=list)
+
+
+@dataclass
 class ScaleOperation:
     """Plan for scaling operation."""
 
@@ -107,6 +119,7 @@ class OperationResult:
     errors: List[str] = field(default_factory=list)
     execution_time: float = 0.0
     dry_run: bool = False
+    rotation_changes: List[RotationChange] = field(default_factory=list)
 
 
 class FleetStateManager:
@@ -661,6 +674,7 @@ class FleetStateManager:
 
         start_time = time.perf_counter()
         successful_rotations = []
+        rotation_changes: List[RotationChange] = []
         failed_rotations = []
 
         # Execute rotations with limited concurrency
@@ -668,21 +682,13 @@ class FleetStateManager:
 
         async def rotate_single_service(
             rotation_plan: ServiceRotationPlan,
-        ) -> Tuple[str, bool, str, str, str]:
+        ) -> Tuple[str, bool, RotationChange | None, str]:
             async with semaphore:
                 try:
-                    final_name, final_location = await self._execute_single_rotation(
-                        rotation_plan
-                    )
-                    return (
-                        rotation_plan.service_name,
-                        True,
-                        final_name,
-                        final_location,
-                        "",
-                    )
+                    change = await self._execute_single_rotation(rotation_plan)
+                    return rotation_plan.service_name, True, change, ""
                 except Exception as e:
-                    return rotation_plan.service_name, False, "", "", str(e)
+                    return rotation_plan.service_name, False, None, str(e)
 
         # Execute all rotations in parallel
         tasks = [rotate_single_service(rp) for rp in plan]
@@ -696,9 +702,21 @@ class FleetStateManager:
                 failed_rotations.append(rotation_plan.service_name)
                 errors.append(f"{rotation_plan.service_name}: {result}")
             else:
-                service_name, success, final_name, final_location, error = result
+                service_name, success, change, error = result
                 if success:
-                    successful_rotations.append(final_name or service_name)
+                    final_name = (
+                        change.final_service_name
+                        if change is not None
+                        else service_name
+                    )
+                    final_location = (
+                        change.new_location
+                        if change is not None
+                        else rotation_plan.new_location
+                    )
+                    successful_rotations.append(final_name)
+                    if change is not None:
+                        rotation_changes.append(change)
                     console.print(
                         f"[green]✓[/green] Rotated {service_name} → {final_name}: {rotation_plan.old_location} → {final_location}"
                     )
@@ -726,12 +744,13 @@ class FleetStateManager:
             services_affected=successful_rotations + failed_rotations,
             errors=errors,
             execution_time=execution_time,
+            rotation_changes=rotation_changes,
         )
 
     async def _execute_single_rotation(
         self, rotation_plan: ServiceRotationPlan
-    ) -> tuple[str, str]:
-        """Execute rotation for a single service and return final name/location."""
+    ) -> RotationChange:
+        """Execute rotation for a single service and return final rotation metadata."""
         service_name = rotation_plan.service_name
 
         # Get current service from compose manager
@@ -742,10 +761,12 @@ class FleetStateManager:
         candidate_locations = rotation_plan.candidate_locations or [
             rotation_plan.new_location
         ]
+        attempted_locations: List[str] = []
         failures: List[str] = []
 
         for candidate_location in candidate_locations:
             try:
+                attempted_locations.append(candidate_location)
                 active_name = await self._apply_rotation_location(
                     service, candidate_location
                 )
@@ -769,7 +790,14 @@ class FleetStateManager:
                         )
                         continue
 
-                return active_name, candidate_location
+                return RotationChange(
+                    requested_service_name=service_name,
+                    final_service_name=active_name,
+                    old_location=original_location,
+                    new_location=candidate_location,
+                    candidate_locations=list(candidate_locations),
+                    attempted_locations=list(attempted_locations),
+                )
             except Exception as exc:
                 logger.warning(
                     "rotation_candidate_failed",
