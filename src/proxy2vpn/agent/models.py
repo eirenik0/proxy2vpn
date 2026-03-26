@@ -36,6 +36,7 @@ class ServiceSnapshot(BaseModel):
     container_status: str
     health_score: int
     consecutive_failures: int = 0
+    degraded_since: datetime | None = None
     last_check_at: datetime
     last_action: str | None = None
     last_action_result: str | None = None

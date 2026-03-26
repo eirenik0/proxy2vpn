@@ -8,6 +8,7 @@ def test_agent_settings_reads_environment(monkeypatch):
     monkeypatch.setenv("PROXY2VPN_AGENT_OPENAI_TIMEOUT_SECONDS", "12.5")
     monkeypatch.setenv("PROXY2VPN_AGENT_OPENAI_MAX_OUTPUT_TOKENS", "300")
     monkeypatch.setenv("PROXY2VPN_AGENT_OPENAI_REASONING_EFFORT", "minimal")
+    monkeypatch.setenv("PROXY2VPN_AGENT_ROTATION_GRACE_PERIOD_SECONDS", "600")
 
     settings = AgentSettings()
 
@@ -17,3 +18,4 @@ def test_agent_settings_reads_environment(monkeypatch):
     assert settings.openai_timeout_seconds == 12.5
     assert settings.openai_max_output_tokens == 300
     assert settings.openai_reasoning_effort == "minimal"
+    assert settings.rotation_grace_period_seconds == 600

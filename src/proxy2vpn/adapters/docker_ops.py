@@ -554,7 +554,7 @@ def _get_authenticated_proxy_url(container: Container, port: str) -> dict[str, s
         return {"http": f"http://localhost:{port}", "https": f"http://localhost:{port}"}
 
 
-def get_container_ip(container: Container) -> str:
+def get_container_ip(container: Container, timeout: int = 3) -> str:
     """Return the external IP address for a running container.
 
     The IP address is retrieved from external services through the proxy
@@ -567,11 +567,11 @@ def get_container_ip(container: Container) -> str:
     if not port or container.status != "running":
         return "N/A"
     proxies = _get_authenticated_proxy_url(container, port)
-    ip = ip_utils.fetch_ip(proxies=proxies)
+    ip = ip_utils.fetch_ip(proxies=proxies, timeout=timeout)
     return ip or "N/A"
 
 
-async def get_container_ip_async(container: Container) -> str:
+async def get_container_ip_async(container: Container, timeout: int = 3) -> str:
     """Asynchronously return the external IP address for a running container.
 
     This uses :func:`ip_utils.fetch_ip_async` to concurrently query IP services.
@@ -583,7 +583,7 @@ async def get_container_ip_async(container: Container) -> str:
     if not port or container.status != "running":
         return "N/A"
     proxies = _get_authenticated_proxy_url(container, port)
-    ip = await ip_utils.fetch_ip_async(proxies=proxies)
+    ip = await ip_utils.fetch_ip_async(proxies=proxies, timeout=timeout)
     return ip or "N/A"
 
 
@@ -619,7 +619,7 @@ async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str,
     return results
 
 
-async def test_vpn_connection_async(name: str) -> bool:
+async def test_vpn_connection_async(name: str, timeout: int = 3) -> bool:
     """Return ``True`` if the VPN proxy for NAME appears to work."""
 
     client = _client()
@@ -635,8 +635,10 @@ async def test_vpn_connection_async(name: str) -> bool:
         # Fetch both IPs concurrently for faster testing
         import asyncio
 
-        direct_task = asyncio.create_task(ip_utils.fetch_ip_async())
-        proxied_task = asyncio.create_task(ip_utils.fetch_ip_async(proxies=proxies))
+        direct_task = asyncio.create_task(ip_utils.fetch_ip_async(timeout=timeout))
+        proxied_task = asyncio.create_task(
+            ip_utils.fetch_ip_async(proxies=proxies, timeout=timeout)
+        )
 
         direct, proxied = await asyncio.gather(direct_task, proxied_task)
         return proxied not in {"", direct}
@@ -644,7 +646,7 @@ async def test_vpn_connection_async(name: str) -> bool:
         return False
 
 
-def test_vpn_connection(name: str) -> bool:
+def test_vpn_connection(name: str, timeout: int = 3) -> bool:
     """Return ``True`` if the VPN proxy for NAME appears to work."""
     client = _client()
     try:
@@ -659,8 +661,8 @@ def test_vpn_connection(name: str) -> bool:
     try:
         proxies = _get_authenticated_proxy_url(container, port)
         # Use sync IP fetching for simplicity
-        direct = ip_utils.fetch_ip()
-        proxied = ip_utils.fetch_ip(proxies=proxies)
+        direct = ip_utils.fetch_ip(timeout=timeout)
+        proxied = ip_utils.fetch_ip(proxies=proxies, timeout=timeout)
         return proxied not in {"", direct}
     except Exception:
         return False

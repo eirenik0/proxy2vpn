@@ -174,7 +174,7 @@ class AgentWatchdog:
                 approved.service_name,
                 OperationConfig(
                     dry_run=False,
-                    criteria=RotationCriteria.RANDOM,
+                    criteria=RotationCriteria.PERFORMANCE,
                     rollback_on_failure=True,
                 ),
             )
@@ -183,21 +183,37 @@ class AgentWatchdog:
 
         state = self.store.read_state() or self.empty_state()
         action_result = "success" if result.success else "failed"
+        action_details = self._build_rotation_action_details(
+            incident_id=approved.id,
+            requested_service_name=approved.service_name,
+            result=result,
+        )
+        action_service_name = action_details.get(
+            "final_service_name", approved.service_name
+        )
         self._append_action(
             state,
-            service_name=approved.service_name,
+            service_name=action_service_name,
             action="rotate",
             trigger="manual_approval",
             result=action_result,
-            details={"incident_id": approved.id, "errors": " | ".join(result.errors)},
+            details=action_details,
         )
         self._update_snapshot_action(
             state,
             approved.service_name,
             last_action="rotate",
             last_action_result=action_result,
+            new_service_name=action_details.get("final_service_name"),
         )
         self.store.write_state(state)
+        final_service_name = action_details.get("final_service_name")
+        if result.success and final_service_name not in {None, approved.service_name}:
+            self._migrate_active_incidents(
+                old_service_name=approved.service_name,
+                new_service_name=final_service_name,
+                exclude_incident_ids={approved.id},
+            )
 
         terminal_status: IncidentStatus = "resolved" if result.success else "failed"
         summary_text = (
@@ -213,13 +229,11 @@ class AgentWatchdog:
                 failure_count=approved.failure_count,
                 issues=[],
                 recent_actions=[
-                    {
-                        "action": action.action,
-                        "result": action.result,
-                        "trigger": action.trigger,
-                    }
-                    for action in state.actions[-5:]
-                    if action.service_name == approved.service_name
+                    action
+                    for action in self._recent_actions_for_service(
+                        state.actions,
+                        approved.service_name,
+                    )
                 ],
             )
         )
@@ -328,11 +342,21 @@ class AgentWatchdog:
             if health_score >= self.settings.health_threshold
             else (previous.consecutive_failures + 1 if previous else 1)
         )
+        degraded_since = (
+            None
+            if health_score >= self.settings.health_threshold
+            else (
+                previous.degraded_since
+                if previous is not None and previous.degraded_since is not None
+                else utc_now()
+            )
+        )
         snapshot = ServiceSnapshot(
             service_name=service.name,
             container_status=container_status,
             health_score=health_score,
             consecutive_failures=failure_count,
+            degraded_since=degraded_since,
             last_check_at=utc_now(),
             last_action=previous.last_action if previous else None,
             last_action_result=previous.last_action_result if previous else None,
@@ -362,6 +386,11 @@ class AgentWatchdog:
                     0
                     if post_restart["health_score"] >= self.settings.health_threshold
                     else failure_count
+                )
+                snapshot.degraded_since = (
+                    None
+                    if post_restart["health_score"] >= self.settings.health_threshold
+                    else degraded_since
                 )
                 if post_restart["health_score"] >= self.settings.health_threshold:
                     self._resolve_active_incidents(service.name, incidents)
@@ -413,6 +442,11 @@ class AgentWatchdog:
                 if post_restart["health_score"] >= self.settings.health_threshold
                 else failure_count
             )
+            snapshot.degraded_since = (
+                None
+                if post_restart["health_score"] >= self.settings.health_threshold
+                else degraded_since
+            )
 
             if post_restart["health_score"] >= self.settings.health_threshold:
                 self._resolve_active_incidents(service.name, incidents)
@@ -436,9 +470,36 @@ class AgentWatchdog:
                 if post_restore["health_score"] >= self.settings.health_threshold
                 else failure_count
             )
+            snapshot.degraded_since = (
+                None
+                if post_restore["health_score"] >= self.settings.health_threshold
+                else degraded_since
+            )
             if post_restore["health_score"] >= self.settings.health_threshold:
                 self._resolve_active_incidents(service.name, incidents)
                 return snapshot
+
+        if not self._rotation_grace_elapsed(snapshot):
+            grace_remaining = (
+                self.settings.rotation_grace_period_seconds
+                - int((utc_now() - snapshot.degraded_since).total_seconds())
+                if snapshot.degraded_since is not None
+                else self.settings.rotation_grace_period_seconds
+            )
+            logger.info(
+                "agent_rotation_deferred",
+                extra={
+                    "service_name": service.name,
+                    "degraded_since": (
+                        snapshot.degraded_since.isoformat()
+                        if snapshot.degraded_since is not None
+                        else None
+                    ),
+                    "grace_period_seconds": self.settings.rotation_grace_period_seconds,
+                    "grace_remaining_seconds": max(grace_remaining, 0),
+                },
+            )
+            return snapshot
 
         summary, human_explanation = self._format_issue_summary(
             service.name,
@@ -610,20 +671,135 @@ class AgentWatchdog:
         service_name: str,
         last_action: str,
         last_action_result: str,
+        new_service_name: str | None = None,
     ) -> None:
         for snapshot in state.services:
-            if snapshot.service_name == service_name:
-                snapshot.last_action = last_action
-                snapshot.last_action_result = last_action_result
-                snapshot.last_check_at = utc_now()
-                break
+            if snapshot.service_name not in {service_name, new_service_name}:
+                continue
+            if new_service_name:
+                snapshot.service_name = new_service_name
+            snapshot.last_action = last_action
+            snapshot.last_action_result = last_action_result
+            snapshot.last_check_at = utc_now()
+            break
+
+    def _build_rotation_action_details(
+        self,
+        incident_id: str,
+        requested_service_name: str,
+        result: Any,
+    ) -> dict[str, str]:
+        details = {
+            "incident_id": incident_id,
+            "requested_service_name": requested_service_name,
+        }
+        errors = [
+            error.strip()
+            for error in getattr(result, "errors", [])
+            if isinstance(error, str) and error.strip()
+        ]
+        if errors:
+            details["errors"] = " | ".join(errors)
+
+        rotation_changes = getattr(result, "rotation_changes", []) or []
+        if not rotation_changes:
+            return details
+
+        change = rotation_changes[0]
+        details["final_service_name"] = getattr(
+            change,
+            "final_service_name",
+            requested_service_name,
+        )
+        details["old_location"] = getattr(change, "old_location", "")
+        details["new_location"] = getattr(change, "new_location", "")
+
+        candidate_locations = getattr(change, "candidate_locations", []) or []
+        attempted_locations = getattr(change, "attempted_locations", []) or []
+        if candidate_locations:
+            details["candidate_locations"] = ", ".join(candidate_locations)
+        if attempted_locations:
+            details["attempted_locations"] = ", ".join(attempted_locations)
+        return details
+
+    def _action_matches_service(
+        self,
+        action: ActionRecord,
+        service_name: str,
+    ) -> bool:
+        if action.service_name == service_name:
+            return True
+        requested_service_name = action.details.get("requested_service_name")
+        final_service_name = action.details.get("final_service_name")
+        return service_name in {requested_service_name, final_service_name}
+
+    def _serialize_action(self, action: ActionRecord) -> dict[str, str]:
+        payload = {
+            "action": action.action,
+            "result": action.result,
+            "trigger": action.trigger,
+            "service_name": action.service_name,
+            "ts": action.ts.isoformat(),
+        }
+        payload.update(
+            {
+                key: value
+                for key, value in action.details.items()
+                if value and key not in payload
+            }
+        )
+        return payload
+
+    def _recent_actions_for_service(
+        self,
+        actions: list[ActionRecord],
+        service_name: str,
+        limit: int = 5,
+    ) -> list[dict[str, str]]:
+        matching_actions = [
+            action
+            for action in actions
+            if self._action_matches_service(action, service_name)
+        ]
+        return [self._serialize_action(action) for action in matching_actions[-limit:]]
+
+    def _describe_recent_action(self, action: dict[str, str]) -> str:
+        parts = [f"{action['action']} [{action['result']}] via {action['trigger']}."]
+        requested_service_name = action.get("requested_service_name")
+        final_service_name = action.get("final_service_name")
+        if (
+            requested_service_name
+            and final_service_name
+            and requested_service_name != final_service_name
+        ):
+            parts.append(
+                f"Service renamed {requested_service_name} -> {final_service_name}."
+            )
+        old_location = action.get("old_location")
+        new_location = action.get("new_location")
+        if old_location and new_location and old_location != new_location:
+            parts.append(f"Location changed {old_location} -> {new_location}.")
+        attempted_locations = action.get("attempted_locations")
+        if attempted_locations:
+            parts.append(f"Attempted locations: {attempted_locations}.")
+        return " ".join(parts)
 
     def _can_restore(self, service_name: str, actions: list[ActionRecord]) -> bool:
         cutoff = utc_now() - timedelta(seconds=self.settings.restore_cooldown_seconds)
         for action in reversed(actions):
-            if action.service_name == service_name and action.action == "restore":
+            if (
+                self._action_matches_service(action, service_name)
+                and action.action == "restore"
+            ):
                 return action.ts < cutoff
         return True
+
+    def _rotation_grace_elapsed(self, snapshot: ServiceSnapshot) -> bool:
+        if snapshot.degraded_since is None:
+            return False
+        return utc_now() - snapshot.degraded_since >= timedelta(
+            seconds=self.settings.rotation_grace_period_seconds
+        )
 
     async def _attempt_isolated_auth_restart(
         self,
@@ -687,15 +863,10 @@ class AgentWatchdog:
             for result in results
             if not result.passed and result.recommendation
         ]
-        recent_service_actions = [
-            {
-                "action": action.action,
-                "result": action.result,
-                "trigger": action.trigger,
-            }
-            for action in recent_actions[-5:]
-            if action.service_name == service_name
-        ]
+        recent_service_actions = self._recent_actions_for_service(
+            recent_actions,
+            service_name,
+        )
         if not messages:
             return self._enrich_summary(
                 IncidentContext(
@@ -784,13 +955,11 @@ class AgentWatchdog:
             None,
         )
         recent_actions = [
-            {
-                "action": action.action,
-                "result": action.result,
-                "trigger": action.trigger,
-            }
-            for action in state.actions[-5:]
-            if action.service_name == incident.service_name
+            action
+            for action in self._recent_actions_for_service(
+                state.actions,
+                incident.service_name,
+            )
         ]
 
         manager: ComposeManager | None = None
@@ -1143,8 +1312,7 @@ class AgentWatchdog:
         for action in context.recent_actions[-3:]:
             self._append_unique(
                 findings,
-                "Recent action: "
-                f"{action['action']} [{action['result']}] via {action['trigger']}.",
+                f"Recent action: {self._describe_recent_action(action)}",
             )
 
         if context.incident_type == "auth_config_failure":
@@ -1388,6 +1556,27 @@ class AgentWatchdog:
             self.store.append_incident(resolved)
             incidents.remove(incident)
             incidents.insert(0, resolved)
+
+    def _migrate_active_incidents(
+        self,
+        old_service_name: str,
+        new_service_name: str,
+        exclude_incident_ids: set[str] | None = None,
+    ) -> None:
+        exclude_ids = exclude_incident_ids or set()
+        now = utc_now()
+        incidents = self.store.load_incidents()
+        for incident in incidents:
+            if incident.id in exclude_ids:
+                continue
+            if incident.service_name != old_service_name:
+                continue
+            if incident.status in {"resolved", "dismissed", "failed"}:
+                continue
+            migrated = incident.model_copy(
+                update={"service_name": new_service_name, "updated_at": now}
+            )
+            self.store.append_incident(migrated)
 
     def _find_active_incident(
         self,

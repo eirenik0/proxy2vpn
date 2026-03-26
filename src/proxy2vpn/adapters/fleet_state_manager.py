@@ -1,6 +1,8 @@
 """Fleet State Manager - Reliable singleton for managing VPN fleet operations."""
 
 import asyncio
+from collections import Counter
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,10 +17,12 @@ from .display_utils import console
 from .docker_ops import (
     ensure_network,
     get_container_by_service_name,
+    get_container_ip_async,
     recreate_vpn_container,
     remove_container,
     start_container,
     start_vpn_service,
+    test_vpn_connection_async,
     stop_container,
 )
 from .http_client import HTTPClient, HTTPClientConfig
@@ -68,6 +72,10 @@ class OperationConfig:
     max_parallel: int = 5
     rollback_on_failure: bool = True
     health_check_timeout: int = 30
+    rotation_attempt_limit: int = 3
+    rotation_verification_attempts: int = 3
+    rotation_verification_delay_seconds: int = 10
+    bad_city_cooldown_seconds: int = 3600
     countries: Optional[List[str]] = None
     provider: Optional[str] = None
     profile: Optional[str] = None
@@ -81,6 +89,19 @@ class ServiceRotationPlan:
     old_location: str
     new_location: str
     reason: str
+    candidate_locations: List[str] = field(default_factory=list)
+
+
+@dataclass
+class RotationChange:
+    """Persistable description of one completed rotation."""
+
+    requested_service_name: str
+    final_service_name: str
+    old_location: str
+    new_location: str
+    candidate_locations: List[str] = field(default_factory=list)
+    attempted_locations: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -103,6 +124,7 @@ class OperationResult:
     errors: List[str] = field(default_factory=list)
     execution_time: float = 0.0
     dry_run: bool = False
+    rotation_changes: List[RotationChange] = field(default_factory=list)
 
 
 class FleetStateManager:
@@ -165,6 +187,7 @@ class FleetStateManager:
 
         # Operation history for debugging
         self.operation_history: List[OperationResult] = []
+        self.bad_rotation_cities: Dict[Tuple[str, str, str], datetime] = {}
 
         self._initialized = True
         logger.info("FleetStateManager initialized")
@@ -295,13 +318,14 @@ class FleetStateManager:
         return results
 
     async def _check_service_health(
-        self, service_name: str
+        self, service_name: str, timeout: int | None = None
     ) -> Tuple[str, ServiceHealth]:
         """Check health of a single service using diagnostic analyzer like vpn list."""
         try:
             service = self.services.get(service_name)
             if not service:
                 raise Exception(f"Service {service_name} not found in fleet state")
+            effective_timeout = max(1, timeout or 5)
 
             # Get container
             container = get_container_by_service_name(service_name)
@@ -321,7 +345,10 @@ class FleetStateManager:
             # Get direct IP for diagnostics (same as vpn list)
             direct_ip = None
             try:
-                direct_ip = await asyncio.to_thread(ip_utils.fetch_ip, 5)
+                direct_ip = await asyncio.to_thread(
+                    ip_utils.fetch_ip,
+                    timeout=effective_timeout,
+                )
             except Exception:
                 pass  # Will be handled by diagnostic analyzer
 
@@ -331,7 +358,13 @@ class FleetStateManager:
 
             start_time = time.perf_counter()
             results = await loop.run_in_executor(
-                None, analyze_container_logs, service_name, 20, analyzer, 5, direct_ip
+                None,
+                analyze_container_logs,
+                service_name,
+                20,
+                analyzer,
+                effective_timeout,
+                direct_ip,
             )
             response_time = time.perf_counter() - start_time
 
@@ -401,9 +434,12 @@ class FleetStateManager:
                 available_cities = self.server_manager.list_cities(
                     service.provider, country
                 )
-                alternative_cities = [
-                    city for city in available_cities if city != service.location
-                ]
+                alternative_cities = self._rank_rotation_candidates(
+                    service=service,
+                    country=country,
+                    available_cities=available_cities,
+                    config=config,
+                )
 
                 if not alternative_cities:
                     logger.warning(
@@ -411,14 +447,10 @@ class FleetStateManager:
                     )
                     continue
 
-                # Select new location based on criteria
-                if config.criteria == RotationCriteria.RANDOM:
-                    import random
-
-                    new_location = random.choice(alternative_cities)
-                else:
-                    # For now, default to first available (can be enhanced)
-                    new_location = alternative_cities[0]
+                # Select the best candidate first, but keep the rest so execution
+                # can fall through if the first choice does not yield a healthy
+                # service with a genuinely new egress IP.
+                new_location = alternative_cities[0]
 
                 plan.append(
                     ServiceRotationPlan(
@@ -426,6 +458,7 @@ class FleetStateManager:
                         old_location=service.location,
                         new_location=new_location,
                         reason="health_check_failed",
+                        candidate_locations=alternative_cities,
                     )
                 )
 
@@ -434,6 +467,64 @@ class FleetStateManager:
                 continue
 
         return plan
+
+    def _rotation_city_key(
+        self, provider: str, country: str, city: str
+    ) -> Tuple[str, str, str]:
+        """Return a normalized lookup key for one rotation candidate city."""
+
+        return (provider.casefold(), country.casefold(), city.casefold())
+
+    def _prune_bad_rotation_cities(self, cooldown_seconds: int) -> None:
+        """Drop expired bad-city markers so candidate ranking can recover over time."""
+
+        cutoff = datetime.now().timestamp() - max(1, cooldown_seconds)
+        expired = [
+            key
+            for key, failed_at in self.bad_rotation_cities.items()
+            if failed_at.timestamp() < cutoff
+        ]
+        for key in expired:
+            self.bad_rotation_cities.pop(key, None)
+
+    def _is_bad_rotation_city(
+        self,
+        provider: str,
+        country: str,
+        city: str,
+        cooldown_seconds: int,
+    ) -> bool:
+        """Return True when CITY recently failed rotation verification."""
+
+        self._prune_bad_rotation_cities(cooldown_seconds)
+        return (
+            self._rotation_city_key(provider, country, city) in self.bad_rotation_cities
+        )
+
+    def _mark_bad_rotation_city(
+        self,
+        provider: str,
+        country: str,
+        city: str,
+    ) -> None:
+        """Record one recently failed rotation city for later plan avoidance."""
+
+        self.bad_rotation_cities[self._rotation_city_key(provider, country, city)] = (
+            datetime.now()
+        )
+
+    def _clear_bad_rotation_city(
+        self,
+        provider: str,
+        country: str,
+        city: str,
+    ) -> None:
+        """Clear a bad-city marker after a later successful verification."""
+
+        self.bad_rotation_cities.pop(
+            self._rotation_city_key(provider, country, city),
+            None,
+        )
 
     def _extract_country_from_service(self, service: VPNService) -> str:
         """Extract country from service name or location."""
@@ -448,6 +539,212 @@ class FleetStateManager:
 
         # Fallback to location
         return service.location
+
+    def _rank_rotation_candidates(
+        self,
+        service: VPNService,
+        country: str,
+        available_cities: List[str],
+        config: OperationConfig,
+    ) -> List[str]:
+        """Order candidate cities using fleet-aware heuristics."""
+
+        current_location = service.location.casefold()
+        seen: set[str] = set()
+        candidates: List[str] = []
+        skipped_bad_cities: List[str] = []
+        for city in available_cities:
+            normalized = city.casefold()
+            if normalized == current_location or normalized in seen:
+                continue
+            seen.add(normalized)
+            if self._is_bad_rotation_city(
+                service.provider,
+                country,
+                city,
+                config.bad_city_cooldown_seconds,
+            ):
+                skipped_bad_cities.append(city)
+                continue
+            candidates.append(city)
+
+        if skipped_bad_cities:
+            logger.info(
+                "rotation_candidates_skip_recent_failures",
+                extra={
+                    "service_name": service.name,
+                    "provider": service.provider,
+                    "country": country,
+                    "cities": skipped_bad_cities,
+                },
+            )
+
+        if not candidates:
+            return []
+
+        if config.criteria == RotationCriteria.RANDOM:
+            random.shuffle(candidates)
+            return candidates
+
+        usage_counts = self._city_usage_counts(
+            provider=service.provider,
+            country=country,
+            exclude_service=service.name,
+        )
+        capacity_counts = self._city_capacity_counts(service.provider, country)
+
+        if config.criteria == RotationCriteria.LOAD:
+            return sorted(
+                candidates,
+                key=lambda city: (
+                    usage_counts[city.casefold()],
+                    -capacity_counts[city.casefold()],
+                    city.casefold(),
+                ),
+            )
+
+        return sorted(
+            candidates,
+            key=lambda city: (
+                -capacity_counts[city.casefold()],
+                usage_counts[city.casefold()],
+                city.casefold(),
+            ),
+        )
+
+    def _city_usage_counts(
+        self, provider: str, country: str, exclude_service: str | None = None
+    ) -> Counter[str]:
+        """Count how many current services already use each city."""
+
+        counts: Counter[str] = Counter()
+        for service in self.services.values():
+            if exclude_service and service.name == exclude_service:
+                continue
+            if service.provider != provider:
+                continue
+            if self._extract_country_from_service(service) != country:
+                continue
+            if service.location:
+                counts[service.location.casefold()] += 1
+        return counts
+
+    def _city_capacity_counts(self, provider: str, country: str) -> Counter[str]:
+        """Count advertised servers per city to prefer broader pools."""
+
+        data = self.server_manager.data or {}
+        provider_data = data.get(provider, {})
+        counts: Counter[str] = Counter()
+
+        for server in provider_data.get("servers", []):
+            if server.get("country") != country:
+                continue
+            city = server.get("city")
+            if not city:
+                continue
+            ips = [ip for ip in (server.get("ips") or []) if isinstance(ip, str) and ip]
+            counts[city.casefold()] += max(1, len(ips))
+
+        return counts
+
+    def _slug_location(self, value: str) -> str:
+        """Normalize a location segment to the service-name slug format."""
+
+        return value.strip().lower().replace(" ", "-")
+
+    def _derive_rotated_service_name(
+        self,
+        service: VPNService,
+        target_location: str,
+        *,
+        current_name: str | None = None,
+        target_name: str | None = None,
+    ) -> str:
+        """Return the renamed service/container name for TARGET_LOCATION."""
+
+        if target_name:
+            return target_name
+
+        active_name = current_name or service.name
+        current_slug = self._slug_location(service.location)
+        target_slug = self._slug_location(target_location)
+        if not current_slug or not target_slug or current_slug == target_slug:
+            return active_name
+
+        if current_slug not in active_name:
+            return active_name
+
+        prefix, suffix = active_name.rsplit(current_slug, 1)
+        candidate = f"{prefix}{target_slug}{suffix}"
+        existing_names = {item.name for item in self.compose_manager.list_services()}
+        existing_names.discard(active_name)
+        if candidate not in existing_names:
+            return candidate
+
+        candidate_with_port = f"{candidate}-{service.port}"
+        if candidate_with_port not in existing_names:
+            return candidate_with_port
+
+        index = 2
+        while f"{candidate_with_port}-{index}" in existing_names:
+            index += 1
+        return f"{candidate_with_port}-{index}"
+
+    async def _get_service_egress_ip(
+        self, service_name: str, timeout: int | None = None
+    ) -> str | None:
+        """Return the current observed egress IP for a service, if it can be measured."""
+
+        container = get_container_by_service_name(service_name)
+        if not container:
+            return None
+        try:
+            container.reload()
+        except Exception:
+            pass
+        try:
+            ip_address = await get_container_ip_async(
+                container,
+                timeout=max(1, timeout or 3),
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to determine egress IP for {service_name}: {exc}")
+            return None
+        if not ip_address or ip_address == "N/A":
+            return None
+        return ip_address
+
+    async def _apply_rotation_location(
+        self,
+        service: VPNService,
+        location: str,
+        settle_seconds: int = 10,
+        target_name: str | None = None,
+    ) -> str:
+        """Apply one candidate location and recreate the service container."""
+
+        profile = self.compose_manager.get_profile(service.profile)
+        previous_name = service.name
+        next_name = self._derive_rotated_service_name(
+            service,
+            location,
+            current_name=previous_name,
+            target_name=target_name,
+        )
+        service.set_location(location)
+        service.set_name(next_name)
+        self.compose_manager.replace_service(previous_name, service)
+        if previous_name != next_name:
+            self.services.pop(previous_name, None)
+            try:
+                await asyncio.to_thread(remove_container, previous_name)
+            except Exception:
+                pass
+        self.services[next_name] = service
+        await asyncio.to_thread(recreate_vpn_container, service, profile)
+        await asyncio.to_thread(start_container, service.name)
+        await asyncio.sleep(settle_seconds)
+        return next_name
 
     async def _execute_rotation_plan(
         self, plan: List[ServiceRotationPlan], config: OperationConfig
@@ -476,6 +773,7 @@ class FleetStateManager:
 
         start_time = time.perf_counter()
         successful_rotations = []
+        rotation_changes: List[RotationChange] = []
         failed_rotations = []
 
         # Execute rotations with limited concurrency
@@ -483,13 +781,13 @@ class FleetStateManager:
 
         async def rotate_single_service(
             rotation_plan: ServiceRotationPlan,
-        ) -> Tuple[str, bool, str]:
+        ) -> Tuple[str, bool, RotationChange | None, str]:
             async with semaphore:
                 try:
-                    await self._execute_single_rotation(rotation_plan)
-                    return rotation_plan.service_name, True, ""
+                    change = await self._execute_single_rotation(rotation_plan, config)
+                    return rotation_plan.service_name, True, change, ""
                 except Exception as e:
-                    return rotation_plan.service_name, False, str(e)
+                    return rotation_plan.service_name, False, None, str(e)
 
         # Execute all rotations in parallel
         tasks = [rotate_single_service(rp) for rp in plan]
@@ -503,11 +801,23 @@ class FleetStateManager:
                 failed_rotations.append(rotation_plan.service_name)
                 errors.append(f"{rotation_plan.service_name}: {result}")
             else:
-                service_name, success, error = result
+                service_name, success, change, error = result
                 if success:
-                    successful_rotations.append(service_name)
+                    final_name = (
+                        change.final_service_name
+                        if change is not None
+                        else service_name
+                    )
+                    final_location = (
+                        change.new_location
+                        if change is not None
+                        else rotation_plan.new_location
+                    )
+                    successful_rotations.append(final_name)
+                    if change is not None:
+                        rotation_changes.append(change)
                     console.print(
-                        f"[green]✓[/green] Rotated {service_name}: {rotation_plan.old_location} → {rotation_plan.new_location}"
+                        f"[green]✓[/green] Rotated {service_name} → {final_name}: {rotation_plan.old_location} → {final_location}"
                     )
                 else:
                     failed_rotations.append(service_name)
@@ -533,36 +843,214 @@ class FleetStateManager:
             services_affected=successful_rotations + failed_rotations,
             errors=errors,
             execution_time=execution_time,
+            rotation_changes=rotation_changes,
         )
 
-    async def _execute_single_rotation(self, rotation_plan: ServiceRotationPlan):
-        """Execute rotation for a single service."""
+    async def _execute_single_rotation(
+        self,
+        rotation_plan: ServiceRotationPlan,
+        config: OperationConfig | None = None,
+    ) -> RotationChange:
+        """Execute rotation for a single service and return final rotation metadata."""
+        config_obj = config or OperationConfig()
         service_name = rotation_plan.service_name
 
         # Get current service from compose manager
         service = self.compose_manager.get_service(service_name)
-        profile = self.compose_manager.get_profile(service.profile)
+        original_name = service.name
+        original_location = service.location
+        country = self._extract_country_from_service(service)
+        previous_ip = await self._get_service_egress_ip(
+            service_name,
+            timeout=config_obj.health_check_timeout,
+        )
+        candidate_locations = rotation_plan.candidate_locations or [
+            rotation_plan.new_location
+        ]
+        attempt_limit = max(1, config_obj.rotation_attempt_limit)
+        attempted_locations: List[str] = []
+        failures: List[str] = []
 
-        # Update service configuration
-        service.set_location(rotation_plan.new_location)
+        for attempt_number, candidate_location in enumerate(
+            candidate_locations, start=1
+        ):
+            if attempt_number > attempt_limit:
+                failures.append(
+                    f"stopped after {attempt_limit} rotation attempts for {service_name}"
+                )
+                logger.warning(
+                    "rotation_attempt_limit_reached",
+                    extra={
+                        "service_name": service_name,
+                        "attempt_limit": attempt_limit,
+                        "attempted_locations": attempted_locations,
+                    },
+                )
+                break
+            try:
+                attempted_locations.append(candidate_location)
+                logger.info(
+                    "rotation_attempt_started",
+                    extra={
+                        "service_name": service_name,
+                        "attempt": attempt_number,
+                        "attempt_limit": attempt_limit,
+                        "candidate_location": candidate_location,
+                    },
+                )
+                active_name = await self._apply_rotation_location(
+                    service, candidate_location
+                )
+                verified, verification_failures = await self._verify_rotation_candidate(
+                    service_name=active_name,
+                    previous_ip=previous_ip,
+                    config=config_obj,
+                )
+                if not verified:
+                    self._mark_bad_rotation_city(
+                        service.provider,
+                        country,
+                        candidate_location,
+                    )
+                    failures.append(
+                        f"{candidate_location}: {' | '.join(verification_failures)}"
+                    )
+                    logger.warning(
+                        "rotation_attempt_failed",
+                        extra={
+                            "service_name": service_name,
+                            "attempt": attempt_number,
+                            "attempt_limit": attempt_limit,
+                            "candidate_location": candidate_location,
+                            "verification_failures": verification_failures,
+                        },
+                    )
+                    continue
 
-        # Save updated service to compose file
-        self.compose_manager.update_service(service)
+                self._clear_bad_rotation_city(
+                    service.provider,
+                    country,
+                    candidate_location,
+                )
+                logger.info(
+                    "rotation_attempt_succeeded",
+                    extra={
+                        "service_name": service_name,
+                        "attempt": attempt_number,
+                        "attempt_limit": attempt_limit,
+                        "candidate_location": candidate_location,
+                        "final_service_name": active_name,
+                    },
+                )
 
-        # Update local state
-        self.services[service_name] = service
+                return RotationChange(
+                    requested_service_name=service_name,
+                    final_service_name=active_name,
+                    old_location=original_location,
+                    new_location=candidate_location,
+                    candidate_locations=list(candidate_locations),
+                    attempted_locations=list(attempted_locations),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "rotation_candidate_failed",
+                    extra={
+                        "service_name": service.name,
+                        "attempt": attempt_number,
+                        "attempt_limit": attempt_limit,
+                        "candidate_location": candidate_location,
+                        "error": str(exc),
+                    },
+                )
+                self._mark_bad_rotation_city(
+                    service.provider,
+                    country,
+                    candidate_location,
+                )
+                failures.append(f"{candidate_location}: {exc}")
 
-        # Recreate container with new configuration
-        await asyncio.to_thread(recreate_vpn_container, service, profile)
-        await asyncio.to_thread(start_container, service_name)
+        try:
+            await self._apply_rotation_location(
+                service,
+                original_location,
+                target_name=original_name,
+            )
+        except Exception as exc:
+            failures.append(
+                f"rollback to {original_name} ({original_location}) failed after exhausted candidates: {exc}"
+            )
 
-        # Wait for container to stabilize
-        await asyncio.sleep(10)
+        raise Exception(
+            "No rotation candidate restored healthy connectivity with a new egress IP. "
+            + " | ".join(failures)
+        )
 
-        # Verify rotation worked
-        _, health = await self._check_service_health(service_name)
-        if not health.is_healthy:
-            raise Exception(f"Service {service_name} still unhealthy after rotation")
+    async def _verify_rotation_candidate(
+        self,
+        service_name: str,
+        previous_ip: str | None,
+        config: OperationConfig,
+    ) -> Tuple[bool, List[str]]:
+        """Verify one rotated candidate with repeated health and vpn-test probes."""
+
+        attempts = max(1, config.rotation_verification_attempts)
+        retry_delay = max(0, config.rotation_verification_delay_seconds)
+        failures: List[str] = []
+
+        for attempt in range(1, attempts + 1):
+            _, health = await self._check_service_health(
+                service_name,
+                timeout=config.health_check_timeout,
+            )
+            vpn_test_passed = await test_vpn_connection_async(
+                service_name,
+                timeout=config.health_check_timeout,
+            )
+            current_ip = None
+            if vpn_test_passed:
+                current_ip = await self._get_service_egress_ip(
+                    service_name,
+                    timeout=config.health_check_timeout,
+                )
+
+            attempt_failures: List[str] = []
+            if not vpn_test_passed:
+                attempt_failures.append("vpn test failed")
+            if previous_ip:
+                if not current_ip:
+                    attempt_failures.append("unable to verify new egress IP")
+                elif current_ip == previous_ip:
+                    attempt_failures.append(f"egress IP did not change ({current_ip})")
+
+            if vpn_test_passed and (
+                not previous_ip or (current_ip and current_ip != previous_ip)
+            ):
+                if not health.is_healthy:
+                    logger.info(
+                        "rotation_candidate_verified_by_vpn_test",
+                        extra={
+                            "service_name": service_name,
+                            "health_score": health.health_score,
+                        },
+                    )
+                return True, failures
+
+            if not health.is_healthy:
+                attempt_failures.append(f"health score {health.health_score}")
+            if health.error_message:
+                attempt_failures.append(health.error_message)
+
+            attempt_summary = (
+                " | ".join(attempt_failures)
+                if attempt_failures
+                else "verification failed"
+            )
+            failures.append(f"attempt {attempt}/{attempts}: {attempt_summary}")
+
+            if attempt < attempts and retry_delay:
+                await asyncio.sleep(retry_delay)
+
+        return False, failures
 
     def _display_rotation_plan(self, plan: List[ServiceRotationPlan]):
         """Display rotation plan in formatted table."""

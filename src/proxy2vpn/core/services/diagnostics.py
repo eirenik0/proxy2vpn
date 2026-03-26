@@ -29,8 +29,8 @@ class DiagnosticAnalyzer:
         """Recent log analysis - focus on latest logs to avoid outdated issues."""
         lines = [str(line) for line in log_lines]
 
-        # Only analyze most recent logs (first 10 lines of recent logs)
-        recent_lines = lines[:10] if len(lines) > 10 else lines
+        # Docker returns tailed logs oldest-to-newest, so inspect the newest slice.
+        recent_lines = lines[-10:] if len(lines) > 10 else lines
         recent_text = " ".join(recent_lines).lower()
 
         # Authentication failures in recent logs only
@@ -276,19 +276,41 @@ class DiagnosticAnalyzer:
 
     def health_score(self, results: Iterable[DiagnosticResult]) -> int:
         """Reality-based health scoring: broken containers get 0, working containers get high scores."""
+        results_list = list(results)
+
         # If connectivity fails, container is completely useless
-        for r in results:
+        connectivity_results = [r for r in results_list if r.check == "connectivity"]
+        for r in connectivity_results:
             if r.check == "connectivity" and not r.passed:
                 return 0
+        connectivity_passed = any(r.passed for r in connectivity_results)
 
         # If DNS or authentication fails persistently, container is broken
         critical_failures = ["dns_status", "auth_failure", "config_error"]
-        for r in results:
+        critical_results = [
+            r for r in results_list if r.check in critical_failures and not r.passed
+        ]
+
+        # A confirmed proxied IP is stronger evidence than stale or transient logs.
+        if connectivity_passed:
+            penalty = (len(critical_results) * 15) + (
+                sum(
+                    1
+                    for r in results_list
+                    if not r.passed
+                    and r.check not in critical_failures
+                    and r.check != "connectivity"
+                )
+                * 5
+            )
+            return max(70, 100 - penalty)
+
+        for r in critical_results:
             if r.check in critical_failures and not r.passed:
                 return 0 if r.persistent else 25
 
         # Minor issues don't matter if core functionality works
         minor_issues = sum(
-            1 for r in results if not r.passed and r.check not in critical_failures
+            1 for r in results_list if not r.passed and r.check not in critical_failures
         )
         return max(50, 100 - (minor_issues * 10))

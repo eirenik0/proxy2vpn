@@ -360,6 +360,35 @@ class ServerMonitor:
         # Fallback: use location as country (works for country-level locations)
         return service.location
 
+    def _slug_location(self, value: str) -> str:
+        """Normalize a location segment to the service-name slug format."""
+
+        return value.strip().lower().replace(" ", "-")
+
+    def _derive_rotated_service_name(
+        self, service: VPNService, target_location: str, compose_manager
+    ) -> str:
+        """Return the renamed service/container name for TARGET_LOCATION."""
+
+        current_slug = self._slug_location(service.location)
+        target_slug = self._slug_location(target_location)
+        if not current_slug or not target_slug or current_slug == target_slug:
+            return service.name
+        if current_slug not in service.name:
+            return service.name
+
+        prefix, suffix = service.name.rsplit(current_slug, 1)
+        candidate = f"{prefix}{target_slug}{suffix}"
+        existing_names = {item.name for item in compose_manager.list_services()}
+        existing_names.discard(service.name)
+        if candidate not in existing_names:
+            return candidate
+
+        candidate_with_port = f"{candidate}-{service.port}"
+        if candidate_with_port not in existing_names:
+            return candidate_with_port
+        return service.name
+
     async def _execute_service_rotation(self, rotation: ServiceRotation):
         """Execute server rotation for a single service"""
         # Update service configuration with new location
@@ -367,15 +396,30 @@ class ServerMonitor:
 
         # Get current service
         service = compose_manager.get_service(rotation.service_name)
+        previous_name = service.name
+        next_name = self._derive_rotated_service_name(
+            service, rotation.new_location, compose_manager
+        )
 
         # Update location and environment
         service.set_location(rotation.new_location)
+        service.set_name(next_name)
 
         # Save updated service to compose file
-        compose_manager.update_service(service)
+        compose_manager.replace_service(previous_name, service)
 
         # Recreate container with new configuration
-        from .docker_ops import recreate_vpn_container, start_container
+        from .docker_ops import (
+            recreate_vpn_container,
+            remove_container,
+            start_container,
+        )
+
+        if previous_name != next_name:
+            try:
+                await asyncio.to_thread(remove_container, previous_name)
+            except Exception:
+                pass
 
         profile = compose_manager.get_profile(service.profile)
         await asyncio.to_thread(recreate_vpn_container, service, profile)

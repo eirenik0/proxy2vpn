@@ -17,6 +17,7 @@ class AgentSettings(BaseSettings):
     interval_seconds: int = 30
     health_threshold: int = 60
     recheck_delay_seconds: int = 15
+    rotation_grace_period_seconds: int = 300
     restore_cooldown_seconds: int = 600
     incident_cooldown_seconds: int = 1800
     action_history_limit: int = 100

@@ -1,5 +1,6 @@
 import asyncio
 from asyncio import threads as asyncio_threads
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +9,7 @@ import pytest
 
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import (
+    ActionRecord,
     AgentIncident,
     AgentState,
     AgentStatus,
@@ -17,6 +19,7 @@ from proxy2vpn.agent.llm import IncidentEnrichment, InvestigationPlan
 from proxy2vpn.agent.runtime import AgentWatchdog, utc_now
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.adapters.compose_manager import ComposeManager
+from proxy2vpn.adapters.fleet_state_manager import RotationChange
 from proxy2vpn.core import config
 from proxy2vpn.core.models import ServiceCredentials
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
@@ -222,6 +225,47 @@ def test_agent_run_once_healthy_updates_snapshots_only(
     assert state.services[0].health_score == 100
     assert state.actions == []
     assert watchdog.store.state_file.exists()
+    assert watchdog.store.load_incidents() == []
+    assert calls["status"] == 1
+
+
+def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
+    agent_compose_file, monkeypatch, control_client_factory
+):
+    dummy_client, calls = control_client_factory
+    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            ),
+            DiagnosticResult(
+                check="connectivity",
+                passed=True,
+                message="VPN working: real=2.2.2.2 vpn=1.1.1.1",
+                recommendation="",
+            ),
+        ],
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+    state = asyncio.run(watchdog.run_once())
+
+    assert state.status.unhealthy_count == 0
+    assert state.services[0].health_score == 85
+    assert state.services[0].consecutive_failures == 0
+    assert state.actions == []
     assert watchdog.store.load_incidents() == []
     assert calls["status"] == 1
 
@@ -1146,7 +1190,7 @@ def test_investigate_incident_does_not_infer_accountwide_auth_issue_from_generic
     )
 
 
-def test_agent_restore_failure_creates_rotation_incident(
+def test_agent_restore_failure_tracks_degradation_before_rotation_incident(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
@@ -1175,6 +1219,61 @@ def test_agent_restore_failure_creates_rotation_incident(
 
     assert state.actions[0].action == "restore"
     assert state.actions[0].result == "failed"
+    assert state.services[0].degraded_since is not None
+    assert incidents == []
+
+
+def test_agent_restore_failure_creates_rotation_incident_after_grace_period(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    degraded_since=utc_now() - timedelta(minutes=6),
+                    last_check_at=utc_now(),
+                )
+            ],
+        )
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: unhealthy_results(),
+    )
+
+    def fake_start(service, profile, force):
+        raise RuntimeError("restore failed")
+
+    async def fake_control_api(service):
+        return False
+
+    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+
+    state = asyncio.run(watchdog.run_once())
+    incidents = watchdog.store.load_incidents()
+
+    assert state.actions[0].action == "restore"
+    assert state.actions[0].result == "failed"
+    assert state.services[0].degraded_since is not None
     assert incidents[0].recommended_action == "rotate"
     assert incidents[0].approval_required is True
     assert incidents[0].status == "open"
@@ -1215,13 +1314,28 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
         approval_required=True,
     )
     store.append_incident(incident)
+    captured_config = {}
 
     class DummyFleetManager:
         def __init__(self, compose_file):
             self.compose_file = compose_file
 
         async def rotate_service(self, service_name, config_obj):
-            return SimpleNamespace(success=True, errors=[])
+            captured_config["criteria"] = config_obj.criteria
+            return SimpleNamespace(
+                success=True,
+                errors=[],
+                rotation_changes=[
+                    RotationChange(
+                        requested_service_name=service_name,
+                        final_service_name="protonvpn-united-states-boston",
+                        old_location="New York",
+                        new_location="Boston",
+                        candidate_locations=["Boston", "Chicago"],
+                        attempted_locations=["Boston"],
+                    )
+                ],
+            )
 
         async def close(self):
             return None
@@ -1237,13 +1351,140 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
     assert persisted is not None
     assert persisted.actions[-1].action == "rotate"
     assert persisted.actions[-1].result == "success"
+    assert persisted.actions[-1].service_name == "protonvpn-united-states-boston"
+    assert (
+        persisted.actions[-1].details["requested_service_name"]
+        == "protonvpn-united-states-new-york"
+    )
+    assert (
+        persisted.actions[-1].details["final_service_name"]
+        == "protonvpn-united-states-boston"
+    )
+    assert persisted.actions[-1].details["old_location"] == "New York"
+    assert persisted.actions[-1].details["new_location"] == "Boston"
+    assert persisted.actions[-1].details["candidate_locations"] == "Boston, Chicago"
+    assert persisted.actions[-1].details["attempted_locations"] == "Boston"
+    assert persisted.services[0].service_name == "protonvpn-united-states-boston"
+    assert persisted.services[0].last_action == "rotate"
+    assert captured_config["criteria"] == agent_runtime.RotationCriteria.PERFORMANCE
 
     with pytest.raises(RuntimeError):
         asyncio.run(watchdog.approve_incident("incident123"))
 
 
+def test_approve_incident_migrates_other_open_incidents_after_service_rename(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    last_check_at=utc_now(),
+                )
+            ],
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="rotation_required",
+            severity="medium",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=2,
+            summary="Needs rotation",
+            recommended_action="rotate",
+            approval_required=True,
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident456",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Auth issue still open",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    class DummyFleetManager:
+        def __init__(self, compose_file):
+            self.compose_file = compose_file
+
+        async def rotate_service(self, service_name, config_obj):
+            return SimpleNamespace(
+                success=True,
+                errors=[],
+                rotation_changes=[
+                    RotationChange(
+                        requested_service_name=service_name,
+                        final_service_name="protonvpn-united-states-boston",
+                        old_location="New York",
+                        new_location="Boston",
+                        candidate_locations=["Boston"],
+                        attempted_locations=["Boston"],
+                    )
+                ],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", DummyFleetManager)
+
+    asyncio.run(watchdog.approve_incident("incident123"))
+    incidents = store.load_incidents()
+    migrated_incident = next(item for item in incidents if item.id == "incident456")
+    rotation_incident = next(item for item in incidents if item.id == "incident123")
+
+    assert migrated_incident.service_name == "protonvpn-united-states-boston"
+    assert migrated_incident.status == "open"
+    assert rotation_incident.service_name == "protonvpn-united-states-new-york"
+    assert rotation_incident.status == "resolved"
+
+
 def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkeypatch):
     store = AgentStateStore(agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    degraded_since=utc_now() - timedelta(minutes=6),
+                    last_check_at=utc_now(),
+                )
+            ],
+        )
+    )
     failed_incident = AgentIncident(
         id="incident123",
         service_name="protonvpn-united-states-new-york",
@@ -1289,7 +1530,90 @@ def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkey
     assert incidents[1].id == failed_incident.id
 
 
-def test_state_persists_across_watchdog_restarts(agent_compose_file, monkeypatch):
+def test_investigation_context_keeps_rotation_history_after_service_rename(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-boston",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    last_check_at=utc_now(),
+                    last_action="rotate",
+                    last_action_result="success",
+                )
+            ],
+            actions=[
+                ActionRecord(
+                    ts=utc_now(),
+                    service_name="protonvpn-united-states-new-york",
+                    action="rotate",
+                    trigger="manual_approval",
+                    result="success",
+                    details={
+                        "requested_service_name": "protonvpn-united-states-new-york",
+                        "final_service_name": "protonvpn-united-states-boston",
+                        "old_location": "New York",
+                        "new_location": "Boston",
+                        "candidate_locations": "Boston, Chicago",
+                        "attempted_locations": "Boston",
+                    },
+                )
+            ],
+        )
+    )
+    incident = AgentIncident(
+        id="incident123",
+        service_name="protonvpn-united-states-boston",
+        type="rotation_required",
+        severity="medium",
+        status="open",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=2,
+        summary="Service remained unhealthy after rotation.",
+        recommended_action="investigate",
+        approval_required=False,
+    )
+    store.append_incident(incident)
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: None,
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    context = asyncio.run(watchdog._build_investigation_context(incident))
+
+    assert len(context.recent_actions) == 1
+    assert (
+        context.recent_actions[0]["requested_service_name"]
+        == "protonvpn-united-states-new-york"
+    )
+    assert (
+        context.recent_actions[0]["final_service_name"]
+        == "protonvpn-united-states-boston"
+    )
+    assert context.recent_actions[0]["old_location"] == "New York"
+    assert context.recent_actions[0]["new_location"] == "Boston"
+    assert context.recent_actions[0]["candidate_locations"] == "Boston, Chicago"
+    assert context.recent_actions[0]["attempted_locations"] == "Boston"
+
+
+def test_degraded_since_persists_across_watchdog_restarts(
+    agent_compose_file, monkeypatch
+):
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
@@ -1319,8 +1643,8 @@ def test_state_persists_across_watchdog_restarts(agent_compose_file, monkeypatch
 
     assert state is not None
     assert state.status.unhealthy_count == 1
-    assert len(incidents) == 1
-    assert incidents[0].status == "open"
+    assert state.services[0].degraded_since is not None
+    assert incidents == []
 
 
 def test_runtime_lock_prevents_duplicate_watchdogs(agent_compose_file):
