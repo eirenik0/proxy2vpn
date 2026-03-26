@@ -16,8 +16,6 @@ def test_extract_proxy_credentials_from_env():
 
 
 def test_proxy_url_and_redaction():
-    urls = proxy_utils.build_proxy_urls(
-        8080, username="user", password="pass"
-    )
+    urls = proxy_utils.build_proxy_urls(8080, username="user", password="pass")
     assert urls["http"] == "http://user:pass@localhost:8080"
     assert proxy_utils.redact_proxy_url(urls["http"]) == "http://***:***@localhost:8080"

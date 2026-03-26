@@ -67,7 +67,9 @@ def test_check_service_health_redacts_proxy_errors(monkeypatch):
         async def get(self, url, **kwargs):
             raise RuntimeError("failed: http://user:pass@localhost:8080")
 
-    monkeypatch.setattr(docker_ops, "get_container_by_service_name", lambda name: DummyContainer())
+    monkeypatch.setattr(
+        docker_ops, "get_container_by_service_name", lambda name: DummyContainer()
+    )
     # Ensure HTTP client exception is routed through the HTTPClientError branch.
     monkeypatch.setattr(
         server_monitor,
@@ -80,7 +82,9 @@ def test_check_service_health_redacts_proxy_errors(monkeypatch):
 
     monkeypatch.setattr(server_monitor.logger, "error", fake_error)
 
-    monitor = server_monitor.ServerMonitor(fleet_manager=None, http_client=DummyHTTPClient())
+    monitor = server_monitor.ServerMonitor(
+        fleet_manager=None, http_client=DummyHTTPClient()
+    )
     assert asyncio.run(monitor.check_service_health(service)) is False
     assert any("***:***" in message for message in captured_logs)
     assert all("user:pass" not in message for message in captured_logs)

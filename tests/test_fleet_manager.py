@@ -469,6 +469,56 @@ def test_start_services_sequential_uses_helper(monkeypatch, fleet_manager):
     assert calls == [("testvpn1", "test", True), ("testvpn2", "test", True)]
 
 
+def test_deploy_fleet_creates_many_services_with_real_compose(tmp_path, monkeypatch):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "proton.env"
+    env_path.write_text(
+        "VPN_SERVICE_PROVIDER=protonvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+    manager.add_profile(Profile(name="proton", env_file=str(env_path)))
+
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+    plan = DeploymentPlan()
+    for idx in range(14):
+        plan.services.append(
+            ServicePlan(
+                name=f"proton-us-philadelphia-{idx}",
+                profile="proton",
+                location="Philadelphia",
+                country="United States",
+                port=20000 + idx,
+                control_port=30000 + idx,
+                provider="protonvpn",
+            )
+        )
+
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.fleet_manager.ensure_network", lambda force: None
+    )
+
+    async def fake_start(service_names, force):
+        assert len(service_names) == 14
+
+    monkeypatch.setattr(fleet_manager, "_start_services_parallel", fake_start)
+    monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
+
+    result = asyncio.run(
+        fleet_manager.deploy_fleet(
+            plan,
+            validate_servers=False,
+            parallel=True,
+            force=False,
+        )
+    )
+
+    assert result.deployed == 14
+    assert result.failed == 0
+    assert len(fleet_manager.compose_manager.list_services()) == 14
+
+
 def test_get_service_status_counts(monkeypatch):
     from proxy2vpn.adapters.docker_ops import get_service_status_counts
 

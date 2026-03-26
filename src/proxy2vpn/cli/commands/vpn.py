@@ -308,12 +308,16 @@ def add(
         except typer.BadParameter as exc:
             abort(str(exc))
         resolved_profile = _prompt_for_profile(manager)
-        resolved_port = typer.prompt("Host port to expose (0 for auto)", default=0, type=int)
+        resolved_port = typer.prompt(
+            "Host port to expose (0 for auto)", default=0, type=int
+        )
         try:
             resolved_port = validate_port(resolved_port)
         except typer.BadParameter as exc:
             abort(str(exc))
-        resolved_control_port = typer.prompt("Control port (0 for auto)", default=0, type=int)
+        resolved_control_port = typer.prompt(
+            "Control port (0 for auto)", default=0, type=int
+        )
         try:
             resolved_control_port = validate_port(resolved_control_port)
         except typer.BadParameter as exc:

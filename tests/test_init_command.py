@@ -135,7 +135,9 @@ def test_system_init_uses_cached_server_list_when_refresh_fails(tmp_path, monkey
             return False
 
     # Redirect ServerManager creation to use a deterministic fake with stale cache.
-    monkeypatch.setattr("proxy2vpn.cli.commands.system.ServerManager", lambda: OfflineManager())
+    monkeypatch.setattr(
+        "proxy2vpn.cli.commands.system.ServerManager", lambda: OfflineManager()
+    )
     ctx = SimpleNamespace(obj={"compose_file": tmp_path / "compose.yml"})
     monkeypatch.chdir(tmp_path)
     # No exception should be raised when cached data exists and refresh fails.
@@ -153,7 +155,11 @@ def test_system_validate_defaults_to_no_location_validation(monkeypatch):
 
     monkeypatch.setattr(
         "proxy2vpn.cli.commands.system.ComposeManager",
-        type("ComposeManager", (), {"from_ctx": classmethod(lambda _cls, _ctx: FakeManager())}),
+        type(
+            "ComposeManager",
+            (),
+            {"from_ctx": classmethod(lambda _cls, _ctx: FakeManager())},
+        ),
     )
     ctx = SimpleNamespace(obj={})
     system_validate(ctx)
@@ -170,7 +176,11 @@ def test_system_validate_explicit_flag_triggers_location_checks(monkeypatch):
 
     monkeypatch.setattr(
         "proxy2vpn.cli.commands.system.ComposeManager",
-        type("ComposeManager", (), {"from_ctx": classmethod(lambda _cls, _ctx: FakeManager())}),
+        type(
+            "ComposeManager",
+            (),
+            {"from_ctx": classmethod(lambda _cls, _ctx: FakeManager())},
+        ),
     )
     ctx = SimpleNamespace(obj={})
     system_validate(ctx, validate_locations=True)

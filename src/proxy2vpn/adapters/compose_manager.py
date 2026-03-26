@@ -97,7 +97,9 @@ class ComposeManager:
 
     def validate_compose_file(self, validate_locations: bool = False) -> list[str]:
         """Validate a docker compose file and return a list of errors."""
-        return validate_compose(self.compose_path, validate_locations=validate_locations)
+        return validate_compose(
+            self.compose_path, validate_locations=validate_locations
+        )
 
     def list_services(self) -> list[VPNService]:
         services = self.data.get("services", {})
@@ -144,7 +146,10 @@ class ComposeManager:
     def _merged_service_config(self, service: VPNService) -> CommentedMap:
         profile_map = self._profile_map_for_service(service.profile)
         merged_config = CommentedMap()
-        merged_config.add_yaml_merge([(0, profile_map)])
+        # Store the merge metadata directly instead of going through
+        # ``add_yaml_merge()``, which is brittle across ruamel internals and can
+        # raise on some fleet deployment paths when services are added in bulk.
+        merged_config.merge.append((0, profile_map))
         merged_config.update(CommentedMap(service.to_compose_service()))
         return merged_config
 

@@ -56,7 +56,9 @@ def test_connectivity_errors_are_redacted(monkeypatch):
 
     monkeypatch.setattr(diagnostics.ip_utils, "fetch_ip", fake_fetch_ip)
     analyzer = diagnostics.DiagnosticAnalyzer()
-    result = analyzer.check_connectivity(8080, proxy_user="user", proxy_password="pass")[0]
+    result = analyzer.check_connectivity(
+        8080, proxy_user="user", proxy_password="pass"
+    )[0]
     assert "user:pass" not in result.message
     assert "***:***" in result.message
 

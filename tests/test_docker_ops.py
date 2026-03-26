@@ -230,7 +230,9 @@ def test_create_vpn_container_resolves_files_from_compose_root(tmp_path, monkeyp
         containers = DummyContainers()
         images = DummyImages()
 
-    monkeypatch.setattr(docker_ops, "_client", lambda timeout=docker_ops.DEFAULT_TIMEOUT: DummyClient())
+    monkeypatch.setattr(
+        docker_ops, "_client", lambda timeout=docker_ops.DEFAULT_TIMEOUT: DummyClient()
+    )
     monkeypatch.setattr(docker_ops, "ensure_network", lambda recreate=False: None)
     monkeypatch.chdir(tmp_path)
 

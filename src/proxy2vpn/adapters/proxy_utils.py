@@ -58,9 +58,7 @@ def build_proxy_urls(
     port: str | int, username: str | None = None, password: str | None = None
 ) -> dict[str, str]:
     """Build both http and https proxy URLs."""
-    url = build_proxy_url(
-        port=port, username=username, password=password
-    )
+    url = build_proxy_url(port=port, username=username, password=password)
     return {"http": url, "https": url}
 
 

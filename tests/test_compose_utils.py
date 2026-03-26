@@ -25,12 +25,19 @@ def test_parse_env_with_issues():
     assert parsed == {"A": "1", "B": "2", "C": "None"}
     assert issues == []
 
-    parsed, issues = compose_utils.parse_env_with_issues(["A=1", "BROKEN", {"bad": "entry"}])
+    parsed, issues = compose_utils.parse_env_with_issues(
+        ["A=1", "BROKEN", {"bad": "entry"}]
+    )
     assert parsed == {"A": "1"}
-    assert issues == ["invalid environment entry: 'BROKEN'", "invalid environment entry: {'bad': 'entry'}"]
+    assert issues == [
+        "invalid environment entry: 'BROKEN'",
+        "invalid environment entry: {'bad': 'entry'}",
+    ]
 
 
 def test_iter_port_mappings_with_issues():
-    parsed, issues = compose_utils.iter_port_mappings_with_issues(["20000:1194/tcp", "x:y"])
+    parsed, issues = compose_utils.iter_port_mappings_with_issues(
+        ["20000:1194/tcp", "x:y"]
+    )
     assert parsed == [(20000, 1194)]
     assert issues == ["invalid port mapping: 'x:y'"]

@@ -313,7 +313,11 @@ def container_logs(name: str, lines: int = 100, follow: bool = False) -> Iterato
             output = container.logs(tail=lines)
             if isinstance(output, list):
                 for line in output:
-                    yield str(line.decode().rstrip()) if isinstance(line, bytes) else str(line)
+                    yield (
+                        str(line.decode().rstrip())
+                        if isinstance(line, bytes)
+                        else str(line)
+                    )
                 return
             output = output.decode().splitlines()
             for line in output:
@@ -579,12 +583,8 @@ async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str,
             {
                 "host": host,
                 "port": container.labels.get("vpn.port", ""),
-                "username": proxy_user or ""
-                if include_credentials
-                else "",
-                "password": proxy_password or ""
-                if include_credentials
-                else "",
+                "username": proxy_user or "" if include_credentials else "",
+                "password": proxy_password or "" if include_credentials else "",
                 "location": container.labels.get("vpn.location", ""),
                 "status": status,
             }

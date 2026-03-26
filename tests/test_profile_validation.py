@@ -229,12 +229,14 @@ def test_profile_add_duplicate_exits_cleanly(tmp_path):
 
     runner = CliRunner()
     first = runner.invoke(
-        app, ["--compose-file", str(compose_path), "profile", "add", "test", str(env_file)]
+        app,
+        ["--compose-file", str(compose_path), "profile", "add", "test", str(env_file)],
     )
     assert first.exit_code == 0
 
     second = runner.invoke(
-        app, ["--compose-file", str(compose_path), "profile", "add", "test", str(env_file)]
+        app,
+        ["--compose-file", str(compose_path), "profile", "add", "test", str(env_file)],
     )
     assert second.exit_code == 1
     assert "Profile 'test' already exists" in second.output
