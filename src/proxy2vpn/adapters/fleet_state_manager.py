@@ -437,6 +437,10 @@ class FleetStateManager:
 
     def _extract_country_from_service(self, service: VPNService) -> str:
         """Extract country from service name or location."""
+        country = service.environment.get("SERVER_COUNTRIES", "")
+        if country:
+            return country
+
         # Try service name format: provider-country-city
         name_parts = service.name.split("-")
         if len(name_parts) >= 3:
@@ -644,6 +648,51 @@ class FleetStateManager:
                     success=False,
                     errors=[f"Fleet rotation failed: {e}"],
                     execution_time=time.perf_counter() - start_time,
+                )
+
+    async def rotate_service(
+        self, service_name: str, config: OperationConfig | None = None
+    ) -> OperationResult:
+        """Rotate a single service using the canonical fleet rotation path."""
+
+        config_obj = config or OperationConfig()
+        async with self.operation_lock:
+            try:
+                start_time = time.perf_counter()
+                self._sync_services_from_compose()
+
+                if service_name not in self.services:
+                    return OperationResult(
+                        operation_type=OperationType.ROTATE,
+                        success=False,
+                        errors=[f"Service '{service_name}' not found"],
+                        execution_time=time.perf_counter() - start_time,
+                    )
+
+                rotation_plan = self._create_rotation_plan([service_name], config_obj)
+                if not rotation_plan:
+                    return OperationResult(
+                        operation_type=OperationType.ROTATE,
+                        success=False,
+                        errors=[
+                            f"No rotation candidates available for '{service_name}'"
+                        ],
+                        execution_time=time.perf_counter() - start_time,
+                        dry_run=config_obj.dry_run,
+                    )
+
+                result = await self._execute_rotation_plan(rotation_plan, config_obj)
+                result.execution_time = time.perf_counter() - start_time
+                self.operation_history.append(result)
+                return result
+            except Exception as e:
+                logger.error(f"Single-service rotation failed for {service_name}: {e}")
+                return OperationResult(
+                    operation_type=OperationType.ROTATE,
+                    success=False,
+                    errors=[f"Single-service rotation failed for {service_name}: {e}"],
+                    execution_time=time.perf_counter() - start_time,
+                    dry_run=config_obj.dry_run,
                 )
 
     async def scale_fleet(

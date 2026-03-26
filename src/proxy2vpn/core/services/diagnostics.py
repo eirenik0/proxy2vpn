@@ -73,6 +73,20 @@ class DiagnosticAnalyzer:
                 )
             ]
 
+        # Configuration issues in recent logs
+        if ("config" in recent_text or "configuration" in recent_text) and any(
+            word in recent_text for word in ("error", "invalid", "missing")
+        ):
+            return [
+                DiagnosticResult(
+                    check="config_error",
+                    passed=False,
+                    message="Recent configuration issue detected",
+                    recommendation="Verify profile env file and service settings.",
+                    persistent=True,
+                )
+            ]
+
         return [
             DiagnosticResult(
                 check="logs",
@@ -268,7 +282,7 @@ class DiagnosticAnalyzer:
                 return 0
 
         # If DNS or authentication fails persistently, container is broken
-        critical_failures = ["dns_status", "auth_failure"]
+        critical_failures = ["dns_status", "auth_failure", "config_error"]
         for r in results:
             if r.check in critical_failures and not r.passed:
                 return 0 if r.persistent else 25
