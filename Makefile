@@ -1,8 +1,9 @@
-.PHONY: help test changelog changelog-draft release lint fmt fmt-check clean all
+.PHONY: help test changelog-check changelog changelog-draft release lint fmt fmt-check clean all
 
 help: ## Show available targets
 		@echo "Targets:"
 		@echo "  test              Run unit tests"
+		@echo "  changelog-check   Validate Towncrier news fragments"
 		@echo "  changelog         Build changelog for a release (requires VERSION)"
 		@echo "  changelog-draft   Preview next changelog"
 		@echo "  release           Bump version, build changelog and tag"
@@ -14,6 +15,9 @@ help: ## Show available targets
 
 test:
 	uv run --with pytest,pytest-xdist pytest -n auto
+
+changelog-check:
+	uv run --with towncrier towncrier check
 
 changelog:
 	@[ -n "$(VERSION)" ] || (echo "VERSION is required" && exit 1)
