@@ -16,7 +16,9 @@ from proxy2vpn.agent.models import (
 from proxy2vpn.agent.llm import IncidentEnrichment, InvestigationPlan
 from proxy2vpn.agent.runtime import AgentWatchdog, utc_now
 from proxy2vpn.agent.state import AgentStateStore
+from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.core import config
+from proxy2vpn.core.models import ServiceCredentials
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
 import proxy2vpn.agent.runtime as agent_runtime
 
@@ -461,6 +463,57 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
         "proxy2vpn vpn update protonvpn-united-states-new-york" in step
         for step in investigated.investigation.action_plan
     )
+
+
+def test_investigate_incident_rejects_closed_incidents(agent_compose_file):
+    store = AgentStateStore(agent_compose_file)
+    incident = AgentIncident(
+        id="incident123",
+        service_name="protonvpn-united-states-new-york",
+        type="auth_config_failure",
+        severity="high",
+        status="dismissed",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=2,
+        summary="Dismissed incident",
+        recommended_action="investigate",
+        approval_required=False,
+    )
+    store.append_incident(incident)
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+
+    with pytest.raises(RuntimeError, match="already closed"):
+        asyncio.run(watchdog.investigate_incident("incident123"))
+
+    persisted = store.load_incidents()[0]
+    assert persisted.status == "dismissed"
+    assert persisted.updated_at == incident.updated_at
+    assert persisted.investigation is None
+
+
+def test_investigation_validation_honors_service_proxy_overrides(
+    agent_compose_file, tmp_path
+):
+    env_path = tmp_path / "override.env"
+    env_path.write_text("VPN_SERVICE_PROVIDER=protonvpn\nHTTPPROXY=on\n")
+
+    manager = ComposeManager(agent_compose_file)
+    service, profile = manager.get_service_with_profile(
+        "protonvpn-united-states-new-york"
+    )
+    profile.env_file = str(env_path)
+    profile._base_dir = tmp_path
+    service.credentials = ServiceCredentials(
+        httpproxy_user="override-user",
+        httpproxy_password="override-pass",
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+    errors = watchdog._validate_profile_for_investigation(profile, service)
+
+    assert "HTTPPROXY_USER is required when HTTPPROXY=on." not in errors
+    assert "HTTPPROXY_PASSWORD is required when HTTPPROXY=on." not in errors
 
 
 def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeypatch):

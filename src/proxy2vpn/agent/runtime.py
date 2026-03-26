@@ -258,6 +258,8 @@ class AgentWatchdog:
         incident = next((item for item in incidents if item.id == incident_id), None)
         if incident is None:
             raise KeyError(f"Incident '{incident_id}' not found")
+        if incident.status in {"resolved", "dismissed", "failed"}:
+            raise RuntimeError(f"Incident '{incident_id}' is already closed")
 
         context = await self._build_investigation_context(incident)
         investigation = self._investigate_context(context)
@@ -848,10 +850,32 @@ class AgentWatchdog:
             if not env_vars.get("OPENVPN_PASSWORD"):
                 errors.append("OPENVPN_PASSWORD is missing from the profile env file.")
 
-        if env_vars.get("HTTPPROXY", "").strip().lower() in {"on", "true", "1"}:
-            if not env_vars.get("HTTPPROXY_USER"):
+        effective_http_proxy = env_vars.get("HTTPPROXY", "")
+        effective_proxy_user = env_vars.get("HTTPPROXY_USER")
+        effective_proxy_password = env_vars.get("HTTPPROXY_PASSWORD")
+
+        if service is not None:
+            effective_http_proxy = service.environment.get(
+                "HTTPPROXY", effective_http_proxy
+            )
+            effective_proxy_user = service.environment.get(
+                "HTTPPROXY_USER", effective_proxy_user
+            )
+            effective_proxy_password = service.environment.get(
+                "HTTPPROXY_PASSWORD", effective_proxy_password
+            )
+            if service.credentials is not None:
+                effective_proxy_user = (
+                    service.credentials.httpproxy_user or effective_proxy_user
+                )
+                effective_proxy_password = (
+                    service.credentials.httpproxy_password or effective_proxy_password
+                )
+
+        if effective_http_proxy.strip().lower() in {"on", "true", "1"}:
+            if not effective_proxy_user:
                 errors.append("HTTPPROXY_USER is required when HTTPPROXY=on.")
-            if not env_vars.get("HTTPPROXY_PASSWORD"):
+            if not effective_proxy_password:
                 errors.append("HTTPPROXY_PASSWORD is required when HTTPPROXY=on.")
 
         return errors
