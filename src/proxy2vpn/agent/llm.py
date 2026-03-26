@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from proxy2vpn.adapters.logging_utils import get_logger
 from proxy2vpn.agent.config import AgentSettings
@@ -53,6 +53,10 @@ class InvestigationContext(BaseModel):
     health_score: int | None = None
     control_api_reachable: bool | None = None
     profile_validation_errors: list[str]
+    healthy_shared_profile_peers: list[str] = Field(default_factory=list)
+    auth_config_shared_profile_peers: list[str] = Field(default_factory=list)
+    other_unhealthy_shared_profile_peers: list[str] = Field(default_factory=list)
+    shared_profile_peer_probe_failures: list[str] = Field(default_factory=list)
     issues: list[dict[str, Any]]
     recent_actions: list[dict[str, str]]
     human_explanation: str | None = None
@@ -172,6 +176,15 @@ class OpenAIIncidentInvestigator(_OpenAIResponderBase):
             system_prompt=(
                 "You investigate proxy2vpn watchdog incidents. "
                 "Be concise, factual, and operator-oriented. "
+                "Treat healthy peer services sharing the same profile as evidence "
+                "against account-wide or credential-wide failures unless explicit "
+                "configuration errors contradict that. Only treat same-profile peers "
+                "with matching auth/config evidence as support for a profile-wide or "
+                "account-wide provider issue. "
+                "When the incident shows auth_failure, healthy peer services share "
+                "the same profile, and the control API is reachable, prefer "
+                "restarting that service's tunnel before recommending container "
+                "recreation. "
                 "Do not expose secrets, redact credential values, and keep action_plan "
                 "to safe operational steps that a proxy2vpn operator can execute."
             ),

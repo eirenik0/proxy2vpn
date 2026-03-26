@@ -343,6 +343,31 @@ class AgentWatchdog:
             return snapshot
 
         if self._has_persistent_auth_or_config_failure(results):
+            auth_restart = await self._attempt_isolated_auth_restart(
+                manager=manager,
+                state=state,
+                incidents=incidents,
+                service=service,
+                results=results,
+                control_api_reachable=control_api_reachable,
+            )
+            if auth_restart is not None:
+                restart_result, post_restart = auth_restart
+                snapshot.last_action = "restart_tunnel"
+                snapshot.last_action_result = restart_result
+                snapshot.container_status = post_restart["container_status"]
+                snapshot.health_score = post_restart["health_score"]
+                snapshot.last_check_at = utc_now()
+                snapshot.consecutive_failures = (
+                    0
+                    if post_restart["health_score"] >= self.settings.health_threshold
+                    else failure_count
+                )
+                if post_restart["health_score"] >= self.settings.health_threshold:
+                    self._resolve_active_incidents(service.name, incidents)
+                    return snapshot
+                results = post_restart["results"]
+
             summary, human_explanation = self._format_issue_summary(
                 service.name,
                 results,
@@ -445,7 +470,12 @@ class AgentWatchdog:
         except Exception:
             return False
 
-    async def _restart_tunnel(self, service: VPNService, state: AgentState) -> str:
+    async def _restart_tunnel(
+        self,
+        service: VPNService,
+        state: AgentState,
+        trigger: str = "first_unhealthy_cycle",
+    ) -> str:
         base_url = f"http://localhost:{service.control_port}/v1"
         try:
             async with GluetunControlClient(base_url) as client:
@@ -454,7 +484,7 @@ class AgentWatchdog:
                 state,
                 service_name=service.name,
                 action="restart_tunnel",
-                trigger="first_unhealthy_cycle",
+                trigger=trigger,
                 result="success",
                 details={"control_port": str(service.control_port)},
             )
@@ -464,7 +494,7 @@ class AgentWatchdog:
                 state,
                 service_name=service.name,
                 action="restart_tunnel",
-                trigger="first_unhealthy_cycle",
+                trigger=trigger,
                 result="failed",
                 details={"error": str(exc)},
             )
@@ -595,6 +625,45 @@ class AgentWatchdog:
                 return action.ts < cutoff
         return True
 
+    async def _attempt_isolated_auth_restart(
+        self,
+        manager: ComposeManager,
+        state: AgentState,
+        incidents: list[AgentIncident],
+        service: VPNService,
+        results: list[DiagnosticResult],
+        control_api_reachable: bool,
+    ) -> tuple[str, dict[str, object]] | None:
+        if not control_api_reachable:
+            return None
+        if self._find_active_incident(incidents, service.name, "auth_config_failure"):
+            return None
+        if any(
+            result.check == "config_error" and not result.passed for result in results
+        ):
+            return None
+        if not any(
+            result.check == "auth_failure" and not result.passed for result in results
+        ):
+            return None
+
+        peer_evidence = await self._collect_shared_profile_peer_evidence(
+            manager=manager,
+            state=state,
+            service=service,
+        )
+        if not peer_evidence["healthy"]:
+            return None
+
+        restart_result = await self._restart_tunnel(
+            service,
+            state,
+            trigger="isolated_auth_failure",
+        )
+        await asyncio.sleep(self.settings.recheck_delay_seconds)
+        post_restart = await self._evaluate_health(service)
+        return restart_result, post_restart
+
     def _has_persistent_auth_or_config_failure(
         self, results: list[DiagnosticResult]
     ) -> bool:
@@ -724,6 +793,7 @@ class AgentWatchdog:
             if action.service_name == incident.service_name
         ]
 
+        manager: ComposeManager | None = None
         service: VPNService | None = None
         profile = None
         try:
@@ -777,12 +847,26 @@ class AgentWatchdog:
         profile_name = service.profile if service is not None else None
         profile_env_file = None
         profile_validation_errors: list[str] = []
+        healthy_shared_profile_peers: list[str] = []
+        auth_config_shared_profile_peers: list[str] = []
+        other_unhealthy_shared_profile_peers: list[str] = []
+        shared_profile_peer_probe_failures: list[str] = []
         if profile is not None:
             profile_env_file = str(profile._resolve_env_path())
             profile_validation_errors = self._validate_profile_for_investigation(
                 profile=profile,
                 service=service,
             )
+        if manager is not None and service is not None:
+            peer_evidence = await self._collect_shared_profile_peer_evidence(
+                manager=manager,
+                state=state,
+                service=service,
+            )
+            healthy_shared_profile_peers = peer_evidence["healthy"]
+            auth_config_shared_profile_peers = peer_evidence["auth_config"]
+            other_unhealthy_shared_profile_peers = peer_evidence["other_unhealthy"]
+            shared_profile_peer_probe_failures = peer_evidence["probe_failed"]
 
         return InvestigationContext(
             incident_id=incident.id,
@@ -801,6 +885,10 @@ class AgentWatchdog:
             health_score=health_score,
             control_api_reachable=control_api_reachable,
             profile_validation_errors=profile_validation_errors,
+            healthy_shared_profile_peers=healthy_shared_profile_peers,
+            auth_config_shared_profile_peers=auth_config_shared_profile_peers,
+            other_unhealthy_shared_profile_peers=other_unhealthy_shared_profile_peers,
+            shared_profile_peer_probe_failures=shared_profile_peer_probe_failures,
             issues=self._diagnostic_payload(results),
             recent_actions=recent_actions,
             human_explanation=incident.human_explanation,
@@ -880,6 +968,74 @@ class AgentWatchdog:
 
         return errors
 
+    async def _collect_shared_profile_peer_evidence(
+        self,
+        manager: ComposeManager,
+        state: AgentState,
+        service: VPNService,
+    ) -> dict[str, list[str]]:
+        """Return classified evidence for peer services that share the same profile."""
+
+        snapshots_by_name = {
+            snapshot.service_name: snapshot for snapshot in state.services
+        }
+        evidence = {
+            "healthy": [],
+            "auth_config": [],
+            "other_unhealthy": [],
+            "probe_failed": [],
+        }
+
+        for candidate in manager.list_services():
+            if candidate.name == service.name or candidate.profile != service.profile:
+                continue
+
+            snapshot = snapshots_by_name.get(candidate.name)
+            if snapshot is not None and (
+                snapshot.container_status == "running"
+                and snapshot.health_score >= self.settings.health_threshold
+            ):
+                evidence["healthy"].append(candidate.name)
+                continue
+
+            try:
+                peer_health = await self._evaluate_health(candidate)
+            except Exception as exc:
+                logger.warning(
+                    "agent_shared_profile_peer_probe_failed",
+                    extra={
+                        "service_name": service.name,
+                        "peer_service_name": candidate.name,
+                        "error": str(exc),
+                    },
+                )
+                evidence["probe_failed"].append(candidate.name)
+                continue
+
+            is_healthy = (
+                peer_health["container_status"] == "running"
+                and peer_health["health_score"] >= self.settings.health_threshold
+            )
+            if is_healthy:
+                evidence["healthy"].append(candidate.name)
+                continue
+
+            peer_results = peer_health.get("results", [])
+            has_auth_or_config_issue = any(
+                isinstance(result, DiagnosticResult)
+                and not result.passed
+                and result.check in {"auth_failure", "config_error"}
+                for result in peer_results
+            )
+            if has_auth_or_config_issue:
+                evidence["auth_config"].append(candidate.name)
+            else:
+                evidence["other_unhealthy"].append(candidate.name)
+
+        for names in evidence.values():
+            names.sort()
+        return evidence
+
     def _investigate_context(self, context: InvestigationContext) -> InvestigationPlan:
         fallback = self._fallback_investigation(context)
         if self._incident_investigator is None:
@@ -929,6 +1085,44 @@ class AgentWatchdog:
                 findings,
                 f"Profile '{profile_label}' resolves to env file '{context.profile_env_file}'.",
             )
+        if context.healthy_shared_profile_peers:
+            peers = self._format_service_names(context.healthy_shared_profile_peers)
+            profile_label = context.profile_name or "unknown"
+            self._append_unique(
+                findings,
+                f"Profile '{profile_label}' is also healthy in other containers: {peers}. "
+                "That weakens suspicion of a profile-wide or account-wide provider "
+                "issue and points to a service-specific or endpoint-specific issue.",
+            )
+        if context.auth_config_shared_profile_peers:
+            peers = self._format_service_names(context.auth_config_shared_profile_peers)
+            profile_label = context.profile_name or "unknown"
+            self._append_unique(
+                findings,
+                f"Other containers sharing profile '{profile_label}' also show auth/config "
+                f"problems: {peers}. That supports an account/profile-wide issue such as "
+                "bad credentials, provider-side limits, suspension, or other provider-side "
+                "account issues.",
+            )
+        if context.other_unhealthy_shared_profile_peers:
+            peers = self._format_service_names(
+                context.other_unhealthy_shared_profile_peers
+            )
+            profile_label = context.profile_name or "unknown"
+            self._append_unique(
+                findings,
+                f"Other containers sharing profile '{profile_label}' are unhealthy: {peers}. "
+                "Current peer evidence does not show the same auth/config failure there, "
+                "so this alone does not prove an account/profile-wide credential issue.",
+            )
+        if context.shared_profile_peer_probe_failures:
+            peers = self._format_service_names(
+                context.shared_profile_peer_probe_failures
+            )
+            self._append_unique(
+                findings,
+                f"Could not fully inspect some same-profile peers: {peers}. Peer evidence is incomplete.",
+            )
         if context.control_api_reachable is False:
             self._append_unique(
                 findings,
@@ -959,17 +1153,37 @@ class AgentWatchdog:
                     f"{context.service_name}: configuration for the VPN profile or "
                     "service definition is incomplete or inconsistent."
                 )
+                action_plan = self._auth_config_action_plan(context)
+            elif (
+                "auth_failure" in issues_by_check
+                and context.healthy_shared_profile_peers
+            ):
+                summary = (
+                    f"{context.service_name}: auth-like failures look isolated to this "
+                    f"service because profile '{context.profile_name or 'unknown'}' is "
+                    f"healthy in {len(context.healthy_shared_profile_peers)} other "
+                    "container(s)."
+                )
+                action_plan = self._isolated_service_action_plan(context)
+            elif context.auth_config_shared_profile_peers:
+                summary = (
+                    f"{context.service_name}: multiple containers sharing profile "
+                    f"'{context.profile_name or 'unknown'}' show auth/config problems, "
+                    "which is consistent with an account/profile-wide issue."
+                )
+                action_plan = self._auth_config_action_plan(context)
             elif "auth_failure" in issues_by_check:
                 summary = (
                     f"{context.service_name}: the VPN provider is rejecting the "
                     "configured authentication details."
                 )
+                action_plan = self._auth_config_action_plan(context)
             else:
                 summary = (
                     f"{context.service_name}: authentication or configuration needs "
                     "manual review before more automation."
                 )
-            action_plan = self._auth_config_action_plan(context)
+                action_plan = self._auth_config_action_plan(context)
         elif context.incident_type == "rotation_required":
             summary = (
                 f"{context.service_name}: automatic remediation did not recover the "
@@ -1049,10 +1263,63 @@ class AgentWatchdog:
             "`proxy2vpn agent run --once`.",
         ]
 
+    def _isolated_service_action_plan(self, context: InvestigationContext) -> list[str]:
+        service_name = context.service_name
+        profile_label = context.profile_name or "unknown"
+        peers = self._format_service_names(context.healthy_shared_profile_peers)
+        plan = [
+            f"Compare `{service_name}` against healthy containers sharing profile "
+            f"'{profile_label}' ({peers}) and look for service-specific drift in "
+            "location, env overrides, port mappings, or recreate history.",
+            "Do not rotate the shared profile credentials yet; first inspect "
+            "service-specific drift, endpoint selection, and port/control-path issues.",
+            f"Review recent logs with `proxy2vpn vpn logs {service_name} --lines 100` "
+            "and focus on endpoint-specific failures.",
+        ]
+        if context.provider or context.location:
+            provider_text = context.provider or "the configured provider"
+            location_text = context.location or "the configured location"
+            plan.append(
+                f"Validate the target endpoint for {provider_text} / {location_text}; "
+                "if needed, rotate or adjust only this service rather than the whole "
+                "profile."
+            )
+        if context.control_api_reachable is False:
+            plan.append(
+                "The control API is currently unreachable, so a manual tunnel restart "
+                "is unlikely to succeed."
+            )
+            plan.append(
+                f"Recreate only this service with `proxy2vpn vpn update {service_name}` "
+                f"and validate recovery with `proxy2vpn vpn test {service_name}`."
+            )
+        else:
+            plan.append(
+                f"Request a tunnel restart with `proxy2vpn vpn restart-tunnel {service_name}` "
+                f"and retest with `proxy2vpn vpn test {service_name}` before recreating the container."
+            )
+            plan.append(
+                f"If the service remains unhealthy after the tunnel restart, recreate only "
+                f"this service with `proxy2vpn vpn update {service_name}`."
+            )
+        plan.append(
+            "Run `proxy2vpn agent run --once` to refresh watchdog state and confirm "
+            "whether the isolated incident closes."
+        )
+        return plan
+
     def _append_unique(self, items: list[str], value: str) -> None:
         clean = value.strip()
         if clean and clean not in items:
             items.append(clean)
+
+    def _format_service_names(self, names: list[str], limit: int = 3) -> str:
+        if not names:
+            return "none"
+        visible = names[:limit]
+        if len(names) <= limit:
+            return ", ".join(visible)
+        return f"{', '.join(visible)} (+{len(names) - limit} more)"
 
     def _upsert_incident(
         self,
