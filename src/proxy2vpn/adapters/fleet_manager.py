@@ -498,11 +498,17 @@ class FleetManager:
             await self._start_services_sequential(added_services, force)
 
     async def _handle_deployment_failure(
-        self, added_services: list[str], error: Exception
+        self, added_services: list[str], error: Exception, force: bool
     ) -> str:
-        """Handle deployment failure by rolling back added services."""
+        """Handle deployment failure and optionally roll back added services."""
         error_msg = f"Deployment failed: {error}"
         console.print(f"[red]❌[/red] {error_msg}")
+
+        if force:
+            console.print(
+                "[yellow]↩ Skipping rollback for forced deploy; no previous working state to restore[/yellow]"
+            )
+            return error_msg
 
         for service_name in added_services:
             try:
@@ -568,7 +574,9 @@ class FleetManager:
                 self._reset_agent_monitoring_state()
 
             except Exception as e:
-                error_msg = await self._handle_deployment_failure(added_services, e)
+                error_msg = await self._handle_deployment_failure(
+                    added_services, e, force
+                )
                 errors.append(error_msg)
                 return DeploymentResult(
                     deployed=0,
