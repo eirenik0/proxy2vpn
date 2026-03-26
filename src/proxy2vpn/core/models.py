@@ -98,6 +98,17 @@ class VPNService(BaseModel):
     def labels(self) -> dict[str, str]:
         return self.config.labels
 
+    def set_location(self, location: str) -> None:
+        """Update the effective service location and related compose metadata."""
+
+        self.config.location = location
+        if location:
+            self.config.environment["SERVER_CITIES"] = location
+            self.config.labels["vpn.location"] = location
+        else:
+            self.config.environment.pop("SERVER_CITIES", None)
+            self.config.labels.pop("vpn.location", None)
+
     @classmethod
     def create(
         cls,
