@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.16.1]
+
+### Bug fixes
+
+- Made Docker log reads retry briefly after container startup so early output is not missed in CI. (#213)
+
+
 ## [0.16.0]
 
 ### Bug fixes
