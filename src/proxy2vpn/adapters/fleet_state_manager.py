@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -18,6 +18,7 @@ from .docker_ops import (
     ensure_network,
     get_container_by_service_name,
     get_container_ip_async,
+    get_vpn_containers,
     recreate_vpn_container,
     remove_container,
     start_container,
@@ -246,13 +247,41 @@ class FleetStateManager:
         if not service_names:
             return {}
 
+        # Snapshot the current container set once so every service is checked
+        # against the same Docker view. Per-service lookups were causing
+        # inconsistent results under load.
+        try:
+            containers = {
+                container.name: container
+                for container in get_vpn_containers(all=True)
+                if container.name
+            }
+        except Exception as exc:
+            logger.warning(
+                "Failed to snapshot VPN containers for fleet health checks",
+                extra={"error": str(exc)},
+            )
+            containers = {}
+
+        direct_ip = None
+        try:
+            from . import ip_utils
+
+            direct_ip = await asyncio.to_thread(ip_utils.fetch_ip, timeout=5)
+        except Exception:
+            direct_ip = None
+
         # Use semaphore to limit concurrent health checks (max 10)
         semaphore = asyncio.Semaphore(10)
         results: Dict[str, ServiceHealth] = {}
 
         async def check_single_service(service_name: str) -> Tuple[str, ServiceHealth]:
             async with semaphore:
-                return await self._check_service_health(service_name)
+                return await self._check_service_health(
+                    service_name,
+                    container=containers.get(service_name),
+                    direct_ip=direct_ip,
+                )
 
         # Execute all health checks in parallel with progress display (like vpn list)
         from rich.progress import Progress
@@ -318,7 +347,11 @@ class FleetStateManager:
         return results
 
     async def _check_service_health(
-        self, service_name: str, timeout: int | None = None
+        self,
+        service_name: str,
+        timeout: int | None = None,
+        container: Any | None = None,
+        direct_ip: str | None = None,
     ) -> Tuple[str, ServiceHealth]:
         """Check health of a single service using diagnostic analyzer like vpn list."""
         try:
@@ -328,12 +361,16 @@ class FleetStateManager:
             effective_timeout = max(1, timeout or 5)
 
             # Get container
-            container = get_container_by_service_name(service_name)
+            if container is None:
+                container = get_container_by_service_name(service_name)
             if not container:
                 raise Exception(f"Container not found for service {service_name}")
 
             # Check container status
-            container.reload()
+            try:
+                container.reload()
+            except Exception:
+                pass
             if container.status != "running":
                 raise Exception(f"Container not running: {container.status}")
 
@@ -343,14 +380,14 @@ class FleetStateManager:
             from proxy2vpn.adapters import ip_utils
 
             # Get direct IP for diagnostics (same as vpn list)
-            direct_ip = None
-            try:
-                direct_ip = await asyncio.to_thread(
-                    ip_utils.fetch_ip,
-                    timeout=effective_timeout,
-                )
-            except Exception:
-                pass  # Will be handled by diagnostic analyzer
+            if direct_ip is None:
+                try:
+                    direct_ip = await asyncio.to_thread(
+                        ip_utils.fetch_ip,
+                        timeout=effective_timeout,
+                    )
+                except Exception:
+                    pass  # Will be handled by diagnostic analyzer
 
             # Run diagnostic analysis in thread pool (same as vpn list)
             loop = asyncio.get_event_loop()

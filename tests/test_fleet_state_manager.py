@@ -129,6 +129,111 @@ def test_execute_single_rotation_updates_service_location(monkeypatch, tmp_path)
     assert updated_service.labels["vpn.location"] == "Montreal"
 
 
+def test_batch_health_check_uses_single_container_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
+    monkeypatch.setattr(
+        fleet_state_manager_mod.FleetStateManager,
+        "_instance_compose_path",
+        None,
+    )
+
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "test.env"
+    env_path.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    manager.add_profile(Profile(name="test", env_file=str(env_path)))
+
+    service_names = []
+    for idx, city in enumerate(["Ashburn", "Atlanta", "Boston"], start=1):
+        service = VPNService.create(
+            name=f"protonvpn-united-states-{city.lower()}",
+            port=20000 + idx,
+            control_port=30000 + idx,
+            provider="protonvpn",
+            profile="test",
+            location=city,
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": city,
+                "SERVER_COUNTRIES": "United States",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": str(20000 + idx),
+                "vpn.control_port": str(30000 + idx),
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "test",
+                "vpn.location": city,
+            },
+        )
+        manager.add_service(service)
+        service_names.append(service.name)
+
+    fleet_manager = fleet_state_manager_mod.FleetStateManager(str(compose_path))
+    fleet_manager._sync_services_from_compose()
+
+    class Container:
+        def __init__(self, name: str):
+            self.name = name
+            self.status = "running"
+
+        def reload(self):
+            return None
+
+    containers = [Container(name) for name in service_names]
+    lookup_calls = []
+
+    monkeypatch.setattr(
+        fleet_state_manager_mod,
+        "get_vpn_containers",
+        lambda all=True: lookup_calls.append(all) or containers,
+    )
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return "198.51.100.10"
+
+    monkeypatch.setattr(fleet_state_manager_mod.asyncio, "to_thread", fake_to_thread)
+
+    async def fake_get_ip(container, timeout=None):
+        return "203.0.113.50"
+
+    monkeypatch.setattr(fleet_state_manager_mod, "get_container_ip_async", fake_get_ip)
+
+    from proxy2vpn.core.services.diagnostics import DiagnosticResult
+    from proxy2vpn.adapters import docker_ops
+
+    def fake_analyze_container_logs(
+        name, lines=100, analyzer=None, timeout=5, direct_ip=None
+    ):
+        return [
+            DiagnosticResult(
+                check="logs",
+                passed=True,
+                message="ok",
+                recommendation="",
+            )
+        ]
+
+    monkeypatch.setattr(
+        docker_ops, "analyze_container_logs", fake_analyze_container_logs
+    )
+    monkeypatch.setattr(
+        fleet_state_manager_mod,
+        "get_container_by_service_name",
+        lambda name: (_ for _ in ()).throw(
+            AssertionError("unexpected container lookup")
+        ),
+    )
+
+    results = asyncio.run(fleet_manager._batch_health_check(service_names))
+
+    assert lookup_calls == [True]
+    assert set(results) == set(service_names)
+    assert all(result.is_healthy for result in results.values())
+
+
 def test_execute_single_rotation_preserves_server_hostname(monkeypatch, tmp_path):
     monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
     monkeypatch.setattr(
