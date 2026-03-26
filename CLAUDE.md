@@ -44,8 +44,9 @@ uv run proxy2vpn <command> [args]
 uv run proxy2vpn profile create myprofile            # interactive env file creator
 # or add an existing env file
 uv run proxy2vpn profile add myprofile profiles/myprofile.env
-uv run proxy2vpn vpn create                         # interactive service creation
+uv run proxy2vpn vpn add --interactive              # interactive service definition
 uv run proxy2vpn vpn start vpn1
+uv run proxy2vpn vpn update vpn1
 uv run proxy2vpn vpn list
 uv run proxy2vpn vpn start --all
 uv run proxy2vpn servers list-providers
@@ -107,6 +108,7 @@ All VPN containers use the `qmcgaw/gluetun` image with:
 ### Configuration System
 - **compose.yml**: Single source of truth for services and profiles (profiles defined as YAML anchors)
 - **profiles/*.env**: VPN settings (VPN_TYPE, OPENVPN_USER, OPENVPN_PASSWORD) referenced by profiles
+- **control-server-auth.toml**: Generated next to the active compose file during `system init`; mounted into each container for localhost-bound control API access
 - **~/.cache/proxy2vpn/**: Server list cache with TTL management
 - **pyproject.toml**: Project configuration, dependencies, and towncrier settings
 

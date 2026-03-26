@@ -5,6 +5,7 @@ Thank you for considering a contribution to Proxy2VPN!
 ## Getting Started
 - Install dev deps: `uv sync` (recommended) or `pip install -e ".[dev]"`.
 - Run the suite: `make fmt-check && make lint && make test`.
+- `make test` runs `uv run --with pytest,pytest-xdist pytest -n auto`.
 
 > [!NOTE]
 > `uv` is part of the `uv` toolchain. If `uv` isn't installed, get it with:
@@ -29,6 +30,8 @@ Thank you for considering a contribution to Proxy2VPN!
 - Fill out the PR template; include description, linked issues, and test steps.
 - Ensure `make fmt-check`, `make lint`, and `make test` pass.
 - Add or update tests for behavior changes.
+- Keep non-fleet CLI docs aligned with the current model: `vpn add` defines services in compose, `vpn start`/`vpn restart` operate containers, and `vpn update` is the explicit recreate path.
+- Keep `fleet` command behavior and documentation stable unless the change explicitly targets fleet.
 
 ## Changelog Fragments
 We use [Towncrier](https://towncrier.readthedocs.io/) for the changelog.
@@ -41,3 +44,4 @@ We use [Towncrier](https://towncrier.readthedocs.io/) for the changelog.
 ## Security
 - Do not commit secrets or personal `.env` files. Keep credentials in `profiles/*.env` locally.
 - Avoid committing host-specific compose changes; generate via `proxy2vpn system init`.
+- When using `--compose-file`, remember that generated support files such as `control-server-auth.toml` now live next to that compose file.

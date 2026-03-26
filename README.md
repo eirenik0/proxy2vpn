@@ -68,15 +68,15 @@ HTTPPROXY_USER=proxy_user
 HTTPPROXY_PASSWORD=proxy_pass
 EOF
 
-# 3. Register the profile and create a VPN service
+# 3. Register the profile and define a VPN service
 # Option A: Add the env file you just created
 proxy2vpn profile add production profiles/production.env
 
 # Option B: Create the env file interactively (no manual file needed)
 # proxy2vpn profile create production
 
-# Create a VPN service interactively (choose name/profile/ports when prompted)
-proxy2vpn vpn create
+# Add a VPN service interactively (choose name/profile/ports when prompted)
+proxy2vpn vpn add --interactive
 
 # 4. Start and test your VPN
 proxy2vpn vpn start london-proxy
@@ -98,8 +98,8 @@ These short flows cover common US-focused setups. Location names must be valid f
 # 1) Create a profile
 proxy2vpn profile create us-dev
 
-# 2) Create a service interactively (choose profile, ports, and location)
-proxy2vpn vpn create
+# 2) Define a service interactively (choose profile, ports, and location)
+proxy2vpn vpn add --interactive
 # Suggested answers:
 # - Service name: us-nyc
 # - Profile: us-dev
@@ -117,14 +117,14 @@ curl --proxy http://user:pass@localhost:8888 https://httpbin.org/ip
 
 ```bash
 # Create two services interactively
-proxy2vpn vpn create
+proxy2vpn vpn add --interactive
 # - Service name: us-east
 # - Profile: us-dev
 # - Host port: 20001 (or auto)
 # - Control port: 0 (auto)
 # - Location: "New York, United States"
 
-proxy2vpn vpn create
+proxy2vpn vpn add --interactive
 # - Service name: us-west
 # - Profile: us-dev
 # - Host port: 20002 (or auto)
@@ -176,15 +176,26 @@ proxy2vpn vpn restart-tunnel london-proxy
 
 # Bulk operations across all services
 proxy2vpn vpn start --all
+proxy2vpn vpn update --all
 proxy2vpn vpn list
 ```
 
 **Docker Integration**: All containers use consistent labeling and networking, making them easy to integrate with existing Docker workflows and monitoring tools.
 
+### Compose-root state
+
+`proxy2vpn` keeps generated support files next to the active compose file.
+This makes the workspace portable and avoids cwd-dependent behavior.
+
+- `proxy2vpn system init --compose-file state/compose.yml` creates `state/control-server-auth.toml`
+- `proxy2vpn profile add NAME relative/path.env` stores the relative path in `compose.yml`
+- runtime commands resolve profile env files and the control auth file relative to the compose file, not the shell's current working directory
+
 ### Control server authentication
 
-To enable authenticated access to the Gluetun control API, create an auth
-configuration file such as:
+`proxy2vpn system init` generates `control-server-auth.toml` next to the active compose file and mounts it into each container automatically. The generated role uses `auth = "none"` for the localhost-bound control routes that `proxy2vpn` calls, so no extra manual setup is required for the built-in control commands.
+
+If you need stricter access control, replace that generated file with your own Gluetun auth configuration such as:
 
 ```toml
 [[roles]]
@@ -195,9 +206,7 @@ username = "myusername"
 password = "mypassword"
 ```
 
-Bind mount this file to `/gluetun/auth/config.toml` (or set a custom path via
-the `HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH` environment variable) and restart
-the container for the configuration to take effect.
+After editing the file, run `proxy2vpn vpn update NAME` to recreate the container with the new auth configuration.
 
 ## Enterprise Fleet Management
 
@@ -311,14 +320,14 @@ proxy2vpn fleet deploy --parallel
 ### Geo-location Testing
 ```bash
 # Test your app from different countries
-proxy2vpn vpn create
+proxy2vpn vpn add --interactive
 # - Service name: us-east
 # - Profile: production
 # - Host port: 0
 # - Control port: 0
 # - Location: "New York"
 
-proxy2vpn vpn create
+proxy2vpn vpn add --interactive
 # - Service name: eu-west
 # - Profile: production
 # - Host port: 0
@@ -339,7 +348,7 @@ proxy2vpn fleet scale down --factor 0  # Clean up after tests
 ### Development Environment
 ```bash
 # Persistent development proxies
-proxy2vpn vpn create
+proxy2vpn vpn add --interactive
 # - Service name: dev-proxy
 # - Profile: dev-account
 # - Host port: 8888
@@ -361,21 +370,25 @@ proxy2vpn vpn create
 - `proxy2vpn profile list`
 - `proxy2vpn profile remove NAME`
 - `proxy2vpn profile delete NAME`
-- `proxy2vpn profile apply PROFILE SERVICE [--port PORT]`
 
 ### VPN services
-- `proxy2vpn vpn create` (interactive)
+- `proxy2vpn vpn add NAME --profile PROFILE [--port PORT] [--control-port PORT] [--location LOCATION]`
+- `proxy2vpn vpn add --interactive`
 - `proxy2vpn vpn list`
 - `proxy2vpn vpn start [NAME | --all]`
 - `proxy2vpn vpn stop [NAME | --all]`
 - `proxy2vpn vpn restart [NAME | --all]`
+- `proxy2vpn vpn update [NAME | --all]`
 - `proxy2vpn vpn logs NAME [--lines N] [--follow]`
 - `proxy2vpn vpn delete [NAME | --all]`
 - `proxy2vpn vpn test NAME`
 
 Notes:
 - `vpn list` now includes health analysis by default; `--diagnose` and `--ips-only` options were removed.
-- Provider is inferred from the selected profile during `vpn create`.
+- Provider is inferred from the selected profile during `vpn add`.
+- `vpn start` starts an existing container or creates it if missing.
+- `vpn restart` restarts containers in place.
+- `vpn update` is the explicit command that pulls, recreates, and restarts containers.
 
 ### Server database
 - `proxy2vpn servers update`
@@ -403,8 +416,11 @@ pip install -e ".[dev]"
 
 ### Testing
 ```bash
-# Run tests (if available)
-pytest
+# Run the supported full suite target
+make test
+
+# Or invoke pytest the same way the Makefile does
+uv run --with pytest,pytest-xdist pytest -n auto
 ```
 
 ### Changelog Management
@@ -422,9 +438,10 @@ make changelog VERSION=x.y.z
 ```
 
 Recent highlights (see CHANGELOG.md for details):
-- Interactive `vpn create` flow replaces argument-based creation.
+- `vpn add` is the single compose-only service-definition command.
+- `vpn update` is the explicit recreate-and-refresh command for VPN containers.
 - Profile lifecycle split: `profile remove` (from compose) and `profile delete` (delete env file).
-- Control server auth config created during `system init` and mounted automatically.
+- Control server auth config is created during `system init`, mounted automatically, and defaults to `auth = "none"` for localhost-bound control routes.
 - Default health analysis in `vpn list`; removed `--diagnose`/`--ips-only` flags.
 
 ---

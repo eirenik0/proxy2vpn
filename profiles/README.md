@@ -20,10 +20,12 @@ OPENVPN_PASSWORD=password
 
 1. Create a profile file and register it:
    ```bash
-   proxy2vpn profile create myprofile profiles/myprofile.env
+   proxy2vpn profile create myprofile
+   # or register an existing env file
+   proxy2vpn profile add myprofile profiles/myprofile.env
    ```
 
-2. Use the profile when creating services:
+2. Use the profile when defining services:
    ```bash
-   proxy2vpn vpn create vpn1 myprofile --port 8888
+   proxy2vpn vpn add vpn1 --profile myprofile --port 8888
    ```
