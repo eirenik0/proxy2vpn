@@ -463,6 +463,53 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
         asyncio.run(watchdog.approve_incident("incident123"))
 
 
+def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkeypatch):
+    store = AgentStateStore(agent_compose_file)
+    failed_incident = AgentIncident(
+        id="incident123",
+        service_name="protonvpn-united-states-new-york",
+        type="rotation_required",
+        severity="medium",
+        status="failed",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=2,
+        summary="Previous rotation failed",
+        recommended_action="rotate",
+        approval_required=True,
+    )
+    store.append_incident(failed_incident)
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: unhealthy_results(),
+    )
+
+    def fake_start(service, profile, force):
+        raise RuntimeError("restore failed")
+
+    async def fake_control_api(service):
+        return False
+
+    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+
+    asyncio.run(watchdog.run_once())
+    incidents = store.load_incidents()
+
+    assert incidents[0].status == "open"
+    assert incidents[0].id != failed_incident.id
+    assert incidents[1].status == "failed"
+    assert incidents[1].id == failed_incident.id
+
+
 def test_state_persists_across_watchdog_restarts(agent_compose_file, monkeypatch):
     monkeypatch.setattr(
         agent_runtime.docker_ops,

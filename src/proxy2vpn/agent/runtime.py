@@ -714,7 +714,7 @@ class AgentWatchdog:
         for incident in incidents:
             if incident.service_name != service_name or incident.type != incident_type:
                 continue
-            if incident.status not in {"resolved", "dismissed"}:
+            if incident.status not in {"resolved", "dismissed", "failed"}:
                 return incident
         return None
 
