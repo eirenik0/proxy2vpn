@@ -228,6 +228,47 @@ def test_agent_run_once_healthy_updates_snapshots_only(
     assert calls["status"] == 1
 
 
+def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
+    agent_compose_file, monkeypatch, control_client_factory
+):
+    dummy_client, calls = control_client_factory
+    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            ),
+            DiagnosticResult(
+                check="connectivity",
+                passed=True,
+                message="VPN working: real=2.2.2.2 vpn=1.1.1.1",
+                recommendation="",
+            ),
+        ],
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+    state = asyncio.run(watchdog.run_once())
+
+    assert state.status.unhealthy_count == 0
+    assert state.services[0].health_score == 85
+    assert state.services[0].consecutive_failures == 0
+    assert state.actions == []
+    assert watchdog.store.load_incidents() == []
+    assert calls["status"] == 1
+
+
 def test_agent_run_once_executes_sync_diagnostics_off_event_loop(
     agent_compose_file, monkeypatch
 ):
