@@ -369,9 +369,7 @@ class ServerMonitor:
         service = compose_manager.get_service(rotation.service_name)
 
         # Update location and environment
-        service.location = rotation.new_location
-        service.environment["SERVER_CITIES"] = rotation.new_location
-        service.labels["vpn.location"] = rotation.new_location
+        service.set_location(rotation.new_location)
 
         # Save updated service to compose file
         compose_manager.update_service(service)

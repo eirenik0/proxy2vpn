@@ -544,10 +544,7 @@ class FleetStateManager:
         profile = self.compose_manager.get_profile(service.profile)
 
         # Update service configuration
-        service.location = rotation_plan.new_location
-        service.environment["SERVER_CITIES"] = rotation_plan.new_location
-        if hasattr(service, "labels"):
-            service.labels["vpn.location"] = rotation_plan.new_location
+        service.set_location(rotation_plan.new_location)
 
         # Save updated service to compose file
         self.compose_manager.update_service(service)

@@ -43,6 +43,17 @@ class ServiceSnapshot(BaseModel):
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
+class IncidentInvestigation(BaseModel):
+    """Persisted investigation summary and action plan for one incident."""
+
+    summary: str
+    findings: list[str] = Field(default_factory=list)
+    action_plan: list[str] = Field(default_factory=list)
+    investigated_at: datetime
+
+    model_config = ConfigDict(validate_assignment=True, extra="ignore")
+
+
 class AgentIncident(BaseModel):
     """Persisted incident for service failures that need attention."""
 
@@ -60,6 +71,7 @@ class AgentIncident(BaseModel):
     approved_at: datetime | None = None
     resolved_at: datetime | None = None
     human_explanation: str | None = None
+    investigation: IncidentInvestigation | None = None
 
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 

@@ -5,19 +5,27 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from proxy2vpn.agent.config import AgentSettings
+from proxy2vpn.agent.llm import (
+    IncidentContext,
+    InvestigationContext,
+    InvestigationPlan,
+    OpenAIIncidentEnricher,
+    OpenAIIncidentInvestigator,
+)
 from proxy2vpn.agent.models import (
     ActionRecord,
     AgentIncident,
+    IncidentInvestigation,
     AgentState,
     AgentStatus,
     DaemonMode,
     IncidentStatus,
     ServiceSnapshot,
 )
-from proxy2vpn.agent.llm import IncidentContext, OpenAIIncidentEnricher
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.adapters import docker_ops
 from proxy2vpn.adapters.compose_manager import ComposeManager
@@ -63,6 +71,7 @@ class AgentWatchdog:
         self.llm_mode = (llm_mode or self.settings.llm_mode).strip() or "disabled"
         self.store = store or AgentStateStore(self.compose_file, settings=self.settings)
         self._incident_enricher = self._build_incident_enricher()
+        self._incident_investigator = self._build_incident_investigator()
         self._llm_warning_emitted = False
 
     def empty_state(self) -> AgentState:
@@ -241,6 +250,40 @@ class AgentWatchdog:
         )
         self.store.append_incident(dismissed)
         return dismissed
+
+    async def investigate_incident(self, incident_id: str) -> AgentIncident:
+        """Investigate one incident and persist a concrete operator action plan."""
+
+        incidents = self.store.load_incidents()
+        incident = next((item for item in incidents if item.id == incident_id), None)
+        if incident is None:
+            raise KeyError(f"Incident '{incident_id}' not found")
+        if incident.status in {"resolved", "dismissed", "failed"}:
+            raise RuntimeError(f"Incident '{incident_id}' is already closed")
+
+        context = await self._build_investigation_context(incident)
+        investigation = self._investigate_context(context)
+        updated = incident.model_copy(
+            update={
+                "investigation": IncidentInvestigation(
+                    summary=investigation.summary.strip() or incident.summary,
+                    findings=[
+                        item.strip()
+                        for item in investigation.findings
+                        if item and item.strip()
+                    ],
+                    action_plan=[
+                        item.strip()
+                        for item in investigation.action_plan
+                        if item and item.strip()
+                    ],
+                    investigated_at=utc_now(),
+                ),
+                "updated_at": utc_now(),
+            }
+        )
+        self.store.append_incident(updated)
+        return updated
 
     def _load_state(
         self, daemon_mode: DaemonMode, refresh_started_at: bool
@@ -651,6 +694,365 @@ class AgentWatchdog:
             )
             return None
         return OpenAIIncidentEnricher(settings=self.settings)
+
+    def _build_incident_investigator(self) -> OpenAIIncidentInvestigator | None:
+        if self.llm_mode == "disabled":
+            return None
+        if self.llm_mode != "openai":
+            return None
+        return OpenAIIncidentInvestigator(settings=self.settings)
+
+    async def _build_investigation_context(
+        self, incident: AgentIncident
+    ) -> InvestigationContext:
+        state = self.store.read_state() or self.empty_state()
+        snapshot = next(
+            (
+                item
+                for item in state.services
+                if item.service_name == incident.service_name
+            ),
+            None,
+        )
+        recent_actions = [
+            {
+                "action": action.action,
+                "result": action.result,
+                "trigger": action.trigger,
+            }
+            for action in state.actions[-5:]
+            if action.service_name == incident.service_name
+        ]
+
+        service: VPNService | None = None
+        profile = None
+        try:
+            manager = ComposeManager(self.compose_file)
+            try:
+                service, profile = manager.get_service_with_profile(
+                    incident.service_name
+                )
+            except KeyError:
+                service = manager.get_service(incident.service_name)
+        except KeyError:
+            service = None
+        except Exception:
+            service = None
+
+        container = docker_ops.get_container_by_service_name(incident.service_name)
+        container_status = (
+            snapshot.container_status if snapshot is not None else "missing"
+        )
+        if container is not None:
+            try:
+                container.reload()
+            except Exception:
+                pass
+            container_status = (
+                getattr(container, "status", container_status) or "unknown"
+            )
+
+        results: list[DiagnosticResult] = []
+        analyzer = DiagnosticAnalyzer()
+        if container_status == "running":
+            try:
+                results = await self._analyze_service_logs(
+                    incident.service_name, analyzer
+                )
+            except Exception:
+                results = []
+
+        health_score = (
+            analyzer.health_score(results)
+            if results
+            else (snapshot.health_score if snapshot is not None else None)
+        )
+        control_api_reachable = None
+        if service is not None:
+            try:
+                control_api_reachable = await self._control_api_reachable(service)
+            except Exception:
+                control_api_reachable = False
+
+        profile_name = service.profile if service is not None else None
+        profile_env_file = None
+        profile_validation_errors: list[str] = []
+        if profile is not None:
+            profile_env_file = str(profile._resolve_env_path())
+            profile_validation_errors = self._validate_profile_for_investigation(
+                profile=profile,
+                service=service,
+            )
+
+        return InvestigationContext(
+            incident_id=incident.id,
+            incident_type=incident.type,
+            severity=incident.severity,
+            status=incident.status,
+            service_name=incident.service_name,
+            incident_summary=incident.summary,
+            recommended_action=incident.recommended_action,
+            failure_count=incident.failure_count,
+            provider=service.provider if service is not None else None,
+            location=service.location if service is not None else None,
+            profile_name=profile_name,
+            profile_env_file=profile_env_file,
+            container_status=container_status,
+            health_score=health_score,
+            control_api_reachable=control_api_reachable,
+            profile_validation_errors=profile_validation_errors,
+            issues=self._diagnostic_payload(results),
+            recent_actions=recent_actions,
+            human_explanation=incident.human_explanation,
+        )
+
+    def _diagnostic_payload(
+        self, results: list[DiagnosticResult]
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "check": result.check,
+                "message": result.message,
+                "recommendation": result.recommendation,
+                "persistent": result.persistent,
+            }
+            for result in results
+            if not result.passed
+        ]
+
+    def _validate_profile_for_investigation(
+        self,
+        profile,
+        service: VPNService | None,
+    ) -> list[str]:
+        env_path = profile._resolve_env_path()
+        env_vars = docker_ops._load_env_file(str(env_path))
+        errors: list[str] = []
+
+        if not env_path.is_file():
+            return [f"Profile env file '{env_path}' does not exist."]
+
+        provider = env_vars.get("VPN_SERVICE_PROVIDER", "").strip()
+        if not provider:
+            errors.append("VPN_SERVICE_PROVIDER is missing from the profile env file.")
+        elif service is not None and provider.lower() != service.provider.lower():
+            errors.append(
+                "VPN_SERVICE_PROVIDER in the profile env file does not match the service provider."
+            )
+
+        vpn_type = env_vars.get("VPN_TYPE", "openvpn").strip().lower() or "openvpn"
+        if vpn_type not in {"openvpn", "wireguard"}:
+            errors.append("VPN_TYPE must be either 'openvpn' or 'wireguard'.")
+
+        if vpn_type == "openvpn":
+            if not env_vars.get("OPENVPN_USER"):
+                errors.append("OPENVPN_USER is missing from the profile env file.")
+            if not env_vars.get("OPENVPN_PASSWORD"):
+                errors.append("OPENVPN_PASSWORD is missing from the profile env file.")
+
+        effective_http_proxy = env_vars.get("HTTPPROXY", "")
+        effective_proxy_user = env_vars.get("HTTPPROXY_USER")
+        effective_proxy_password = env_vars.get("HTTPPROXY_PASSWORD")
+
+        if service is not None:
+            effective_http_proxy = service.environment.get(
+                "HTTPPROXY", effective_http_proxy
+            )
+            effective_proxy_user = service.environment.get(
+                "HTTPPROXY_USER", effective_proxy_user
+            )
+            effective_proxy_password = service.environment.get(
+                "HTTPPROXY_PASSWORD", effective_proxy_password
+            )
+            if service.credentials is not None:
+                effective_proxy_user = (
+                    service.credentials.httpproxy_user or effective_proxy_user
+                )
+                effective_proxy_password = (
+                    service.credentials.httpproxy_password or effective_proxy_password
+                )
+
+        if effective_http_proxy.strip().lower() in {"on", "true", "1"}:
+            if not effective_proxy_user:
+                errors.append("HTTPPROXY_USER is required when HTTPPROXY=on.")
+            if not effective_proxy_password:
+                errors.append("HTTPPROXY_PASSWORD is required when HTTPPROXY=on.")
+
+        return errors
+
+    def _investigate_context(self, context: InvestigationContext) -> InvestigationPlan:
+        fallback = self._fallback_investigation(context)
+        if self._incident_investigator is None:
+            return fallback
+
+        try:
+            plan = self._incident_investigator.investigate(context)
+        except Exception as exc:
+            if not self._llm_warning_emitted:
+                logger.warning(
+                    "agent_llm_unavailable",
+                    extra={"llm_mode": self.llm_mode, "error": str(exc)},
+                )
+                self._llm_warning_emitted = True
+            return fallback
+
+        return InvestigationPlan(
+            summary=plan.summary.strip() or fallback.summary,
+            findings=[item.strip() for item in plan.findings if item and item.strip()]
+            or fallback.findings,
+            action_plan=[
+                item.strip() for item in plan.action_plan if item and item.strip()
+            ]
+            or fallback.action_plan,
+        )
+
+    def _fallback_investigation(
+        self, context: InvestigationContext
+    ) -> InvestigationPlan:
+        findings: list[str] = []
+        issues_by_check = {issue["check"]: issue for issue in context.issues}
+
+        self._append_unique(findings, f"Incident summary: {context.incident_summary}")
+        self._append_unique(
+            findings, f"Current container status: {context.container_status}."
+        )
+        if context.health_score is not None:
+            self._append_unique(
+                findings, f"Current health score: {context.health_score}/100."
+            )
+        self._append_unique(
+            findings, f"Failure count observed by watchdog: {context.failure_count}."
+        )
+        if context.profile_env_file:
+            profile_label = context.profile_name or "unknown"
+            self._append_unique(
+                findings,
+                f"Profile '{profile_label}' resolves to env file '{context.profile_env_file}'.",
+            )
+        if context.control_api_reachable is False:
+            self._append_unique(
+                findings,
+                "The Gluetun control API is not reachable on the configured control port.",
+            )
+        if context.human_explanation:
+            self._append_unique(findings, context.human_explanation)
+        for error in context.profile_validation_errors[:4]:
+            self._append_unique(findings, error)
+        for issue in context.issues[:4]:
+            message = issue.get("message", "").strip()
+            recommendation = issue.get("recommendation", "").strip()
+            if message:
+                detail = message
+                if recommendation:
+                    detail = f"{detail} Recommendation: {recommendation}"
+                self._append_unique(findings, detail)
+        for action in context.recent_actions[-3:]:
+            self._append_unique(
+                findings,
+                "Recent action: "
+                f"{action['action']} [{action['result']}] via {action['trigger']}.",
+            )
+
+        if context.incident_type == "auth_config_failure":
+            if context.profile_validation_errors or "config_error" in issues_by_check:
+                summary = (
+                    f"{context.service_name}: configuration for the VPN profile or "
+                    "service definition is incomplete or inconsistent."
+                )
+            elif "auth_failure" in issues_by_check:
+                summary = (
+                    f"{context.service_name}: the VPN provider is rejecting the "
+                    "configured authentication details."
+                )
+            else:
+                summary = (
+                    f"{context.service_name}: authentication or configuration needs "
+                    "manual review before more automation."
+                )
+            action_plan = self._auth_config_action_plan(context)
+        elif context.incident_type == "rotation_required":
+            summary = (
+                f"{context.service_name}: automatic remediation did not recover the "
+                "service, so a supervised rotation is the next step."
+            )
+            action_plan = self._rotation_action_plan(context)
+        else:
+            summary = (
+                f"{context.service_name}: review the current incident evidence and "
+                "apply a manual fix before re-running health checks."
+            )
+            action_plan = self._generic_action_plan(context)
+
+        return InvestigationPlan(
+            summary=summary,
+            findings=findings,
+            action_plan=action_plan,
+        )
+
+    def _auth_config_action_plan(self, context: InvestigationContext) -> list[str]:
+        service_name = context.service_name
+        plan: list[str] = []
+        if context.profile_env_file:
+            plan.append(
+                "Inspect the profile env file at "
+                f"'{context.profile_env_file}' and verify "
+                "`VPN_SERVICE_PROVIDER`, `VPN_TYPE`, and the required auth fields "
+                "for the selected VPN type."
+            )
+        else:
+            plan.append(
+                "Inspect the service profile configuration and verify the required "
+                "provider and authentication fields are present."
+            )
+        plan.append(
+            "Re-enter or rotate the VPN provider credentials for this profile "
+            "without exposing the secret values in logs or shell history."
+        )
+        if context.provider or context.location:
+            provider_text = context.provider or "the configured provider"
+            location_text = context.location or "the configured location"
+            plan.append(
+                f"Confirm the compose service targets {provider_text} / "
+                f"{location_text} and that the location fields still match an "
+                "available endpoint."
+            )
+        plan.append(
+            f"Recreate the container with `proxy2vpn vpn update {service_name}` "
+            "after the profile is corrected."
+        )
+        plan.append(
+            f"Validate recovery with `proxy2vpn vpn test {service_name}` and then "
+            "`proxy2vpn agent run --once` to confirm the incident closes cleanly."
+        )
+        return plan
+
+    def _rotation_action_plan(self, context: InvestigationContext) -> list[str]:
+        service_name = context.service_name
+        return [
+            "Review the recent findings and automatic remediation attempts to confirm "
+            "the failure is not caused by bad credentials or broken local config.",
+            f"Approve supervised rotation with `proxy2vpn agent approve {context.incident_id}`.",
+            f"Verify the replacement endpoint with `proxy2vpn vpn test {service_name}`.",
+            "Run `proxy2vpn agent run --once` to refresh watchdog state and confirm "
+            "the incident resolves.",
+        ]
+
+    def _generic_action_plan(self, context: InvestigationContext) -> list[str]:
+        service_name = context.service_name
+        return [
+            f"Review recent logs with `proxy2vpn vpn logs {service_name} --lines 100`.",
+            "Inspect the service profile and compose configuration for drift or "
+            "missing settings.",
+            f"Recreate the service with `proxy2vpn vpn update {service_name}` once "
+            "the configuration issue is corrected.",
+            f"Validate the tunnel with `proxy2vpn vpn test {service_name}` and "
+            "`proxy2vpn agent run --once`.",
+        ]
+
+    def _append_unique(self, items: list[str], value: str) -> None:
+        clean = value.strip()
+        if clean and clean not in items:
+            items.append(clean)
 
     def _upsert_incident(
         self,

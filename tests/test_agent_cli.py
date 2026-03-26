@@ -5,11 +5,12 @@ from typer.testing import CliRunner
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import (
     AgentIncident,
+    IncidentInvestigation,
     AgentState,
     AgentStatus,
     ServiceSnapshot,
 )
-from proxy2vpn.agent.runtime import utc_now
+from proxy2vpn.agent.runtime import AgentWatchdog, utc_now
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.cli.main import app
 from proxy2vpn.core import config
@@ -196,6 +197,101 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
     assert status_payload["daemon"]["running"] is False
     assert set(incidents_payload.keys()) == {"incidents"}
     assert incidents_payload["incidents"][0]["recommended_action"] == "rotate"
+
+
+def test_agent_investigate_cli_prints_action_plan(tmp_path, monkeypatch):
+    compose_file = _write_agent_compose(tmp_path)
+    investigated_incident = AgentIncident(
+        id="incident123",
+        service_name="protonvpn-united-states-new-york",
+        type="auth_config_failure",
+        severity="high",
+        status="open",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=3,
+        summary="Profile configuration issue detected",
+        recommended_action="investigate",
+        approval_required=False,
+        investigation=IncidentInvestigation(
+            summary="Credentials or profile settings need correction.",
+            findings=[
+                "OPENVPN_PASSWORD is missing from the profile env file.",
+                "VPN proxy connection failed after the configuration error.",
+            ],
+            action_plan=[
+                "Inspect the profile env file.",
+                "Recreate the service with proxy2vpn vpn update protonvpn-united-states-new-york.",
+            ],
+            investigated_at=utc_now(),
+        ),
+    )
+
+    async def fake_investigate(self, incident_id):
+        assert incident_id == "incident123"
+        return investigated_incident
+
+    monkeypatch.setattr(AgentWatchdog, "investigate_incident", fake_investigate)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["--compose-file", str(compose_file), "agent", "investigate", "incident123"],
+    )
+
+    assert result.exit_code == 0
+    assert "Credentials or profile settings need correction." in result.output
+    assert "Action plan:" in result.output
+    assert "1. Inspect the profile env file." in result.output
+
+
+def test_agent_investigate_cli_json_is_machine_readable(tmp_path, monkeypatch):
+    compose_file = _write_agent_compose(tmp_path)
+    investigated_incident = AgentIncident(
+        id="incident123",
+        service_name="protonvpn-united-states-new-york",
+        type="auth_config_failure",
+        severity="high",
+        status="open",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=3,
+        summary="Profile configuration issue detected",
+        recommended_action="investigate",
+        approval_required=False,
+        investigation=IncidentInvestigation(
+            summary="Credentials or profile settings need correction.",
+            findings=["OPENVPN_PASSWORD is missing from the profile env file."],
+            action_plan=["Inspect the profile env file."],
+            investigated_at=utc_now(),
+        ),
+    )
+
+    async def fake_investigate(self, incident_id):
+        assert incident_id == "incident123"
+        return investigated_incident
+
+    monkeypatch.setattr(AgentWatchdog, "investigate_incident", fake_investigate)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "--compose-file",
+            str(compose_file),
+            "agent",
+            "investigate",
+            "incident123",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert set(payload.keys()) == {"incident"}
+    assert payload["incident"]["investigation"]["action_plan"] == [
+        "Inspect the profile env file."
+    ]
 
 
 def test_agent_run_daemon_spawns_detached_child(tmp_path, monkeypatch):

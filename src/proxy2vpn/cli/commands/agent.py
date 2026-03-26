@@ -300,6 +300,53 @@ def incidents(
                 console.print(f"- {incident.id}: {incident.human_explanation}")
 
 
+@app.command("investigate")
+@run_async
+async def investigate(
+    ctx: typer.Context,
+    incident_id: str = typer.Argument(..., help="Incident identifier"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Investigate one incident and print an operator action plan."""
+
+    compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    watchdog = AgentWatchdog(compose_file)
+    try:
+        incident = await watchdog.investigate_incident(incident_id)
+    except KeyError:
+        abort(f"Incident '{incident_id}' not found")
+
+    payload = {"incident": incident.model_dump(mode="json")}
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    investigation = incident.investigation
+    if investigation is None:
+        abort(f"Incident '{incident_id}' did not produce an investigation result")
+
+    console.print(
+        f"Incident: {incident.id}\n"
+        f"Service: {incident.service_name}\n"
+        f"Type: {incident.type}\n"
+        f"Severity: {incident.severity}\n"
+        f"Status: {incident.status}\n"
+        f"Recommended action: {incident.recommended_action}\n"
+        f"Investigated at: {investigation.investigated_at}"
+    )
+    console.print(f"\nSummary: {investigation.summary}")
+
+    if investigation.findings:
+        console.print("\nFindings:")
+        for finding in investigation.findings:
+            console.print(f"- {finding}")
+
+    if investigation.action_plan:
+        console.print("\nAction plan:")
+        for index, step in enumerate(investigation.action_plan, start=1):
+            console.print(f"{index}. {step}")
+
+
 @app.command("approve")
 @run_async
 async def approve(

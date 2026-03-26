@@ -88,3 +88,68 @@ def test_check_service_health_redacts_proxy_errors(monkeypatch):
     assert asyncio.run(monitor.check_service_health(service)) is False
     assert any("***:***" in message for message in captured_logs)
     assert all("user:pass" not in message for message in captured_logs)
+
+
+def test_execute_service_rotation_updates_service_location(monkeypatch):
+    service = models.VPNService.create(
+        name="vpn-test",
+        port=8080,
+        control_port=30000,
+        provider="protonvpn",
+        profile="test",
+        location="Toronto",
+        environment={
+            "VPN_SERVICE_PROVIDER": "protonvpn",
+            "SERVER_CITIES": "Toronto",
+            "SERVER_COUNTRIES": "Canada",
+        },
+        labels={"vpn.location": "Toronto"},
+    )
+    updated = {"called": False}
+
+    class DummyComposeManager:
+        def get_service(self, name):
+            assert name == "vpn-test"
+            return service
+
+        def update_service(self, updated_service):
+            updated["called"] = True
+            assert updated_service.location == "Montreal"
+
+        def get_profile(self, name):
+            return object()
+
+    class DummyFleetManager:
+        compose_manager = DummyComposeManager()
+
+    async def fake_sleep(*args, **kwargs):
+        return None
+
+    async def fake_check(updated_service):
+        assert updated_service.location == "Montreal"
+        return True
+
+    monkeypatch.setattr(server_monitor.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        docker_ops, "recreate_vpn_container", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(docker_ops, "start_container", lambda *args, **kwargs: None)
+
+    monitor = server_monitor.ServerMonitor(fleet_manager=DummyFleetManager())
+    monkeypatch.setattr(monitor, "check_service_health", fake_check)
+
+    asyncio.run(
+        monitor._execute_service_rotation(
+            server_monitor.ServiceRotation(
+                service_name="vpn-test",
+                old_location="Toronto",
+                new_location="Montreal",
+                reason="health_check_failed",
+            )
+        )
+    )
+
+    assert updated["called"] is True
+    assert service.location == "Montreal"
+    assert service.environment["SERVER_CITIES"] == "Montreal"
+    assert service.labels["vpn.location"] == "Montreal"

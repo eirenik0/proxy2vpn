@@ -1,7 +1,6 @@
 """Asynchronous HTTP client utilities for proxy2vpn."""
 
 import asyncio
-import os
 import time
 from typing import Any, Self
 from urllib.parse import urlparse
@@ -15,6 +14,7 @@ from proxy2vpn.core.config import (
     MAX_RETRIES,
     VERIFY_SSL,
 )
+from .http_client_config import GluetunControlSettings
 from .logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -251,17 +251,13 @@ class GluetunControlClient(HTTPClient):
         base_url: str,
         timeout: float = DEFAULT_TIMEOUT,
         verify_ssl: bool = VERIFY_SSL,
+        settings: GluetunControlSettings | None = None,
     ):
         parsed = urlparse(base_url)
         if not (parsed.scheme and parsed.netloc):
             raise ValueError(f"invalid base URL: {base_url}")
-        auth: tuple[str, str] | None = None
-        auth_env = os.getenv("GLUETUN_CONTROL_AUTH")
-        if auth_env:
-            username, sep, password = auth_env.partition(":")
-            if not sep:
-                raise ValueError("GLUETUN_CONTROL_AUTH must be in 'user:pass' format")
-            auth = (username, password)
+        control_settings = settings or GluetunControlSettings()
+        auth = control_settings.auth_tuple()
         config = HTTPClientConfig(
             base_url=f"{parsed.scheme}://{parsed.netloc}",
             timeout=timeout,
