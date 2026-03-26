@@ -12,6 +12,7 @@ from proxy2vpn.adapters.http_client import (
     PortForwardResponse,
     StatusResponse,
 )
+from proxy2vpn.adapters.http_client_config import GluetunControlSettings
 
 BASE_URL = "http://localhost:8000"
 
@@ -125,6 +126,14 @@ def test_port_forwarded_calls_correct_path(monkeypatch):
 def test_auth_from_env(monkeypatch):
     monkeypatch.setenv("GLUETUN_CONTROL_AUTH", "user:pass")
     client = GluetunControlClient(BASE_URL)
+    assert client._config.auth == ("user", "pass")
+
+
+def test_auth_from_injected_settings():
+    client = GluetunControlClient(
+        BASE_URL,
+        settings=GluetunControlSettings(control_auth="user:pass"),
+    )
     assert client._config.auth == ("user", "pass")
 
 
