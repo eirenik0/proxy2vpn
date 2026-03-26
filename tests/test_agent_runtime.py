@@ -62,6 +62,65 @@ services:
     return compose_file
 
 
+def _write_shared_profile_agent_compose(tmp_path: Path) -> Path:
+    compose_file = tmp_path / "compose.yml"
+    (tmp_path / "env.test").write_text(
+        "VPN_SERVICE_PROVIDER=protonvpn\n"
+        "OPENVPN_USER=test-user\n"
+        "OPENVPN_PASSWORD=test-pass\n"
+    )
+    (tmp_path / config.CONTROL_AUTH_CONFIG_FILE).write_text(
+        '[[roles]]\nname = "proxy2vpn"\nauth = "none"\n'
+    )
+    compose_file.write_text(
+        """
+x-vpn-base-test: &vpn-base-test
+  image: qmcgaw/gluetun
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  env_file:
+    - env.test
+
+services:
+  protonvpn-united-states-new-york:
+    <<: *vpn-base-test
+    ports:
+      - "0.0.0.0:9999:8888/tcp"
+      - "127.0.0.1:30000:8000/tcp"
+    environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - SERVER_CITIES=New York
+      - SERVER_COUNTRIES=United States
+    labels:
+      vpn.type: vpn
+      vpn.port: "9999"
+      vpn.control_port: "30000"
+      vpn.profile: test
+      vpn.provider: protonvpn
+      vpn.location: New York
+  protonvpn-united-states-boston:
+    <<: *vpn-base-test
+    ports:
+      - "0.0.0.0:9998:8888/tcp"
+      - "127.0.0.1:30001:8000/tcp"
+    environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - SERVER_CITIES=Boston
+      - SERVER_COUNTRIES=United States
+    labels:
+      vpn.type: vpn
+      vpn.port: "9998"
+      vpn.control_port: "30001"
+      vpn.profile: test
+      vpn.provider: protonvpn
+      vpn.location: Boston
+""".strip()
+    )
+    return compose_file
+
+
 class DummyContainer:
     def __init__(self, status: str = "running"):
         self.status = status
@@ -95,6 +154,11 @@ def unhealthy_results() -> list[DiagnosticResult]:
 @pytest.fixture
 def agent_compose_file(tmp_path):
     return _write_agent_compose(tmp_path)
+
+
+@pytest.fixture
+def shared_profile_agent_compose_file(tmp_path):
+    return _write_shared_profile_agent_compose(tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -579,6 +643,172 @@ def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeyp
     )
     assert (
         investigated.investigation.action_plan[0] == "Update the profile credentials."
+    )
+
+
+def test_investigate_incident_deprioritizes_accountwide_issue_when_shared_profile_is_healthy(
+    shared_profile_agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(shared_profile_agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(shared_profile_agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=3,
+                    last_check_at=utc_now(),
+                ),
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-boston",
+                    container_status="running",
+                    health_score=100,
+                    consecutive_failures=0,
+                    last_check_at=utc_now(),
+                ),
+            ],
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Persistent authentication failure detected",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            )
+        ],
+    )
+
+    async def fake_control_api(service):
+        return False
+
+    watchdog = AgentWatchdog(shared_profile_agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+
+    investigated = asyncio.run(watchdog.investigate_incident("incident123"))
+
+    assert investigated.investigation is not None
+    assert "healthy in 1 other container" in investigated.investigation.summary
+    assert any(
+        "weakens suspicion of a profile-wide or account-wide provider issue" in finding
+        for finding in investigated.investigation.findings
+    )
+    assert any(
+        "Do not rotate the shared profile credentials yet" in step
+        for step in investigated.investigation.action_plan
+    )
+
+
+def test_investigate_incident_keeps_accountwide_suspicion_when_shared_profile_peers_are_unhealthy(
+    shared_profile_agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(shared_profile_agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(shared_profile_agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=3,
+                    last_check_at=utc_now(),
+                ),
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-boston",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    last_check_at=utc_now(),
+                ),
+            ],
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Persistent authentication failure detected",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            )
+        ],
+    )
+
+    async def fake_control_api(service):
+        return False
+
+    watchdog = AgentWatchdog(shared_profile_agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+
+    investigated = asyncio.run(watchdog.investigate_incident("incident123"))
+
+    assert investigated.investigation is not None
+    assert "account/profile-wide issue" in investigated.investigation.summary
+    assert any(
+        "supports an account/profile-wide issue" in finding
+        for finding in investigated.investigation.findings
     )
 
 

@@ -724,6 +724,7 @@ class AgentWatchdog:
             if action.service_name == incident.service_name
         ]
 
+        manager: ComposeManager | None = None
         service: VPNService | None = None
         profile = None
         try:
@@ -777,10 +778,21 @@ class AgentWatchdog:
         profile_name = service.profile if service is not None else None
         profile_env_file = None
         profile_validation_errors: list[str] = []
+        healthy_shared_profile_peers: list[str] = []
+        unhealthy_shared_profile_peers: list[str] = []
         if profile is not None:
             profile_env_file = str(profile._resolve_env_path())
             profile_validation_errors = self._validate_profile_for_investigation(
                 profile=profile,
+                service=service,
+            )
+        if manager is not None and service is not None:
+            (
+                healthy_shared_profile_peers,
+                unhealthy_shared_profile_peers,
+            ) = await self._collect_shared_profile_peer_evidence(
+                manager=manager,
+                state=state,
                 service=service,
             )
 
@@ -801,6 +813,8 @@ class AgentWatchdog:
             health_score=health_score,
             control_api_reachable=control_api_reachable,
             profile_validation_errors=profile_validation_errors,
+            healthy_shared_profile_peers=healthy_shared_profile_peers,
+            unhealthy_shared_profile_peers=unhealthy_shared_profile_peers,
             issues=self._diagnostic_payload(results),
             recent_actions=recent_actions,
             human_explanation=incident.human_explanation,
@@ -880,6 +894,46 @@ class AgentWatchdog:
 
         return errors
 
+    async def _collect_shared_profile_peer_evidence(
+        self,
+        manager: ComposeManager,
+        state: AgentState,
+        service: VPNService,
+    ) -> tuple[list[str], list[str]]:
+        """Return healthy/unhealthy peer services that share the same profile."""
+
+        snapshots_by_name = {
+            snapshot.service_name: snapshot for snapshot in state.services
+        }
+        healthy_peers: list[str] = []
+        unhealthy_peers: list[str] = []
+
+        for candidate in manager.list_services():
+            if candidate.name == service.name or candidate.profile != service.profile:
+                continue
+
+            snapshot = snapshots_by_name.get(candidate.name)
+            if snapshot is None:
+                peer_health = await self._evaluate_health(candidate)
+                is_healthy = (
+                    peer_health["container_status"] == "running"
+                    and peer_health["health_score"] >= self.settings.health_threshold
+                )
+            else:
+                is_healthy = (
+                    snapshot.container_status == "running"
+                    and snapshot.health_score >= self.settings.health_threshold
+                )
+
+            if is_healthy:
+                healthy_peers.append(candidate.name)
+            else:
+                unhealthy_peers.append(candidate.name)
+
+        healthy_peers.sort()
+        unhealthy_peers.sort()
+        return healthy_peers, unhealthy_peers
+
     def _investigate_context(self, context: InvestigationContext) -> InvestigationPlan:
         fallback = self._fallback_investigation(context)
         if self._incident_investigator is None:
@@ -929,6 +983,24 @@ class AgentWatchdog:
                 findings,
                 f"Profile '{profile_label}' resolves to env file '{context.profile_env_file}'.",
             )
+        if context.healthy_shared_profile_peers:
+            peers = self._format_service_names(context.healthy_shared_profile_peers)
+            profile_label = context.profile_name or "unknown"
+            self._append_unique(
+                findings,
+                f"Profile '{profile_label}' is also healthy in other containers: {peers}. "
+                "That weakens suspicion of a profile-wide or account-wide provider "
+                "issue and points to a service-specific or endpoint-specific issue.",
+            )
+        if context.unhealthy_shared_profile_peers:
+            peers = self._format_service_names(context.unhealthy_shared_profile_peers)
+            profile_label = context.profile_name or "unknown"
+            self._append_unique(
+                findings,
+                f"Other containers sharing profile '{profile_label}' are also unhealthy: {peers}. "
+                "That supports an account/profile-wide issue such as bad credentials, "
+                "provider-side limits, suspension, or other provider-side account issues.",
+            )
         if context.control_api_reachable is False:
             self._append_unique(
                 findings,
@@ -959,17 +1031,34 @@ class AgentWatchdog:
                     f"{context.service_name}: configuration for the VPN profile or "
                     "service definition is incomplete or inconsistent."
                 )
+                action_plan = self._auth_config_action_plan(context)
+            elif context.healthy_shared_profile_peers:
+                summary = (
+                    f"{context.service_name}: auth-like failures look isolated to this "
+                    f"service because profile '{context.profile_name or 'unknown'}' is "
+                    f"healthy in {len(context.healthy_shared_profile_peers)} other "
+                    "container(s)."
+                )
+                action_plan = self._isolated_service_action_plan(context)
+            elif context.unhealthy_shared_profile_peers:
+                summary = (
+                    f"{context.service_name}: multiple containers sharing profile "
+                    f"'{context.profile_name or 'unknown'}' are unhealthy, which is "
+                    "consistent with an account/profile-wide issue."
+                )
+                action_plan = self._auth_config_action_plan(context)
             elif "auth_failure" in issues_by_check:
                 summary = (
                     f"{context.service_name}: the VPN provider is rejecting the "
                     "configured authentication details."
                 )
+                action_plan = self._auth_config_action_plan(context)
             else:
                 summary = (
                     f"{context.service_name}: authentication or configuration needs "
                     "manual review before more automation."
                 )
-            action_plan = self._auth_config_action_plan(context)
+                action_plan = self._auth_config_action_plan(context)
         elif context.incident_type == "rotation_required":
             summary = (
                 f"{context.service_name}: automatic remediation did not recover the "
@@ -1049,10 +1138,49 @@ class AgentWatchdog:
             "`proxy2vpn agent run --once`.",
         ]
 
+    def _isolated_service_action_plan(self, context: InvestigationContext) -> list[str]:
+        service_name = context.service_name
+        profile_label = context.profile_name or "unknown"
+        peers = self._format_service_names(context.healthy_shared_profile_peers)
+        plan = [
+            f"Compare `{service_name}` against healthy containers sharing profile "
+            f"'{profile_label}' ({peers}) and look for service-specific drift in "
+            "location, env overrides, port mappings, or recreate history.",
+            "Do not rotate the shared profile credentials yet; first inspect "
+            "service-specific drift, endpoint selection, and port/control-path issues.",
+            f"Review recent logs with `proxy2vpn vpn logs {service_name} --lines 100` "
+            "and focus on endpoint-specific failures.",
+        ]
+        if context.provider or context.location:
+            provider_text = context.provider or "the configured provider"
+            location_text = context.location or "the configured location"
+            plan.append(
+                f"Validate the target endpoint for {provider_text} / {location_text}; "
+                "if needed, rotate or adjust only this service rather than the whole "
+                "profile."
+            )
+        plan.append(
+            f"Recreate only this service with `proxy2vpn vpn update {service_name}` "
+            f"and validate recovery with `proxy2vpn vpn test {service_name}`."
+        )
+        plan.append(
+            "Run `proxy2vpn agent run --once` to refresh watchdog state and confirm "
+            "whether the isolated incident closes."
+        )
+        return plan
+
     def _append_unique(self, items: list[str], value: str) -> None:
         clean = value.strip()
         if clean and clean not in items:
             items.append(clean)
+
+    def _format_service_names(self, names: list[str], limit: int = 3) -> str:
+        if not names:
+            return "none"
+        visible = names[:limit]
+        if len(names) <= limit:
+            return ", ".join(visible)
+        return f"{', '.join(visible)} (+{len(names) - limit} more)"
 
     def _upsert_incident(
         self,

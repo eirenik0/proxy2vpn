@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from proxy2vpn.adapters.logging_utils import get_logger
 from proxy2vpn.agent.config import AgentSettings
@@ -53,6 +53,8 @@ class InvestigationContext(BaseModel):
     health_score: int | None = None
     control_api_reachable: bool | None = None
     profile_validation_errors: list[str]
+    healthy_shared_profile_peers: list[str] = Field(default_factory=list)
+    unhealthy_shared_profile_peers: list[str] = Field(default_factory=list)
     issues: list[dict[str, Any]]
     recent_actions: list[dict[str, str]]
     human_explanation: str | None = None
@@ -172,6 +174,9 @@ class OpenAIIncidentInvestigator(_OpenAIResponderBase):
             system_prompt=(
                 "You investigate proxy2vpn watchdog incidents. "
                 "Be concise, factual, and operator-oriented. "
+                "Treat healthy peer services sharing the same profile as evidence "
+                "against account-wide or credential-wide failures unless explicit "
+                "configuration errors contradict that. "
                 "Do not expose secrets, redact credential values, and keep action_plan "
                 "to safe operational steps that a proxy2vpn operator can execute."
             ),
