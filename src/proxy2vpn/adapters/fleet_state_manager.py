@@ -22,6 +22,7 @@ from .docker_ops import (
     remove_container,
     start_container,
     start_vpn_service,
+    test_vpn_connection_async,
     stop_container,
 )
 from .http_client import HTTPClient, HTTPClientConfig
@@ -71,6 +72,9 @@ class OperationConfig:
     max_parallel: int = 5
     rollback_on_failure: bool = True
     health_check_timeout: int = 30
+    rotation_verification_attempts: int = 3
+    rotation_verification_delay_seconds: int = 10
+    bad_city_cooldown_seconds: int = 3600
     countries: Optional[List[str]] = None
     provider: Optional[str] = None
     profile: Optional[str] = None
@@ -182,6 +186,7 @@ class FleetStateManager:
 
         # Operation history for debugging
         self.operation_history: List[OperationResult] = []
+        self.bad_rotation_cities: Dict[Tuple[str, str, str], datetime] = {}
 
         self._initialized = True
         logger.info("FleetStateManager initialized")
@@ -312,13 +317,14 @@ class FleetStateManager:
         return results
 
     async def _check_service_health(
-        self, service_name: str
+        self, service_name: str, timeout: int | None = None
     ) -> Tuple[str, ServiceHealth]:
         """Check health of a single service using diagnostic analyzer like vpn list."""
         try:
             service = self.services.get(service_name)
             if not service:
                 raise Exception(f"Service {service_name} not found in fleet state")
+            effective_timeout = max(1, timeout or 5)
 
             # Get container
             container = get_container_by_service_name(service_name)
@@ -338,7 +344,10 @@ class FleetStateManager:
             # Get direct IP for diagnostics (same as vpn list)
             direct_ip = None
             try:
-                direct_ip = await asyncio.to_thread(ip_utils.fetch_ip, 5)
+                direct_ip = await asyncio.to_thread(
+                    ip_utils.fetch_ip,
+                    timeout=effective_timeout,
+                )
             except Exception:
                 pass  # Will be handled by diagnostic analyzer
 
@@ -348,7 +357,13 @@ class FleetStateManager:
 
             start_time = time.perf_counter()
             results = await loop.run_in_executor(
-                None, analyze_container_logs, service_name, 20, analyzer, 5, direct_ip
+                None,
+                analyze_container_logs,
+                service_name,
+                20,
+                analyzer,
+                effective_timeout,
+                direct_ip,
             )
             response_time = time.perf_counter() - start_time
 
@@ -452,6 +467,64 @@ class FleetStateManager:
 
         return plan
 
+    def _rotation_city_key(
+        self, provider: str, country: str, city: str
+    ) -> Tuple[str, str, str]:
+        """Return a normalized lookup key for one rotation candidate city."""
+
+        return (provider.casefold(), country.casefold(), city.casefold())
+
+    def _prune_bad_rotation_cities(self, cooldown_seconds: int) -> None:
+        """Drop expired bad-city markers so candidate ranking can recover over time."""
+
+        cutoff = datetime.now().timestamp() - max(1, cooldown_seconds)
+        expired = [
+            key
+            for key, failed_at in self.bad_rotation_cities.items()
+            if failed_at.timestamp() < cutoff
+        ]
+        for key in expired:
+            self.bad_rotation_cities.pop(key, None)
+
+    def _is_bad_rotation_city(
+        self,
+        provider: str,
+        country: str,
+        city: str,
+        cooldown_seconds: int,
+    ) -> bool:
+        """Return True when CITY recently failed rotation verification."""
+
+        self._prune_bad_rotation_cities(cooldown_seconds)
+        return (
+            self._rotation_city_key(provider, country, city) in self.bad_rotation_cities
+        )
+
+    def _mark_bad_rotation_city(
+        self,
+        provider: str,
+        country: str,
+        city: str,
+    ) -> None:
+        """Record one recently failed rotation city for later plan avoidance."""
+
+        self.bad_rotation_cities[self._rotation_city_key(provider, country, city)] = (
+            datetime.now()
+        )
+
+    def _clear_bad_rotation_city(
+        self,
+        provider: str,
+        country: str,
+        city: str,
+    ) -> None:
+        """Clear a bad-city marker after a later successful verification."""
+
+        self.bad_rotation_cities.pop(
+            self._rotation_city_key(provider, country, city),
+            None,
+        )
+
     def _extract_country_from_service(self, service: VPNService) -> str:
         """Extract country from service name or location."""
         country = service.environment.get("SERVER_COUNTRIES", "")
@@ -478,12 +551,32 @@ class FleetStateManager:
         current_location = service.location.casefold()
         seen: set[str] = set()
         candidates: List[str] = []
+        skipped_bad_cities: List[str] = []
         for city in available_cities:
             normalized = city.casefold()
             if normalized == current_location or normalized in seen:
                 continue
             seen.add(normalized)
+            if self._is_bad_rotation_city(
+                service.provider,
+                country,
+                city,
+                config.bad_city_cooldown_seconds,
+            ):
+                skipped_bad_cities.append(city)
+                continue
             candidates.append(city)
+
+        if skipped_bad_cities:
+            logger.info(
+                "rotation_candidates_skip_recent_failures",
+                extra={
+                    "service_name": service.name,
+                    "provider": service.provider,
+                    "country": country,
+                    "cities": skipped_bad_cities,
+                },
+            )
 
         if not candidates:
             return []
@@ -596,7 +689,9 @@ class FleetStateManager:
             index += 1
         return f"{candidate_with_port}-{index}"
 
-    async def _get_service_egress_ip(self, service_name: str) -> str | None:
+    async def _get_service_egress_ip(
+        self, service_name: str, timeout: int | None = None
+    ) -> str | None:
         """Return the current observed egress IP for a service, if it can be measured."""
 
         container = get_container_by_service_name(service_name)
@@ -607,7 +702,10 @@ class FleetStateManager:
         except Exception:
             pass
         try:
-            ip_address = await get_container_ip_async(container)
+            ip_address = await get_container_ip_async(
+                container,
+                timeout=max(1, timeout or 3),
+            )
         except Exception as exc:
             logger.warning(f"Failed to determine egress IP for {service_name}: {exc}")
             return None
@@ -685,7 +783,7 @@ class FleetStateManager:
         ) -> Tuple[str, bool, RotationChange | None, str]:
             async with semaphore:
                 try:
-                    change = await self._execute_single_rotation(rotation_plan)
+                    change = await self._execute_single_rotation(rotation_plan, config)
                     return rotation_plan.service_name, True, change, ""
                 except Exception as e:
                     return rotation_plan.service_name, False, None, str(e)
@@ -748,16 +846,23 @@ class FleetStateManager:
         )
 
     async def _execute_single_rotation(
-        self, rotation_plan: ServiceRotationPlan
+        self,
+        rotation_plan: ServiceRotationPlan,
+        config: OperationConfig | None = None,
     ) -> RotationChange:
         """Execute rotation for a single service and return final rotation metadata."""
+        config_obj = config or OperationConfig()
         service_name = rotation_plan.service_name
 
         # Get current service from compose manager
         service = self.compose_manager.get_service(service_name)
         original_name = service.name
         original_location = service.location
-        previous_ip = await self._get_service_egress_ip(service_name)
+        country = self._extract_country_from_service(service)
+        previous_ip = await self._get_service_egress_ip(
+            service_name,
+            timeout=config_obj.health_check_timeout,
+        )
         candidate_locations = rotation_plan.candidate_locations or [
             rotation_plan.new_location
         ]
@@ -770,25 +875,27 @@ class FleetStateManager:
                 active_name = await self._apply_rotation_location(
                     service, candidate_location
                 )
-                _, health = await self._check_service_health(active_name)
-                if not health.is_healthy:
+                verified, verification_failures = await self._verify_rotation_candidate(
+                    service_name=active_name,
+                    previous_ip=previous_ip,
+                    config=config_obj,
+                )
+                if not verified:
+                    self._mark_bad_rotation_city(
+                        service.provider,
+                        country,
+                        candidate_location,
+                    )
                     failures.append(
-                        f"{candidate_location}: service unhealthy after rotation"
+                        f"{candidate_location}: {' | '.join(verification_failures)}"
                     )
                     continue
 
-                current_ip = await self._get_service_egress_ip(active_name)
-                if previous_ip:
-                    if not current_ip:
-                        failures.append(
-                            f"{candidate_location}: unable to verify new egress IP"
-                        )
-                        continue
-                    if current_ip == previous_ip:
-                        failures.append(
-                            f"{candidate_location}: egress IP did not change ({current_ip})"
-                        )
-                        continue
+                self._clear_bad_rotation_city(
+                    service.provider,
+                    country,
+                    candidate_location,
+                )
 
                 return RotationChange(
                     requested_service_name=service_name,
@@ -807,6 +914,11 @@ class FleetStateManager:
                         "error": str(exc),
                     },
                 )
+                self._mark_bad_rotation_city(
+                    service.provider,
+                    country,
+                    candidate_location,
+                )
                 failures.append(f"{candidate_location}: {exc}")
 
         try:
@@ -824,6 +936,73 @@ class FleetStateManager:
             "No rotation candidate restored healthy connectivity with a new egress IP. "
             + " | ".join(failures)
         )
+
+    async def _verify_rotation_candidate(
+        self,
+        service_name: str,
+        previous_ip: str | None,
+        config: OperationConfig,
+    ) -> Tuple[bool, List[str]]:
+        """Verify one rotated candidate with repeated health and vpn-test probes."""
+
+        attempts = max(1, config.rotation_verification_attempts)
+        retry_delay = max(0, config.rotation_verification_delay_seconds)
+        failures: List[str] = []
+
+        for attempt in range(1, attempts + 1):
+            _, health = await self._check_service_health(
+                service_name,
+                timeout=config.health_check_timeout,
+            )
+            vpn_test_passed = await test_vpn_connection_async(
+                service_name,
+                timeout=config.health_check_timeout,
+            )
+            current_ip = None
+            if vpn_test_passed:
+                current_ip = await self._get_service_egress_ip(
+                    service_name,
+                    timeout=config.health_check_timeout,
+                )
+
+            attempt_failures: List[str] = []
+            if not vpn_test_passed:
+                attempt_failures.append("vpn test failed")
+            if previous_ip:
+                if not current_ip:
+                    attempt_failures.append("unable to verify new egress IP")
+                elif current_ip == previous_ip:
+                    attempt_failures.append(f"egress IP did not change ({current_ip})")
+
+            if vpn_test_passed and (
+                not previous_ip or (current_ip and current_ip != previous_ip)
+            ):
+                if not health.is_healthy:
+                    logger.info(
+                        "rotation_candidate_verified_by_vpn_test",
+                        extra={
+                            "service_name": service_name,
+                            "health_score": health.health_score,
+                        },
+                    )
+                return True, failures
+
+            if not health.is_healthy:
+                attempt_failures.append(f"health score {health.health_score}")
+            if health.error_message:
+                attempt_failures.append(health.error_message)
+
+            attempt_summary = (
+                " | ".join(attempt_failures)
+                if attempt_failures
+                else "verification failed"
+            )
+            failures.append(f"attempt {attempt}/{attempts}: {attempt_summary}")
+
+            if attempt < attempts and retry_delay:
+                await asyncio.sleep(retry_delay)
+
+        return False, failures
 
     def _display_rotation_plan(self, plan: List[ServiceRotationPlan]):
         """Display rotation plan in formatted table."""
