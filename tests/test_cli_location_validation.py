@@ -84,8 +84,7 @@ def test_vpn_start_requires_valid_location(tmp_path, monkeypatch):
     monkeypatch.setattr(server_manager, "ServerManager", lambda: DummyServerManager())
     from proxy2vpn.adapters import docker_ops
 
-    monkeypatch.setattr(docker_ops, "recreate_vpn_container", lambda *a, **k: None)
-    monkeypatch.setattr(docker_ops, "start_container", lambda *a, **k: None)
+    monkeypatch.setattr(docker_ops, "start_vpn_service", lambda *a, **k: None)
     monkeypatch.setattr(docker_ops, "analyze_container_logs", lambda *a, **k: [])
 
     result = runner.invoke(

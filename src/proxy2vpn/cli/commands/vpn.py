@@ -543,11 +543,7 @@ def start(
 ):
     """Start one or all VPN containers."""
 
-    # Construct via adapters.compose_manager so tests can monkeypatch behavior
-    from proxy2vpn.adapters import compose_manager
-
-    compose_file: Path = ctx.obj.get("compose_file", config.COMPOSE_FILE)
-    manager = compose_manager.ComposeManager(compose_file)
+    manager = ComposeManager.from_ctx(ctx)
     validate_all_name_args(all, name)
 
     if all:
@@ -557,34 +553,32 @@ def start(
 
         results = start_all_vpn_containers(manager)
         for svc_name in results:
-            console.print(
-                format_bulk_success_message("Recreated and started", svc_name)
-            )
+            console.print(format_bulk_success_message("Started", svc_name))
         return
 
     svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 
     from proxy2vpn.adapters.docker_ops import (
-        start_container,
+        start_vpn_service,
         analyze_container_logs,
-        recreate_vpn_container,
     )
     from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     profile = manager.get_profile(svc.profile)
     try:
-        recreate_vpn_container(svc, profile)
-        start_container(name)
-        console.print(format_success_message("Recreated and started", name))
+        start_vpn_service(svc, profile, force=False)
+        console.print(format_success_message("Started", svc.name))
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
-        results = analyze_container_logs(name, analyzer=analyzer)
+        results = analyze_container_logs(svc.name, analyzer=analyzer)
         if results:
             typer.echo("Diagnostic hints:", err=True)
             for res in results:
                 typer.echo(f" - {res.message}: {res.recommendation}", err=True)
-        abort(f"Failed to start '{name}': {exc.explanation}")
+        abort(f"Failed to start '{svc.name}': {exc.explanation}")
+    except RuntimeError as exc:
+        abort(str(exc))
 
 
 @app.command("stop")
@@ -650,50 +644,75 @@ def restart(
 
     if all:
         services = manager.list_services()
-        _validate_service_locations(services, force)
-        from proxy2vpn.adapters.docker_ops import (
-            recreate_vpn_container,
-            start_container,
-        )
+        from proxy2vpn.adapters.docker_ops import restart_container
 
         for svc in services:
-            profile = manager.get_profile(svc.profile)
             try:
-                recreate_vpn_container(svc, profile)
-                start_container(svc.name)
-                console.print(
-                    format_bulk_success_message("Recreated and restarted", svc.name)
-                )
-            except APIError as exc:
-                typer.echo(
-                    f"Failed to restart '{svc.name}': {exc.explanation}", err=True
-                )
+                restart_container(svc.name)
+                console.print(format_bulk_success_message("Restarted", svc.name))
+            except RuntimeError as exc:
+                typer.echo(str(exc), err=True)
+        return
+
+    svc = validate_service_exists(manager, name)
+    from proxy2vpn.adapters.docker_ops import restart_container
+
+    try:
+        restart_container(svc.name)
+        console.print(format_success_message("Restarted", svc.name))
+    except RuntimeError as exc:
+        abort(str(exc))
+
+
+@app.command("update")
+def update(
+    ctx: typer.Context,
+    name: str | None = typer.Argument(
+        None, callback=lambda v: sanitize_name(v) if v else None
+    ),
+    all: bool = typer.Option(False, "--all", help="Update all VPN services"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Ignore location validation"
+    ),
+):
+    """Pull, recreate, and start one or all VPN containers."""
+
+    manager = ComposeManager.from_ctx(ctx)
+    validate_all_name_args(all, name)
+
+    if all:
+        services = manager.list_services()
+        _validate_service_locations(services, force)
+        from proxy2vpn.adapters.docker_ops import update_all_vpn_containers
+
+        try:
+            results = update_all_vpn_containers(manager)
+        except RuntimeError as exc:
+            abort(str(exc))
+        for svc_name in results:
+            console.print(format_bulk_success_message("Updated", svc_name))
         return
 
     svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 
-    from proxy2vpn.adapters.docker_ops import (
-        recreate_vpn_container,
-        start_container,
-        analyze_container_logs,
-    )
+    from proxy2vpn.adapters.docker_ops import update_vpn_service, analyze_container_logs
     from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
 
     profile = manager.get_profile(svc.profile)
     try:
-        recreate_vpn_container(svc, profile)
-        start_container(name)
-        console.print(format_success_message("Recreated and restarted", name))
+        update_vpn_service(svc, profile)
+        console.print(format_success_message("Updated", svc.name))
     except APIError as exc:
         analyzer = DiagnosticAnalyzer()
-        assert name is not None  # Type narrowing for error handling
-        results = analyze_container_logs(name, analyzer=analyzer)
+        results = analyze_container_logs(svc.name, analyzer=analyzer)
         if results:
             typer.echo("Diagnostic hints:", err=True)
             for res in results:
                 typer.echo(f" - {res.message}: {res.recommendation}", err=True)
-        abort(f"Failed to restart '{name}': {exc.explanation}")
+        abort(f"Failed to update '{svc.name}': {exc.explanation}")
+    except RuntimeError as exc:
+        abort(str(exc))
 
 
 @app.command("logs")

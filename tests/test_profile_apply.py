@@ -84,7 +84,11 @@ def test_vpn_and_profile_help_reflect_service_definition_commands():
     vpn_help = runner.invoke(app, ["vpn", "--help"])
     assert vpn_help.exit_code == 0
     assert "add" in vpn_help.output
-    assert "create" not in vpn_help.output
+    assert "update" in vpn_help.output
+
+    vpn_create = runner.invoke(app, ["vpn", "create", "--help"])
+    assert vpn_create.exit_code != 0
+    assert "No such command 'create'" in vpn_create.output
 
     profile_help = runner.invoke(app, ["profile", "--help"])
     assert profile_help.exit_code == 0

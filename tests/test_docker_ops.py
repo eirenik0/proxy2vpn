@@ -310,7 +310,7 @@ def test_recreate_vpn_container():
     docker_ops.remove_container(service.name)
 
 
-def test_start_all_vpn_containers_recreates(monkeypatch):
+def test_start_all_vpn_containers_start_or_create(monkeypatch):
     svc = docker_ops.VPNService.create(
         name="svc",
         port=1,
@@ -341,7 +341,76 @@ def test_start_all_vpn_containers_recreates(monkeypatch):
 
     results = docker_ops.start_all_vpn_containers(Manager())
     assert results == ["svc"]
-    assert called == [("svc", "p", True)]
+    assert called == [("svc", "p", False)]
+
+
+def test_update_vpn_service_recreates_and_starts(monkeypatch):
+    svc = docker_ops.VPNService.create(
+        name="svc",
+        port=1,
+        control_port=30002,
+        provider="",
+        profile="p",
+        location="",
+        environment={},
+        labels={},
+    )
+    profile = docker_ops.Profile(
+        name="p", env_file="", image="alpine", cap_add=[], devices=[]
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_recreate(service, resolved_profile):
+        calls.append(("recreate", service.name))
+
+    class DummyContainer:
+        pass
+
+    def fake_start(name):
+        calls.append(("start", name))
+        return DummyContainer()
+
+    monkeypatch.setattr(docker_ops, "recreate_vpn_container", fake_recreate)
+    monkeypatch.setattr(docker_ops, "start_container", fake_start)
+
+    result = docker_ops.update_vpn_service(svc, profile)
+    assert isinstance(result, DummyContainer)
+    assert calls == [("recreate", "svc"), ("start", "svc")]
+
+
+def test_update_all_vpn_containers_recreates(monkeypatch):
+    svc = docker_ops.VPNService.create(
+        name="svc",
+        port=1,
+        control_port=30002,
+        provider="",
+        profile="p",
+        location="",
+        environment={},
+        labels={},
+    )
+    profile = docker_ops.Profile(
+        name="p", env_file="", image="alpine", cap_add=[], devices=[]
+    )
+
+    class Manager:
+        def list_services(self):
+            return [svc]
+
+        def get_profile(self, name):
+            return profile
+
+    called: list[tuple[str, str]] = []
+
+    def fake_update(service, resolved_profile):
+        called.append((service.name, resolved_profile.name))
+
+    monkeypatch.setattr(docker_ops, "update_vpn_service", fake_update)
+
+    results = docker_ops.update_all_vpn_containers(Manager())
+    assert results == ["svc"]
+    assert called == [("svc", "p")]
 
 
 def test_start_vpn_service_force_recreates(monkeypatch):

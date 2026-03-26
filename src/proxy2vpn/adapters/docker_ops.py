@@ -440,12 +440,30 @@ def analyze_container_logs(
 
 
 def start_all_vpn_containers(manager: ComposeManager) -> list[str]:
-    """Recreate and start all VPN containers."""
+    """Ensure all VPN containers exist and are running."""
 
     results: list[str] = []
     for svc in manager.list_services():
         profile = manager.get_profile(svc.profile)
-        start_vpn_service(svc, profile, force=True)
+        start_vpn_service(svc, profile, force=False)
+        results.append(svc.name)
+    return results
+
+
+def update_vpn_service(service: VPNService, profile: Profile) -> Container:
+    """Pull, recreate, and start a VPN service container."""
+
+    recreate_vpn_container(service, profile)
+    return start_container(service.name)
+
+
+def update_all_vpn_containers(manager: ComposeManager) -> list[str]:
+    """Pull, recreate, and start all VPN containers."""
+
+    results: list[str] = []
+    for svc in manager.list_services():
+        profile = manager.get_profile(svc.profile)
+        update_vpn_service(svc, profile)
         results.append(svc.name)
     return results
 
