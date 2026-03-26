@@ -1,4 +1,6 @@
 import json
+from contextlib import AbstractContextManager
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -226,6 +228,76 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypa
     assert status_payload["daemon"]["running"] is False
     assert set(incidents_payload.keys()) == {"incidents"}
     assert incidents_payload["incidents"][0]["recommended_action"] == "rotate"
+
+
+def test_agent_status_shows_health_analysis_status_bar(tmp_path, monkeypatch):
+    compose_file = _write_agent_compose(tmp_path)
+    state = AgentState(
+        status=AgentStatus(
+            compose_path=str(compose_file),
+            daemon_mode="daemon",
+            started_at=utc_now(),
+            last_loop_at=utc_now(),
+            interval_seconds=AgentSettings().interval_seconds,
+            service_count=1,
+            unhealthy_count=0,
+            last_error=None,
+            llm_mode="disabled",
+        ),
+        services=[],
+    )
+    status_messages: list[str] = []
+
+    class DummyStatus(AbstractContextManager):
+        def __init__(self, message: str) -> None:
+            self.message = message
+
+        def __enter__(self):
+            status_messages.append(self.message)
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class DummyConsole:
+        def status(self, message, spinner=None):
+            return DummyStatus(message)
+
+        def print(self, *args, **kwargs):
+            return None
+
+    class DummyStore:
+        daemon_log_path = Path("daemon.log")
+
+        def read_state(self):
+            return state
+
+        def empty_state(self):
+            return state
+
+        def daemon_process(self):
+            return None
+
+        def read_daemon_pid(self):
+            return None
+
+    class DummyWatchdog:
+        def __init__(self, compose_file):
+            self.store = DummyStore()
+
+        async def build_remediation_overview(self, state):
+            return {"blocked": False, "services": []}
+
+    monkeypatch.setattr(agent_commands, "console", DummyConsole())
+    monkeypatch.setattr(agent_commands, "AgentWatchdog", DummyWatchdog)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["--compose-file", str(compose_file), "agent", "status"]
+    )
+
+    assert result.exit_code == 0
+    assert status_messages == ["[cyan]Analyzing health[/cyan]"]
 
 
 def test_agent_investigate_cli_prints_action_plan(tmp_path, monkeypatch):

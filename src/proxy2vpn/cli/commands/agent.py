@@ -192,7 +192,8 @@ def status(
     watchdog = AgentWatchdog(compose_file)
     state = watchdog.store.read_state() or watchdog.empty_state()
     daemon_data = _daemon_payload(watchdog.store)
-    remediation = asyncio.run(watchdog.build_remediation_overview(state))
+    with console.status("[cyan]Analyzing health[/cyan]", spinner="dots"):
+        remediation = asyncio.run(watchdog.build_remediation_overview(state))
 
     payload = state.model_dump(mode="json")
     payload["daemon"] = daemon_data
