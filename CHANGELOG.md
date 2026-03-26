@@ -8,6 +8,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.16.0]
+
+### Bug fixes
+
+- Fixed fleet and profile command handling so provider resolution, compose-file context, control-port planning, and fleet status output behave correctly. (#2)
+- Fix generated compose services to use real YAML merges and allow profile-only workspaces to pass validation. (#201)
+- Resolve profile env files and control auth config relative to the compose root instead of the shell working directory. (#202)
+- Hardened compose merge serialization during bulk fleet deployment so adding many services does not fail on ruamel YAML merge internals. (#206)
+- Pinned `ruamel.yaml` for reproducible CI and made Docker tests provision their own control auth config instead of relying on local workspace state. (#207)
+- Fleet planning now appends safely by reusing the next free ports and auto-suffixing duplicate service names instead of colliding with existing services. (#209)
+
+### Documentation
+
+- Updated the README and contributor docs for `vpn add`, explicit `vpn update`, compose-root state files, and the supported test commands. (#205)
+- Documented the additive fleet expansion workflow, including the next deploy step and how duplicate city names are auto-suffixed. (#210)
+
+### Features
+
+- Implement reliable `fleet scale` and `fleet rotate` commands with profile support
+
+  - **Fleet rotation**: Parallel health checking, atomic operations with rollback capability, and smart server selection
+  - **Fleet scaling**: Support for scaling up/down with specific profile selection, atomic port allocation, and proper cleanup
+  - **Reliability improvements**: Singleton FleetStateManager with async locks, batch operations, and comprehensive error handling
+  - **Profile integration**: Scale operations can target specific profiles or use default profile allocation
+
+  (#1)
+- Add `vpn add` as the compose-only command for defining VPN services explicitly or interactively. (#203)
+- Added `proxy2vpn vpn update` as the explicit command to pull, recreate, and restart VPN containers. (#204)
+- Added a GitHub-native release workflow that prepares draft GitHub Releases and publishes to PyPI when a release is published. (#212)
+
+### Miscellaneous
+
+- Updated GitHub Actions to use Makefile targets and Node 24-compatible `checkout`/`setup-uv` action versions. (#208)
+- Switched the PyPI release workflow to Node 24-compatible GitHub Actions and Trusted Publishing. (#211)
+
+### Removals
+
+- Remove `profile apply` and the old `vpn create` service-definition command in favor of `vpn add`. (#203)
+- `proxy2vpn vpn start` and `proxy2vpn vpn restart` no longer hide image refresh and container recreation; use `proxy2vpn vpn update` for that workflow. (#204)
+
+
 ## [0.15.0]
 
 ### Bug fixes
