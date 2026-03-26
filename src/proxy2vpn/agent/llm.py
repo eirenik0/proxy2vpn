@@ -54,7 +54,9 @@ class InvestigationContext(BaseModel):
     control_api_reachable: bool | None = None
     profile_validation_errors: list[str]
     healthy_shared_profile_peers: list[str] = Field(default_factory=list)
-    unhealthy_shared_profile_peers: list[str] = Field(default_factory=list)
+    auth_config_shared_profile_peers: list[str] = Field(default_factory=list)
+    other_unhealthy_shared_profile_peers: list[str] = Field(default_factory=list)
+    shared_profile_peer_probe_failures: list[str] = Field(default_factory=list)
     issues: list[dict[str, Any]]
     recent_actions: list[dict[str, str]]
     human_explanation: str | None = None
@@ -176,7 +178,9 @@ class OpenAIIncidentInvestigator(_OpenAIResponderBase):
                 "Be concise, factual, and operator-oriented. "
                 "Treat healthy peer services sharing the same profile as evidence "
                 "against account-wide or credential-wide failures unless explicit "
-                "configuration errors contradict that. "
+                "configuration errors contradict that. Only treat same-profile peers "
+                "with matching auth/config evidence as support for a profile-wide or "
+                "account-wide provider issue. "
                 "When the incident shows auth_failure, healthy peer services share "
                 "the same profile, and the control API is reachable, prefer "
                 "restarting that service's tunnel before recommending container "

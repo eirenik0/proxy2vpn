@@ -647,12 +647,12 @@ class AgentWatchdog:
         ):
             return None
 
-        healthy_peers, _ = await self._collect_shared_profile_peer_evidence(
+        peer_evidence = await self._collect_shared_profile_peer_evidence(
             manager=manager,
             state=state,
             service=service,
         )
-        if not healthy_peers:
+        if not peer_evidence["healthy"]:
             return None
 
         restart_result = await self._restart_tunnel(
@@ -848,7 +848,9 @@ class AgentWatchdog:
         profile_env_file = None
         profile_validation_errors: list[str] = []
         healthy_shared_profile_peers: list[str] = []
-        unhealthy_shared_profile_peers: list[str] = []
+        auth_config_shared_profile_peers: list[str] = []
+        other_unhealthy_shared_profile_peers: list[str] = []
+        shared_profile_peer_probe_failures: list[str] = []
         if profile is not None:
             profile_env_file = str(profile._resolve_env_path())
             profile_validation_errors = self._validate_profile_for_investigation(
@@ -856,14 +858,15 @@ class AgentWatchdog:
                 service=service,
             )
         if manager is not None and service is not None:
-            (
-                healthy_shared_profile_peers,
-                unhealthy_shared_profile_peers,
-            ) = await self._collect_shared_profile_peer_evidence(
+            peer_evidence = await self._collect_shared_profile_peer_evidence(
                 manager=manager,
                 state=state,
                 service=service,
             )
+            healthy_shared_profile_peers = peer_evidence["healthy"]
+            auth_config_shared_profile_peers = peer_evidence["auth_config"]
+            other_unhealthy_shared_profile_peers = peer_evidence["other_unhealthy"]
+            shared_profile_peer_probe_failures = peer_evidence["probe_failed"]
 
         return InvestigationContext(
             incident_id=incident.id,
@@ -883,7 +886,9 @@ class AgentWatchdog:
             control_api_reachable=control_api_reachable,
             profile_validation_errors=profile_validation_errors,
             healthy_shared_profile_peers=healthy_shared_profile_peers,
-            unhealthy_shared_profile_peers=unhealthy_shared_profile_peers,
+            auth_config_shared_profile_peers=auth_config_shared_profile_peers,
+            other_unhealthy_shared_profile_peers=other_unhealthy_shared_profile_peers,
+            shared_profile_peer_probe_failures=shared_profile_peer_probe_failures,
             issues=self._diagnostic_payload(results),
             recent_actions=recent_actions,
             human_explanation=incident.human_explanation,
@@ -968,40 +973,68 @@ class AgentWatchdog:
         manager: ComposeManager,
         state: AgentState,
         service: VPNService,
-    ) -> tuple[list[str], list[str]]:
-        """Return healthy/unhealthy peer services that share the same profile."""
+    ) -> dict[str, list[str]]:
+        """Return classified evidence for peer services that share the same profile."""
 
         snapshots_by_name = {
             snapshot.service_name: snapshot for snapshot in state.services
         }
-        healthy_peers: list[str] = []
-        unhealthy_peers: list[str] = []
+        evidence = {
+            "healthy": [],
+            "auth_config": [],
+            "other_unhealthy": [],
+            "probe_failed": [],
+        }
 
         for candidate in manager.list_services():
             if candidate.name == service.name or candidate.profile != service.profile:
                 continue
 
             snapshot = snapshots_by_name.get(candidate.name)
-            if snapshot is None:
+            if snapshot is not None and (
+                snapshot.container_status == "running"
+                and snapshot.health_score >= self.settings.health_threshold
+            ):
+                evidence["healthy"].append(candidate.name)
+                continue
+
+            try:
                 peer_health = await self._evaluate_health(candidate)
-                is_healthy = (
-                    peer_health["container_status"] == "running"
-                    and peer_health["health_score"] >= self.settings.health_threshold
+            except Exception as exc:
+                logger.warning(
+                    "agent_shared_profile_peer_probe_failed",
+                    extra={
+                        "service_name": service.name,
+                        "peer_service_name": candidate.name,
+                        "error": str(exc),
+                    },
                 )
-            else:
-                is_healthy = (
-                    snapshot.container_status == "running"
-                    and snapshot.health_score >= self.settings.health_threshold
-                )
+                evidence["probe_failed"].append(candidate.name)
+                continue
 
+            is_healthy = (
+                peer_health["container_status"] == "running"
+                and peer_health["health_score"] >= self.settings.health_threshold
+            )
             if is_healthy:
-                healthy_peers.append(candidate.name)
-            else:
-                unhealthy_peers.append(candidate.name)
+                evidence["healthy"].append(candidate.name)
+                continue
 
-        healthy_peers.sort()
-        unhealthy_peers.sort()
-        return healthy_peers, unhealthy_peers
+            peer_results = peer_health.get("results", [])
+            has_auth_or_config_issue = any(
+                isinstance(result, DiagnosticResult)
+                and not result.passed
+                and result.check in {"auth_failure", "config_error"}
+                for result in peer_results
+            )
+            if has_auth_or_config_issue:
+                evidence["auth_config"].append(candidate.name)
+            else:
+                evidence["other_unhealthy"].append(candidate.name)
+
+        for names in evidence.values():
+            names.sort()
+        return evidence
 
     def _investigate_context(self, context: InvestigationContext) -> InvestigationPlan:
         fallback = self._fallback_investigation(context)
@@ -1061,14 +1094,34 @@ class AgentWatchdog:
                 "That weakens suspicion of a profile-wide or account-wide provider "
                 "issue and points to a service-specific or endpoint-specific issue.",
             )
-        if context.unhealthy_shared_profile_peers:
-            peers = self._format_service_names(context.unhealthy_shared_profile_peers)
+        if context.auth_config_shared_profile_peers:
+            peers = self._format_service_names(context.auth_config_shared_profile_peers)
             profile_label = context.profile_name or "unknown"
             self._append_unique(
                 findings,
-                f"Other containers sharing profile '{profile_label}' are also unhealthy: {peers}. "
-                "That supports an account/profile-wide issue such as bad credentials, "
-                "provider-side limits, suspension, or other provider-side account issues.",
+                f"Other containers sharing profile '{profile_label}' also show auth/config "
+                f"problems: {peers}. That supports an account/profile-wide issue such as "
+                "bad credentials, provider-side limits, suspension, or other provider-side "
+                "account issues.",
+            )
+        if context.other_unhealthy_shared_profile_peers:
+            peers = self._format_service_names(
+                context.other_unhealthy_shared_profile_peers
+            )
+            profile_label = context.profile_name or "unknown"
+            self._append_unique(
+                findings,
+                f"Other containers sharing profile '{profile_label}' are unhealthy: {peers}. "
+                "Current peer evidence does not show the same auth/config failure there, "
+                "so this alone does not prove an account/profile-wide credential issue.",
+            )
+        if context.shared_profile_peer_probe_failures:
+            peers = self._format_service_names(
+                context.shared_profile_peer_probe_failures
+            )
+            self._append_unique(
+                findings,
+                f"Could not fully inspect some same-profile peers: {peers}. Peer evidence is incomplete.",
             )
         if context.control_api_reachable is False:
             self._append_unique(
@@ -1112,11 +1165,11 @@ class AgentWatchdog:
                     "container(s)."
                 )
                 action_plan = self._isolated_service_action_plan(context)
-            elif context.unhealthy_shared_profile_peers:
+            elif context.auth_config_shared_profile_peers:
                 summary = (
                     f"{context.service_name}: multiple containers sharing profile "
-                    f"'{context.profile_name or 'unknown'}' are unhealthy, which is "
-                    "consistent with an account/profile-wide issue."
+                    f"'{context.profile_name or 'unknown'}' show auth/config problems, "
+                    "which is consistent with an account/profile-wide issue."
                 )
                 action_plan = self._auth_config_action_plan(context)
             elif "auth_failure" in issues_by_check:

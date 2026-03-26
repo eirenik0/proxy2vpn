@@ -950,6 +950,202 @@ def test_investigate_incident_keeps_accountwide_suspicion_when_shared_profile_pe
     )
 
 
+def test_investigate_incident_handles_shared_profile_peer_probe_failure(
+    shared_profile_agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(shared_profile_agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(shared_profile_agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=3,
+                    last_check_at=utc_now(),
+                )
+            ],
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Persistent authentication failure detected",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            )
+        ],
+    )
+
+    async def fake_control_api(service):
+        return False
+
+    async def fake_evaluate(service):
+        if service.name == "protonvpn-united-states-boston":
+            raise RuntimeError("docker inspect failed")
+        return {
+            "container_status": "running",
+            "health_score": 0,
+            "results": [
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    message="Recent authentication failure detected",
+                    recommendation="Verify credentials",
+                    persistent=True,
+                )
+            ],
+        }
+
+    watchdog = AgentWatchdog(shared_profile_agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+    monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
+
+    investigated = asyncio.run(watchdog.investigate_incident("incident123"))
+    persisted = store.load_incidents()[0]
+
+    assert investigated.investigation is not None
+    assert persisted.investigation is not None
+    assert any(
+        "Peer evidence is incomplete" in finding
+        for finding in investigated.investigation.findings
+    )
+
+
+def test_investigate_incident_does_not_infer_accountwide_auth_issue_from_generic_unhealthy_peer(
+    shared_profile_agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(shared_profile_agent_compose_file)
+    store.write_state(
+        AgentState(
+            status=AgentStatus(
+                compose_path=str(shared_profile_agent_compose_file),
+                daemon_mode="once",
+                interval_seconds=AgentSettings().interval_seconds,
+                llm_mode="disabled",
+            ),
+            services=[
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-new-york",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=3,
+                    last_check_at=utc_now(),
+                ),
+                ServiceSnapshot(
+                    service_name="protonvpn-united-states-boston",
+                    container_status="running",
+                    health_score=0,
+                    consecutive_failures=2,
+                    last_check_at=utc_now(),
+                ),
+            ],
+        )
+    )
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Persistent authentication failure detected",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            )
+        ],
+    )
+
+    async def fake_control_api(service):
+        return False
+
+    async def fake_evaluate(service):
+        if service.name == "protonvpn-united-states-boston":
+            return {
+                "container_status": "running",
+                "health_score": 0,
+                "results": unhealthy_results(),
+            }
+        return {
+            "container_status": "running",
+            "health_score": 0,
+            "results": [
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    message="Recent authentication failure detected",
+                    recommendation="Verify credentials",
+                    persistent=True,
+                )
+            ],
+        }
+
+    watchdog = AgentWatchdog(shared_profile_agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+    monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
+
+    investigated = asyncio.run(watchdog.investigate_incident("incident123"))
+
+    assert investigated.investigation is not None
+    assert "account/profile-wide issue" not in investigated.investigation.summary
+    assert any(
+        "does not show the same auth/config failure" in finding
+        for finding in investigated.investigation.findings
+    )
+
+
 def test_agent_restore_failure_creates_rotation_incident(
     agent_compose_file, monkeypatch
 ):
