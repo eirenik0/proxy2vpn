@@ -13,7 +13,7 @@ from proxy2vpn.agent.models import (
     AgentStatus,
     ServiceSnapshot,
 )
-from proxy2vpn.agent.llm import IncidentEnrichment
+from proxy2vpn.agent.llm import IncidentEnrichment, InvestigationPlan
 from proxy2vpn.agent.runtime import AgentWatchdog, utc_now
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.core import config
@@ -396,6 +396,137 @@ def test_agent_openai_enrichment_populates_human_explanation(
     assert incidents[0].summary.endswith("credentials are rejected by provider")
     assert incidents[0].human_explanation is not None
     assert "rejecting" in incidents[0].human_explanation
+
+
+def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypatch):
+    store = AgentStateStore(agent_compose_file)
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Profile configuration issue detected",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="config_error",
+                passed=False,
+                message="Recent configuration issue detected",
+                recommendation="Verify profile env file and service settings.",
+                persistent=True,
+            ),
+            DiagnosticResult(
+                check="connectivity",
+                passed=False,
+                message="VPN proxy connection failed",
+                recommendation="Check container status and port accessibility.",
+            ),
+        ],
+    )
+
+    async def fake_control_api(service):
+        return False
+
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+
+    investigated = asyncio.run(watchdog.investigate_incident("incident123"))
+    persisted = store.load_incidents()[0]
+
+    assert investigated.investigation is not None
+    assert persisted.investigation is not None
+    assert "configuration" in investigated.investigation.summary.lower()
+    assert any(
+        "OPENVPN_PASSWORD is missing" in finding
+        for finding in investigated.investigation.findings
+    )
+    assert any(
+        "proxy2vpn vpn update protonvpn-united-states-new-york" in step
+        for step in investigated.investigation.action_plan
+    )
+
+
+def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeypatch):
+    store = AgentStateStore(agent_compose_file)
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="auth_config_failure",
+            severity="high",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=2,
+            summary="Profile configuration issue detected",
+            recommended_action="investigate",
+            approval_required=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="auth_failure",
+                passed=False,
+                message="Recent authentication failure detected",
+                recommendation="Verify credentials",
+                persistent=True,
+            )
+        ],
+    )
+
+    async def fake_control_api(service):
+        return False
+
+    class DummyInvestigator:
+        def investigate(self, context):
+            return InvestigationPlan(
+                summary=f"{context.service_name}: provider credentials need rotation",
+                findings=["Provider rejected the stored credentials."],
+                action_plan=[
+                    "Update the profile credentials.",
+                    "Run proxy2vpn vpn update for the service.",
+                ],
+            )
+
+    watchdog = AgentWatchdog(agent_compose_file, llm_mode="openai", store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+    monkeypatch.setattr(watchdog, "_incident_investigator", DummyInvestigator())
+
+    investigated = asyncio.run(watchdog.investigate_incident("incident123"))
+
+    assert investigated.investigation is not None
+    assert investigated.investigation.summary.endswith(
+        "provider credentials need rotation"
+    )
+    assert (
+        investigated.investigation.action_plan[0] == "Update the profile credentials."
+    )
 
 
 def test_agent_restore_failure_creates_rotation_incident(
