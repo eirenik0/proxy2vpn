@@ -180,6 +180,20 @@ class ComposeManager:
         services[service.name] = self._merged_service_config(service)
         self.save()
 
+    def replace_service(self, old_name: str, service: VPNService) -> None:
+        """Replace service OLD_NAME with SERVICE, allowing a renamed key."""
+
+        services = self.data.get("services", {})
+        if old_name not in services:
+            raise KeyError(f"Service '{old_name}' not found")
+        if old_name != service.name and service.name in services:
+            raise ValueError(f"Service '{service.name}' already exists")
+
+        if old_name != service.name:
+            del services[old_name]
+        services[service.name] = self._merged_service_config(service)
+        self.save()
+
     # ------------------------------------------------------------------
     # Profile management
     # ------------------------------------------------------------------

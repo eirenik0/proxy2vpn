@@ -98,6 +98,11 @@ class VPNService(BaseModel):
     def labels(self) -> dict[str, str]:
         return self.config.labels
 
+    def set_name(self, name: str) -> None:
+        """Update the effective service and container name."""
+
+        self.container.name = name
+
     def set_location(self, location: str) -> None:
         """Update the effective service location and related compose metadata."""
 

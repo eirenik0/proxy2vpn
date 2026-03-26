@@ -540,6 +540,49 @@ class FleetStateManager:
 
         return counts
 
+    def _slug_location(self, value: str) -> str:
+        """Normalize a location segment to the service-name slug format."""
+
+        return value.strip().lower().replace(" ", "-")
+
+    def _derive_rotated_service_name(
+        self,
+        service: VPNService,
+        target_location: str,
+        *,
+        current_name: str | None = None,
+        target_name: str | None = None,
+    ) -> str:
+        """Return the renamed service/container name for TARGET_LOCATION."""
+
+        if target_name:
+            return target_name
+
+        active_name = current_name or service.name
+        current_slug = self._slug_location(service.location)
+        target_slug = self._slug_location(target_location)
+        if not current_slug or not target_slug or current_slug == target_slug:
+            return active_name
+
+        if current_slug not in active_name:
+            return active_name
+
+        prefix, suffix = active_name.rsplit(current_slug, 1)
+        candidate = f"{prefix}{target_slug}{suffix}"
+        existing_names = {item.name for item in self.compose_manager.list_services()}
+        existing_names.discard(active_name)
+        if candidate not in existing_names:
+            return candidate
+
+        candidate_with_port = f"{candidate}-{service.port}"
+        if candidate_with_port not in existing_names:
+            return candidate_with_port
+
+        index = 2
+        while f"{candidate_with_port}-{index}" in existing_names:
+            index += 1
+        return f"{candidate_with_port}-{index}"
+
     async def _get_service_egress_ip(self, service_name: str) -> str | None:
         """Return the current observed egress IP for a service, if it can be measured."""
 
@@ -560,17 +603,36 @@ class FleetStateManager:
         return ip_address
 
     async def _apply_rotation_location(
-        self, service: VPNService, location: str, settle_seconds: int = 10
-    ) -> None:
+        self,
+        service: VPNService,
+        location: str,
+        settle_seconds: int = 10,
+        target_name: str | None = None,
+    ) -> str:
         """Apply one candidate location and recreate the service container."""
 
         profile = self.compose_manager.get_profile(service.profile)
+        previous_name = service.name
+        next_name = self._derive_rotated_service_name(
+            service,
+            location,
+            current_name=previous_name,
+            target_name=target_name,
+        )
         service.set_location(location)
-        self.compose_manager.update_service(service)
-        self.services[service.name] = service
+        service.set_name(next_name)
+        self.compose_manager.replace_service(previous_name, service)
+        if previous_name != next_name:
+            self.services.pop(previous_name, None)
+            try:
+                await asyncio.to_thread(remove_container, previous_name)
+            except Exception:
+                pass
+        self.services[next_name] = service
         await asyncio.to_thread(recreate_vpn_container, service, profile)
         await asyncio.to_thread(start_container, service.name)
         await asyncio.sleep(settle_seconds)
+        return next_name
 
     async def _execute_rotation_plan(
         self, plan: List[ServiceRotationPlan], config: OperationConfig
@@ -606,13 +668,21 @@ class FleetStateManager:
 
         async def rotate_single_service(
             rotation_plan: ServiceRotationPlan,
-        ) -> Tuple[str, bool, str, str]:
+        ) -> Tuple[str, bool, str, str, str]:
             async with semaphore:
                 try:
-                    final_location = await self._execute_single_rotation(rotation_plan)
-                    return rotation_plan.service_name, True, final_location, ""
+                    final_name, final_location = await self._execute_single_rotation(
+                        rotation_plan
+                    )
+                    return (
+                        rotation_plan.service_name,
+                        True,
+                        final_name,
+                        final_location,
+                        "",
+                    )
                 except Exception as e:
-                    return rotation_plan.service_name, False, "", str(e)
+                    return rotation_plan.service_name, False, "", "", str(e)
 
         # Execute all rotations in parallel
         tasks = [rotate_single_service(rp) for rp in plan]
@@ -626,11 +696,11 @@ class FleetStateManager:
                 failed_rotations.append(rotation_plan.service_name)
                 errors.append(f"{rotation_plan.service_name}: {result}")
             else:
-                service_name, success, final_location, error = result
+                service_name, success, final_name, final_location, error = result
                 if success:
-                    successful_rotations.append(service_name)
+                    successful_rotations.append(final_name or service_name)
                     console.print(
-                        f"[green]✓[/green] Rotated {service_name}: {rotation_plan.old_location} → {final_location}"
+                        f"[green]✓[/green] Rotated {service_name} → {final_name}: {rotation_plan.old_location} → {final_location}"
                     )
                 else:
                     failed_rotations.append(service_name)
@@ -658,12 +728,15 @@ class FleetStateManager:
             execution_time=execution_time,
         )
 
-    async def _execute_single_rotation(self, rotation_plan: ServiceRotationPlan) -> str:
-        """Execute rotation for a single service and return the final location."""
+    async def _execute_single_rotation(
+        self, rotation_plan: ServiceRotationPlan
+    ) -> tuple[str, str]:
+        """Execute rotation for a single service and return final name/location."""
         service_name = rotation_plan.service_name
 
         # Get current service from compose manager
         service = self.compose_manager.get_service(service_name)
+        original_name = service.name
         original_location = service.location
         previous_ip = await self._get_service_egress_ip(service_name)
         candidate_locations = rotation_plan.candidate_locations or [
@@ -673,15 +746,17 @@ class FleetStateManager:
 
         for candidate_location in candidate_locations:
             try:
-                await self._apply_rotation_location(service, candidate_location)
-                _, health = await self._check_service_health(service_name)
+                active_name = await self._apply_rotation_location(
+                    service, candidate_location
+                )
+                _, health = await self._check_service_health(active_name)
                 if not health.is_healthy:
                     failures.append(
                         f"{candidate_location}: service unhealthy after rotation"
                     )
                     continue
 
-                current_ip = await self._get_service_egress_ip(service_name)
+                current_ip = await self._get_service_egress_ip(active_name)
                 if previous_ip:
                     if not current_ip:
                         failures.append(
@@ -694,12 +769,12 @@ class FleetStateManager:
                         )
                         continue
 
-                return candidate_location
+                return active_name, candidate_location
             except Exception as exc:
                 logger.warning(
                     "rotation_candidate_failed",
                     extra={
-                        "service_name": service_name,
+                        "service_name": service.name,
                         "candidate_location": candidate_location,
                         "error": str(exc),
                     },
@@ -707,10 +782,14 @@ class FleetStateManager:
                 failures.append(f"{candidate_location}: {exc}")
 
         try:
-            await self._apply_rotation_location(service, original_location)
+            await self._apply_rotation_location(
+                service,
+                original_location,
+                target_name=original_name,
+            )
         except Exception as exc:
             failures.append(
-                f"rollback to {original_location} failed after exhausted candidates: {exc}"
+                f"rollback to {original_name} ({original_location}) failed after exhausted candidates: {exc}"
             )
 
         raise Exception(

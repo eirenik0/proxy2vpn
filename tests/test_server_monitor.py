@@ -92,7 +92,7 @@ def test_check_service_health_redacts_proxy_errors(monkeypatch):
 
 def test_execute_service_rotation_updates_service_location(monkeypatch):
     service = models.VPNService.create(
-        name="vpn-test",
+        name="protonvpn-canada-toronto",
         port=8080,
         control_port=30000,
         provider="protonvpn",
@@ -109,15 +109,20 @@ def test_execute_service_rotation_updates_service_location(monkeypatch):
 
     class DummyComposeManager:
         def get_service(self, name):
-            assert name == "vpn-test"
+            assert name == "protonvpn-canada-toronto"
             return service
 
-        def update_service(self, updated_service):
+        def replace_service(self, old_name, updated_service):
             updated["called"] = True
+            assert old_name == "protonvpn-canada-toronto"
+            assert updated_service.name == "protonvpn-canada-montreal"
             assert updated_service.location == "Montreal"
 
         def get_profile(self, name):
             return object()
+
+        def list_services(self):
+            return [service]
 
     class DummyFleetManager:
         compose_manager = DummyComposeManager()
@@ -141,7 +146,7 @@ def test_execute_service_rotation_updates_service_location(monkeypatch):
     asyncio.run(
         monitor._execute_service_rotation(
             server_monitor.ServiceRotation(
-                service_name="vpn-test",
+                service_name="protonvpn-canada-toronto",
                 old_location="Toronto",
                 new_location="Montreal",
                 reason="health_check_failed",
@@ -150,6 +155,7 @@ def test_execute_service_rotation_updates_service_location(monkeypatch):
     )
 
     assert updated["called"] is True
+    assert service.name == "protonvpn-canada-montreal"
     assert service.location == "Montreal"
     assert service.environment["SERVER_CITIES"] == "Montreal"
     assert service.labels["vpn.location"] == "Montreal"
