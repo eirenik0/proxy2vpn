@@ -669,6 +669,106 @@ def test_deploy_fleet_resets_agent_state_for_fresh_incidents(tmp_path, monkeypat
     assert refreshed_state.status.last_error is None
 
 
+def test_deploy_fleet_failure_preserves_existing_agent_state(tmp_path, monkeypatch):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "proton.env"
+    env_path.write_text(
+        "VPN_SERVICE_PROVIDER=protonvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+    manager.add_profile(Profile(name="proton", env_file=str(env_path)))
+
+    store = AgentStateStore(compose_path)
+    previous_state = AgentState(
+        status=AgentStatus(
+            compose_path=str(compose_path),
+            daemon_mode="once",
+            interval_seconds=30,
+            service_count=2,
+            unhealthy_count=1,
+            last_error="stale failure",
+            llm_mode="disabled",
+        ),
+        services=[
+            ServiceSnapshot(
+                service_name="old-service",
+                container_status="running",
+                health_score=0,
+                consecutive_failures=3,
+                degraded_since=utc_now(),
+                last_check_at=utc_now(),
+                last_action="restore",
+                last_action_result="failed",
+            )
+        ],
+        actions=[
+            ActionRecord(
+                ts=utc_now(),
+                service_name="old-service",
+                action="restore",
+                trigger="test",
+                result="failed",
+            )
+        ],
+    )
+    store.write_state(previous_state)
+    previous_incident = AgentIncident(
+        id="incident123",
+        service_name="old-service",
+        type="rotation_required",
+        severity="medium",
+        status="open",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=2,
+        summary="Old incident",
+        recommended_action="rotate",
+        approval_required=True,
+    )
+    store.append_incident(previous_incident)
+
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+    plan = DeploymentPlan()
+    plan.services.append(
+        ServicePlan(
+            name="proton-us-philadelphia-0",
+            profile="proton",
+            location="Philadelphia",
+            country="United States",
+            port=20000,
+            control_port=30000,
+            provider="protonvpn",
+        )
+    )
+
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.fleet_manager.ensure_network", lambda force: None
+    )
+
+    async def fake_start(service_names, force):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(fleet_manager, "_start_services_parallel", fake_start)
+    monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
+
+    result = asyncio.run(
+        fleet_manager.deploy_fleet(
+            plan,
+            validate_servers=False,
+            parallel=True,
+            force=False,
+        )
+    )
+
+    assert result.deployed == 0
+    assert result.failed == 1
+    assert any("Deployment failed: boom" in error for error in result.errors)
+    assert store.read_state() == previous_state
+    assert store.load_incidents() == [previous_incident]
+
+
 def test_deploy_fleet_rejects_when_agent_is_running(tmp_path):
     compose_path = tmp_path / "compose.yml"
     ComposeManager.create_initial_compose(compose_path, force=True)

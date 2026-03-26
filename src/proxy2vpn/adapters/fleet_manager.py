@@ -552,8 +552,6 @@ class FleetManager:
                 f"[green]🚀 Deploying {len(valid_services)} VPN services...[/green]"
             )
 
-            self._reset_agent_monitoring_state()
-
             added_services: list[str] = []
             deployed = 0
 
