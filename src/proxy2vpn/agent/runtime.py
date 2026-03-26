@@ -343,6 +343,31 @@ class AgentWatchdog:
             return snapshot
 
         if self._has_persistent_auth_or_config_failure(results):
+            auth_restart = await self._attempt_isolated_auth_restart(
+                manager=manager,
+                state=state,
+                incidents=incidents,
+                service=service,
+                results=results,
+                control_api_reachable=control_api_reachable,
+            )
+            if auth_restart is not None:
+                restart_result, post_restart = auth_restart
+                snapshot.last_action = "restart_tunnel"
+                snapshot.last_action_result = restart_result
+                snapshot.container_status = post_restart["container_status"]
+                snapshot.health_score = post_restart["health_score"]
+                snapshot.last_check_at = utc_now()
+                snapshot.consecutive_failures = (
+                    0
+                    if post_restart["health_score"] >= self.settings.health_threshold
+                    else failure_count
+                )
+                if post_restart["health_score"] >= self.settings.health_threshold:
+                    self._resolve_active_incidents(service.name, incidents)
+                    return snapshot
+                results = post_restart["results"]
+
             summary, human_explanation = self._format_issue_summary(
                 service.name,
                 results,
@@ -445,7 +470,12 @@ class AgentWatchdog:
         except Exception:
             return False
 
-    async def _restart_tunnel(self, service: VPNService, state: AgentState) -> str:
+    async def _restart_tunnel(
+        self,
+        service: VPNService,
+        state: AgentState,
+        trigger: str = "first_unhealthy_cycle",
+    ) -> str:
         base_url = f"http://localhost:{service.control_port}/v1"
         try:
             async with GluetunControlClient(base_url) as client:
@@ -454,7 +484,7 @@ class AgentWatchdog:
                 state,
                 service_name=service.name,
                 action="restart_tunnel",
-                trigger="first_unhealthy_cycle",
+                trigger=trigger,
                 result="success",
                 details={"control_port": str(service.control_port)},
             )
@@ -464,7 +494,7 @@ class AgentWatchdog:
                 state,
                 service_name=service.name,
                 action="restart_tunnel",
-                trigger="first_unhealthy_cycle",
+                trigger=trigger,
                 result="failed",
                 details={"error": str(exc)},
             )
@@ -594,6 +624,45 @@ class AgentWatchdog:
             if action.service_name == service_name and action.action == "restore":
                 return action.ts < cutoff
         return True
+
+    async def _attempt_isolated_auth_restart(
+        self,
+        manager: ComposeManager,
+        state: AgentState,
+        incidents: list[AgentIncident],
+        service: VPNService,
+        results: list[DiagnosticResult],
+        control_api_reachable: bool,
+    ) -> tuple[str, dict[str, object]] | None:
+        if not control_api_reachable:
+            return None
+        if self._find_active_incident(incidents, service.name, "auth_config_failure"):
+            return None
+        if any(
+            result.check == "config_error" and not result.passed for result in results
+        ):
+            return None
+        if not any(
+            result.check == "auth_failure" and not result.passed for result in results
+        ):
+            return None
+
+        healthy_peers, _ = await self._collect_shared_profile_peer_evidence(
+            manager=manager,
+            state=state,
+            service=service,
+        )
+        if not healthy_peers:
+            return None
+
+        restart_result = await self._restart_tunnel(
+            service,
+            state,
+            trigger="isolated_auth_failure",
+        )
+        await asyncio.sleep(self.settings.recheck_delay_seconds)
+        post_restart = await self._evaluate_health(service)
+        return restart_result, post_restart
 
     def _has_persistent_auth_or_config_failure(
         self, results: list[DiagnosticResult]
