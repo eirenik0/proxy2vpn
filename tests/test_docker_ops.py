@@ -183,6 +183,39 @@ def test_analyze_container_logs_redacts_proxy_error_messages(monkeypatch):
     assert all("user:pass" not in result.message for result in results)
 
 
+def test_container_logs_retries_until_startup_output(monkeypatch):
+    class DummyContainer:
+        def __init__(self) -> None:
+            self.status = "running"
+            self.attrs = {"State": {"Status": "running"}}
+            self._log_reads = 0
+
+        def reload(self) -> None:
+            self.attrs["State"]["Status"] = self.status
+
+        def logs(self, *args, **kwargs):
+            self._log_reads += 1
+            if self._log_reads == 1:
+                return b""
+            return b"ready\n"
+
+    container = DummyContainer()
+
+    class DummyContainers:
+        def get(self, name):
+            return container
+
+    class DummyClient:
+        containers = DummyContainers()
+
+    monkeypatch.setattr(docker_ops, "_client", lambda: DummyClient())
+    monkeypatch.setattr(docker_ops.time, "sleep", lambda _: None)
+
+    logs = list(docker_ops.container_logs("vpn-test", lines=10))
+
+    assert logs == ["ready"]
+
+
 def test_create_vpn_container_resolves_files_from_compose_root(tmp_path, monkeypatch):
     compose_root = tmp_path / "state"
     compose_root.mkdir()

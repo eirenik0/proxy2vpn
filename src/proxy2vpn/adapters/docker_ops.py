@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Iterable, Iterator
 
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
@@ -22,6 +23,8 @@ from docker.models.containers import Container
 from docker.errors import DockerException, NotFound
 
 DEFAULT_TIMEOUT = 60
+LOG_WAIT_TIMEOUT = 2.0
+LOG_WAIT_INTERVAL = 0.1
 
 logger = get_logger(__name__)
 
@@ -292,6 +295,24 @@ def remove_container(name: str) -> None:
         raise RuntimeError(f"Failed to remove container {name}: {exc}") from exc
 
 
+def _decode_log_output(output: bytes | list[bytes] | list[str] | str) -> list[str]:
+    """Return decoded log lines from docker SDK output."""
+    if isinstance(output, list):
+        lines: list[str] = []
+        for line in output:
+            lines.append(
+                line.decode(errors="replace").rstrip()
+                if isinstance(line, bytes)
+                else str(line).rstrip()
+            )
+        return lines
+
+    if isinstance(output, bytes):
+        return output.decode(errors="replace").splitlines()
+
+    return str(output).splitlines()
+
+
 def container_logs(name: str, lines: int = 100, follow: bool = False) -> Iterator[str]:
     """Yield log lines from a container.
 
@@ -306,22 +327,27 @@ def container_logs(name: str, lines: int = 100, follow: bool = False) -> Iterato
         if follow:
             for line in container.logs(stream=True, follow=True, tail=lines):
                 if isinstance(line, bytes):
-                    yield line.decode().rstrip()
+                    yield line.decode(errors="replace").rstrip()
                 else:
                     yield str(line).rstrip()
         else:
-            output = container.logs(tail=lines)
-            if isinstance(output, list):
-                for line in output:
-                    yield (
-                        str(line.decode().rstrip())
-                        if isinstance(line, bytes)
-                        else str(line)
-                    )
-                return
-            output = output.decode().splitlines()
-            for line in output:
-                yield line
+            deadline = time.monotonic() + LOG_WAIT_TIMEOUT
+            while True:
+                output = container.logs(tail=lines)
+                decoded = _decode_log_output(output)
+                if decoded:
+                    for line in decoded:
+                        yield line
+                    return
+
+                container.reload()
+                state = container.attrs.get("State", {})
+                status = state.get("Status") or getattr(container, "status", "")
+                if status not in {"created", "running", "restarting"}:
+                    return
+                if time.monotonic() >= deadline:
+                    return
+                time.sleep(LOG_WAIT_INTERVAL)
     except DockerException as exc:
         raise RuntimeError(f"Failed to fetch logs for {name}: {exc}") from exc
 
