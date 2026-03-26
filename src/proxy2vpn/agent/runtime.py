@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import (
     ActionRecord,
     AgentIncident,
@@ -27,7 +27,6 @@ from proxy2vpn.adapters.fleet_state_manager import (
 )
 from proxy2vpn.adapters.http_client import GluetunControlClient
 from proxy2vpn.adapters.logging_utils import get_logger
-from proxy2vpn.core import config
 from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 
@@ -46,16 +45,22 @@ class AgentWatchdog:
     def __init__(
         self,
         compose_file: Path,
-        interval_seconds: int = config.AGENT_DEFAULT_INTERVAL,
+        interval_seconds: int | None = None,
         llm_mode: str | None = None,
         store: AgentStateStore | None = None,
+        settings: AgentSettings | None = None,
     ) -> None:
         self.compose_file = compose_file.expanduser().resolve()
-        self.interval_seconds = interval_seconds
-        self.llm_mode = (
-            llm_mode or os.getenv("PROXY2VPN_AGENT_LLM_MODE") or "disabled"
-        ).strip() or "disabled"
-        self.store = store or AgentStateStore(self.compose_file)
+        self.settings = settings or (
+            store.settings if store is not None else AgentSettings()
+        )
+        self.interval_seconds = (
+            interval_seconds
+            if interval_seconds is not None
+            else self.settings.interval_seconds
+        )
+        self.llm_mode = (llm_mode or self.settings.llm_mode).strip() or "disabled"
+        self.store = store or AgentStateStore(self.compose_file, settings=self.settings)
         self._incident_enricher = self._build_incident_enricher()
         self._llm_warning_emitted = False
 
@@ -123,7 +128,7 @@ class AgentWatchdog:
         state.status.unhealthy_count = sum(
             1
             for snapshot in updated_snapshots
-            if snapshot.health_score < config.AGENT_HEALTH_THRESHOLD
+            if snapshot.health_score < self.settings.health_threshold
         )
         self.store.write_state(state)
         if cycle_error is not None:
@@ -279,7 +284,7 @@ class AgentWatchdog:
 
         failure_count = (
             0
-            if health_score >= config.AGENT_HEALTH_THRESHOLD
+            if health_score >= self.settings.health_threshold
             else (previous.consecutive_failures + 1 if previous else 1)
         )
         snapshot = ServiceSnapshot(
@@ -292,7 +297,7 @@ class AgentWatchdog:
             last_action_result=previous.last_action_result if previous else None,
         )
 
-        if health_score >= config.AGENT_HEALTH_THRESHOLD:
+        if health_score >= self.settings.health_threshold:
             self._resolve_active_incidents(service.name, incidents)
             return snapshot
 
@@ -331,7 +336,7 @@ class AgentWatchdog:
             restart_result = await self._restart_tunnel(service, state)
             snapshot.last_action = "restart_tunnel"
             snapshot.last_action_result = restart_result
-            await asyncio.sleep(config.AGENT_RECHECK_DELAY_SECONDS)
+            await asyncio.sleep(self.settings.recheck_delay_seconds)
 
             post_restart = await self._evaluate_health(service)
             snapshot.container_status = post_restart["container_status"]
@@ -339,11 +344,11 @@ class AgentWatchdog:
             snapshot.last_check_at = utc_now()
             snapshot.consecutive_failures = (
                 0
-                if post_restart["health_score"] >= config.AGENT_HEALTH_THRESHOLD
+                if post_restart["health_score"] >= self.settings.health_threshold
                 else failure_count
             )
 
-            if post_restart["health_score"] >= config.AGENT_HEALTH_THRESHOLD:
+            if post_restart["health_score"] >= self.settings.health_threshold:
                 self._resolve_active_incidents(service.name, incidents)
                 return snapshot
 
@@ -362,10 +367,10 @@ class AgentWatchdog:
             snapshot.container_status = post_restore["container_status"]
             snapshot.consecutive_failures = (
                 0
-                if post_restore["health_score"] >= config.AGENT_HEALTH_THRESHOLD
+                if post_restore["health_score"] >= self.settings.health_threshold
                 else failure_count
             )
-            if post_restore["health_score"] >= config.AGENT_HEALTH_THRESHOLD:
+            if post_restore["health_score"] >= self.settings.health_threshold:
                 self._resolve_active_incidents(service.name, incidents)
                 return snapshot
 
@@ -435,11 +440,11 @@ class AgentWatchdog:
             await asyncio.to_thread(
                 docker_ops.start_vpn_service, service, profile, True
             )
-            await asyncio.sleep(config.AGENT_RECHECK_DELAY_SECONDS)
+            await asyncio.sleep(self.settings.recheck_delay_seconds)
             health = await self._evaluate_health(service)
             result = (
                 "success"
-                if health["health_score"] >= config.AGENT_HEALTH_THRESHOLD
+                if health["health_score"] >= self.settings.health_threshold
                 else "failed"
             )
             self._append_action(
@@ -514,7 +519,7 @@ class AgentWatchdog:
                 details=details or {},
             )
         )
-        state.actions = state.actions[-config.AGENT_ACTION_HISTORY_LIMIT :]
+        state.actions = state.actions[-self.settings.action_history_limit :]
 
     def _update_snapshot_action(
         self,
@@ -531,7 +536,7 @@ class AgentWatchdog:
                 break
 
     def _can_restore(self, service_name: str, actions: list[ActionRecord]) -> bool:
-        cutoff = utc_now() - timedelta(seconds=config.AGENT_RESTORE_COOLDOWN_SECONDS)
+        cutoff = utc_now() - timedelta(seconds=self.settings.restore_cooldown_seconds)
         for action in reversed(actions):
             if action.service_name == service_name and action.action == "restore":
                 return action.ts < cutoff
@@ -635,7 +640,7 @@ class AgentWatchdog:
                 extra={"llm_mode": self.llm_mode},
             )
             return None
-        return OpenAIIncidentEnricher()
+        return OpenAIIncidentEnricher(settings=self.settings)
 
     def _upsert_incident(
         self,
@@ -725,7 +730,7 @@ class AgentWatchdog:
         incident_type: str,
         now: datetime,
     ) -> bool:
-        cooldown = timedelta(seconds=config.AGENT_INCIDENT_COOLDOWN_SECONDS)
+        cooldown = timedelta(seconds=self.settings.incident_cooldown_seconds)
         for incident in incidents:
             if incident.service_name != service_name or incident.type != incident_type:
                 continue

@@ -8,6 +8,7 @@ from filelock import Timeout
 import typer
 from rich.table import Table
 
+from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.runtime import AgentWatchdog
 from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.adapters.display_utils import console
@@ -16,6 +17,7 @@ from proxy2vpn.common import abort
 from proxy2vpn.core import config
 
 app = HelpfulTyper(help="Run the local service watchdog")
+DEFAULT_AGENT_SETTINGS = AgentSettings()
 
 
 @app.command("run")
@@ -26,7 +28,7 @@ async def run(
         False, "--once", help="Run one monitoring cycle and exit"
     ),
     interval: int = typer.Option(
-        config.AGENT_DEFAULT_INTERVAL,
+        DEFAULT_AGENT_SETTINGS.interval_seconds,
         "--interval",
         help="Polling interval in seconds for foreground mode",
     ),

@@ -1,5 +1,6 @@
 """Agent runtime for proxy2vpn."""
 
+from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import (
     ActionRecord,
     AgentIncident,
@@ -17,6 +18,7 @@ from proxy2vpn.agent.state import AgentStateStore
 
 __all__ = [
     "ActionRecord",
+    "AgentSettings",
     "AgentIncident",
     "IncidentContext",
     "IncidentEnrichment",

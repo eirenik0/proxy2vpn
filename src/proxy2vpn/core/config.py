@@ -65,23 +65,6 @@ CONTROL_API_ENDPOINTS = {
 # API can be queried without manual setup.
 CONTROL_AUTH_CONFIG_FILE: Path = Path("control-server-auth.toml")
 
-# Agent state lives next to the compose file so watchdog state stays scoped
-# to one workspace/compose root.
-AGENT_STATE_DIRNAME = ".proxy2vpn-agent"
-AGENT_STATE_FILE = "state.json"
-AGENT_INCIDENTS_FILE = "incidents.jsonl"
-AGENT_RUNTIME_LOCK_FILE = "runtime.lock"
-AGENT_DEFAULT_INTERVAL = 30
-AGENT_HEALTH_THRESHOLD = 60
-AGENT_RECHECK_DELAY_SECONDS = 15
-AGENT_RESTORE_COOLDOWN_SECONDS = 600
-AGENT_INCIDENT_COOLDOWN_SECONDS = 1800
-AGENT_ACTION_HISTORY_LIMIT = 100
-AGENT_OPENAI_MODEL = "gpt-5-nano"
-AGENT_OPENAI_TIMEOUT_SECONDS = 10
-AGENT_OPENAI_MAX_OUTPUT_TOKENS = 220
-AGENT_OPENAI_REASONING_EFFORT = "minimal"
-
 # Default content of the control server authentication configuration.
 # It declares a single role allowing access to the endpoints required by
 # proxy2vpn with ``auth = "none"`` so no credentials are needed.

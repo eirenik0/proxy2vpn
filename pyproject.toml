@@ -25,6 +25,7 @@ dependencies = [
     "filelock",
     "psutil",
     "pydantic>=2",
+    "pydantic-settings",
     "openai",
 ]
 

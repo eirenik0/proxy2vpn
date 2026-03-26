@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from filelock import Timeout
 import pytest
 
+from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import (
     AgentIncident,
     AgentState,
@@ -408,7 +409,7 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
         status=AgentStatus(
             compose_path=str(agent_compose_file),
             daemon_mode="once",
-            interval_seconds=config.AGENT_DEFAULT_INTERVAL,
+            interval_seconds=AgentSettings().interval_seconds,
             llm_mode="disabled",
         ),
         services=[

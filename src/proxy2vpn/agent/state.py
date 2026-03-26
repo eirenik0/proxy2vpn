@@ -7,6 +7,7 @@ from pathlib import Path
 
 from filelock import FileLock
 
+from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import AgentIncident, AgentState
 from proxy2vpn.core import config
 
@@ -14,13 +15,16 @@ from proxy2vpn.core import config
 class AgentStateStore:
     """Persist state, incidents, and runtime lock files for one compose root."""
 
-    def __init__(self, compose_file: Path):
+    def __init__(
+        self, compose_file: Path, settings: AgentSettings | None = None
+    ) -> None:
         self.compose_file = compose_file.expanduser().resolve()
         self.compose_root = config.resolve_compose_root(self.compose_file)
-        self.agent_dir = self.compose_root / config.AGENT_STATE_DIRNAME
-        self.state_file = self.agent_dir / config.AGENT_STATE_FILE
-        self.incidents_file = self.agent_dir / config.AGENT_INCIDENTS_FILE
-        self.runtime_lock_path = self.agent_dir / config.AGENT_RUNTIME_LOCK_FILE
+        self.settings = settings or AgentSettings()
+        self.agent_dir = self.compose_root / self.settings.state_dirname
+        self.state_file = self.agent_dir / self.settings.state_file
+        self.incidents_file = self.agent_dir / self.settings.incidents_file
+        self.runtime_lock_path = self.agent_dir / self.settings.runtime_lock_file
 
     def ensure_dir(self) -> None:
         self.agent_dir.mkdir(parents=True, exist_ok=True)

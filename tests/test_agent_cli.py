@@ -2,6 +2,7 @@ import json
 
 from typer.testing import CliRunner
 
+from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.models import (
     AgentIncident,
     AgentState,
@@ -129,7 +130,7 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path):
             daemon_mode="once",
             started_at=utc_now(),
             last_loop_at=utc_now(),
-            interval_seconds=config.AGENT_DEFAULT_INTERVAL,
+            interval_seconds=AgentSettings().interval_seconds,
             service_count=1,
             unhealthy_count=1,
             last_error=None,

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from proxy2vpn.adapters.logging_utils import get_logger
-from proxy2vpn.core import config
+from proxy2vpn.agent.config import AgentSettings
 
 logger = get_logger(__name__)
 
@@ -44,33 +43,23 @@ class OpenAIIncidentEnricher:
         timeout_seconds: float | None = None,
         max_output_tokens: int | None = None,
         reasoning_effort: str | None = None,
+        settings: AgentSettings | None = None,
         client: Any | None = None,
     ) -> None:
-        self.model = (
-            model
-            or os.getenv("PROXY2VPN_AGENT_OPENAI_MODEL")
-            or config.AGENT_OPENAI_MODEL
-        ).strip()
+        self.settings = settings or AgentSettings()
+        self.model = (model or self.settings.openai_model).strip()
         self.timeout_seconds = float(
             timeout_seconds
             if timeout_seconds is not None
-            else os.getenv(
-                "PROXY2VPN_AGENT_OPENAI_TIMEOUT_SECONDS",
-                str(config.AGENT_OPENAI_TIMEOUT_SECONDS),
-            )
+            else self.settings.openai_timeout_seconds
         )
         self.max_output_tokens = int(
             max_output_tokens
             if max_output_tokens is not None
-            else os.getenv(
-                "PROXY2VPN_AGENT_OPENAI_MAX_OUTPUT_TOKENS",
-                str(config.AGENT_OPENAI_MAX_OUTPUT_TOKENS),
-            )
+            else self.settings.openai_max_output_tokens
         )
         self.reasoning_effort = (
-            reasoning_effort
-            or os.getenv("PROXY2VPN_AGENT_OPENAI_REASONING_EFFORT")
-            or config.AGENT_OPENAI_REASONING_EFFORT
+            reasoning_effort or self.settings.openai_reasoning_effort
         ).strip()
         self._client = client
 
