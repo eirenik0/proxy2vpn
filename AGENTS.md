@@ -190,7 +190,8 @@ This project uses [Towncrier](https://towncrier.readthedocs.io/) to manage the c
 - Fragments are removed automatically when the changelog is built.
 
 ### Code Quality
-- Run `make fmt` and `make lint` after code changes
+- `Makefile` provides `make fmt` and `make lint` targets for formatting and linting.
+- After every code-editing run, always run `make fmt` and `make lint` before handing work back.
 - After implementing features, update the `/news` folder with appropriate fragments
 - Ensure Docker containers are properly tested before committing changes
 
