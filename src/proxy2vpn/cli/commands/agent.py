@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import os
 from pathlib import Path
 import signal
@@ -191,9 +192,12 @@ def status(
     watchdog = AgentWatchdog(compose_file)
     state = watchdog.store.read_state() or watchdog.empty_state()
     daemon_data = _daemon_payload(watchdog.store)
+    with console.status("[cyan]Analyzing health[/cyan]", spinner="dots"):
+        remediation = asyncio.run(watchdog.build_remediation_overview(state))
 
     payload = state.model_dump(mode="json")
     payload["daemon"] = daemon_data
+    payload["remediation"] = remediation
     if json_output:
         typer.echo(json.dumps(payload, indent=2))
         return
@@ -211,6 +215,14 @@ def status(
     )
     if status_data.last_error:
         console.print(f"[red]Last error:[/red] {status_data.last_error}")
+
+    if remediation["blocked"]:
+        console.print("\n[bold]Remediation:[/bold]")
+        for entry in remediation["services"]:
+            if not entry.get("suppressed"):
+                continue
+            reasons = ", ".join(block["reason"] for block in entry.get("blocks", []))
+            console.print(f"- {entry['service_name']}: {reasons}")
 
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Service", style="green")
@@ -353,10 +365,13 @@ async def approve(
     ctx: typer.Context,
     incident_id: str = typer.Argument(..., help="Incident identifier"),
 ):
-    """Approve and execute the pending escalation for one incident."""
+    """Deprecated compatibility command for manually triggering a rotation."""
 
     compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
     watchdog = AgentWatchdog(compose_file)
+    console.print(
+        "[yellow]Deprecated:[/yellow] `proxy2vpn agent approve` is kept for compatibility; use the agent's automatic remediation flow."
+    )
     try:
         incident = await watchdog.approve_incident(incident_id)
     except KeyError:

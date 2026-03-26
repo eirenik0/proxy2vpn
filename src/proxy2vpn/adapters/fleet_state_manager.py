@@ -528,17 +528,37 @@ class FleetStateManager:
 
     def _extract_country_from_service(self, service: VPNService) -> str:
         """Extract country from service name or location."""
-        country = service.environment.get("SERVER_COUNTRIES", "")
+        country = service.environment.get("SERVER_COUNTRIES", "").strip()
         if country:
-            return country
+            return country.replace("-", " ").title()
 
-        # Try service name format: provider-country-city
-        name_parts = service.name.split("-")
-        if len(name_parts) >= 3:
-            return name_parts[1].replace("-", " ").title()
+        label_country = (
+            service.labels.get("vpn.country", "").strip()
+            if hasattr(service, "labels")
+            else ""
+        )
+        if label_country:
+            return label_country.replace("-", " ").title()
 
-        # Fallback to location
-        return service.location
+        provider = (
+            service.provider.replace(" ", "-").lower() if service.provider else ""
+        )
+        location = (
+            service.location.replace(" ", "-").lower() if service.location else ""
+        )
+        name = service.name.lower()
+
+        if provider and name.startswith(provider + "-"):
+            name = name[len(provider) + 1 :]
+
+        if name.rsplit("-", 1)[-1].isdigit():
+            name = name.rsplit("-", 1)[0]
+
+        if location and name.endswith("-" + location):
+            name = name[: -(len(location) + 1)]
+
+        normalized = name.replace("-", " ").strip()
+        return normalized.title() if normalized else service.location
 
     def _rank_rotation_candidates(
         self,

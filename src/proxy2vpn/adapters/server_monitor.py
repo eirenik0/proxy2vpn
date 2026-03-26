@@ -2,15 +2,16 @@
 
 import asyncio
 import random
-import time
 from datetime import datetime, timedelta
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .display_utils import console
-from .http_client import HTTPClient, HTTPClientConfig, HTTPClientError
+from .http_client import HTTPClient, HTTPClientConfig
 from .logging_utils import get_logger
-from .proxy_utils import build_proxy_urls_from_container
-from .proxy_utils import redact_proxy_url
+from proxy2vpn.core.services.health_assessment import (
+    HealthAssessment,
+    HealthAssessmentService,
+)
 from proxy2vpn.core.models import VPNService
 
 logger = get_logger(__name__)
@@ -99,68 +100,40 @@ class ServerMonitor:
         self.http_client = http_client or HTTPClient(
             HTTPClientConfig(base_url="http://localhost")
         )
+        self.assessor = HealthAssessmentService()
         self.availability_cache: dict[str, ServerAvailability] = {}
         self.rotation_history: list[RotationRecord] = []
         self.failed_servers: dict[str, list[datetime]] = {}  # Track failure history
+        self.last_assessments: dict[str, HealthAssessment] = {}
 
     async def check_service_health(
         self, service: VPNService, timeout: int = 30
     ) -> bool:
         """Check if a VPN service is healthy"""
         try:
-            from .docker_ops import get_container_by_service_name
-
-            # Get container
-            container = get_container_by_service_name(service.name)
-            if not container:
-                logger.warning(f"Container not found for service {service.name}")
-                console.print(f"[yellow]⚠️ Container not found:[/yellow] {service.name}")
-                return False
-
-            # Check container status
-            container.reload()
-            if container.status != "running":
-                logger.warning(
-                    f"Container {service.name} is not running: {container.status}"
-                )
-                console.print(
-                    f"[yellow]⚠️ Container not running:[/yellow] {service.name} ({container.status})"
-                )
-                return False
-
-            # Test proxy connectivity
-            proxies = build_proxy_urls_from_container(container, service.port)
-            test_url = "http://httpbin.org/ip"
-
-            start_time = time.perf_counter()
-            await self.http_client.get(test_url, proxy=proxies["http"], timeout=timeout)
-            response_time = time.perf_counter() - start_time
-
-            # Update availability cache
+            assessment = await self.assessor.assess_service(service, timeout=timeout)
+            self.last_assessments[service.name] = assessment
             self.availability_cache[service.location] = ServerAvailability(
                 location=service.location,
                 provider=service.provider,
-                is_available=True,
+                is_available=assessment.health_score >= self.assessor.threshold,
                 tested_at=datetime.now(),
-                response_time=response_time,
+                response_time=None,
+                error_message=(
+                    None
+                    if assessment.health_score >= self.assessor.threshold
+                    else ", ".join(assessment.failing_checks) or assessment.health_class
+                ),
             )
-            return True
+            return assessment.health_score >= self.assessor.threshold
 
         except asyncio.TimeoutError:
             logger.warning(f"Timeout testing service {service.name}")
             console.print(f"[yellow]⏱️ Timeout testing service:[/yellow] {service.name}")
             self._record_failure(service.location)
             return False
-        except HTTPClientError as e:
-            logger.error(
-                f"Network error testing service {service.name}: {redact_proxy_url(str(e))}"
-            )
-            self._record_failure(service.location)
-            return False
         except Exception as e:
-            logger.error(
-                f"Error checking service {service.name}: {redact_proxy_url(str(e))}"
-            )
+            logger.error(f"Error checking service {service.name}: {e}")
             return False
 
     def _record_failure(self, location: str):
@@ -197,47 +170,29 @@ class ServerMonitor:
         services = self.fleet_manager.compose_manager.list_services()
         vpn_services = [s for s in services if hasattr(s, "provider")]
 
-        health_results = {}
-
-        # Use semaphore to limit concurrent health checks
-        semaphore = asyncio.Semaphore(10)
-
-        async def check_service_with_semaphore(service: VPNService):
-            async with semaphore:
-                try:
-                    is_healthy = await self.check_service_health(service)
-                    health_results[service.name] = is_healthy
-
-                    if is_healthy:
-                        console.print(
-                            f"[green]✅ {service.name} ({service.location}) - Healthy[/green]"
-                        )
-                    else:
-                        console.print(
-                            f"[red]❌ {service.name} ({service.location}) - Unhealthy[/red]"
-                        )
-
-                except Exception as e:
-                    logger.error(f"Health check failed for {service.name}: {e}")
-                    health_results[service.name] = False
-                    console.print(
-                        f"[red]❌ {service.name} ({service.location}) - Error: {e}[/red]"
-                    )
-
-        # Run health checks in parallel
-        tasks = [check_service_with_semaphore(service) for service in vpn_services]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        assessments = await self.assessor.assess_services(vpn_services)
+        self.last_assessments = assessments
+        health_results: dict[str, bool] = {}
+        for service in vpn_services:
+            assessment = assessments[service.name]
+            is_healthy = assessment.health_score >= self.assessor.threshold
+            health_results[service.name] = is_healthy
+            if is_healthy:
+                console.print(
+                    f"[green]✅ {service.name} ({service.location}) - Healthy ({assessment.health_score}/100)[/green]"
+                )
+            else:
+                console.print(
+                    f"[red]❌ {service.name} ({service.location}) - {assessment.health_class} ({assessment.health_score}/100)[/red]"
+                )
 
         return health_results
 
     async def rotate_failed_servers(self, dry_run: bool = False) -> RotationResult:
-        """Rotate servers that are failing or unavailable"""
+        """Compatibility shim that only reports failed services."""
         console.print("[yellow]🔍 Checking server health across fleet...[/yellow]")
 
-        # Check health of all services
         health_results = await self.check_fleet_health()
-
-        # Find failed services
         failed_services = []
         services = self.fleet_manager.compose_manager.list_services()
 
@@ -252,55 +207,13 @@ class ServerMonitor:
             return RotationResult(rotated=0, failed=0, services=[])
 
         console.print(
-            f"[yellow]🔄 Found {len(failed_services)} services needing rotation[/yellow]"
+            f"[yellow]🔄 Found {len(failed_services)} services needing attention; rotation is now handled by the agent[/yellow]"
         )
-
-        # Generate rotation plan
-        rotation_plan = await self._generate_rotation_plan(failed_services)
-
-        if dry_run:
-            self._display_rotation_plan(rotation_plan)
-            return RotationResult(rotated=0, failed=0, services=[], dry_run=True)
-
-        # Execute rotations
-        rotated_count = 0
-        failed_count = 0
-
-        for rotation in rotation_plan.rotations:
-            try:
-                console.print(
-                    f"[blue]🔄 Rotating {rotation.service_name}: {rotation.old_location} → {rotation.new_location}[/blue]"
-                )
-
-                await self._execute_service_rotation(rotation)
-                rotated_count += 1
-
-                # Record rotation history
-                self.rotation_history.append(
-                    RotationRecord(
-                        timestamp=datetime.now(),
-                        service_name=rotation.service_name,
-                        old_location=rotation.old_location,
-                        new_location=rotation.new_location,
-                        reason=rotation.reason,
-                    )
-                )
-
-            except Exception as e:
-                logger.error(f"Failed to rotate {rotation.service_name}: {e}")
-                console.print(
-                    f"[red]❌ Failed to rotate {rotation.service_name}: {e}[/red]"
-                )
-                failed_count += 1
-
-        console.print(
-            f"[green]✅ Rotation complete: {rotated_count} rotated, {failed_count} failed[/green]"
-        )
-
         return RotationResult(
-            rotated=rotated_count,
-            failed=failed_count,
-            services=[r.service_name for r in rotation_plan.rotations],
+            rotated=0,
+            failed=len(failed_services),
+            services=[service.name for service in failed_services],
+            dry_run=True if dry_run else False,
         )
 
     async def _generate_rotation_plan(
@@ -350,15 +263,37 @@ class ServerMonitor:
 
     def _extract_country_from_service(self, service: VPNService) -> str:
         """Extract country from service name or location"""
-        # Try to extract country from service name if it follows naming convention
-        # Format: provider-country-city
-        name_parts = service.name.split("-")
-        if len(name_parts) >= 3:
-            country = name_parts[1].replace("-", " ").title()
-            return country
+        country = service.environment.get("SERVER_COUNTRIES", "").strip()
+        if country:
+            return country.replace("-", " ").title()
 
-        # Fallback: use location as country (works for country-level locations)
-        return service.location
+        label_country = (
+            service.labels.get("vpn.country", "").strip()
+            if hasattr(service, "labels")
+            else ""
+        )
+        if label_country:
+            return label_country.replace("-", " ").title()
+
+        provider = (
+            service.provider.replace(" ", "-").lower() if service.provider else ""
+        )
+        location = (
+            service.location.replace(" ", "-").lower() if service.location else ""
+        )
+        name = service.name.lower()
+
+        if provider and name.startswith(provider + "-"):
+            name = name[len(provider) + 1 :]
+
+        if name.rsplit("-", 1)[-1].isdigit():
+            name = name.rsplit("-", 1)[0]
+
+        if location and name.endswith("-" + location):
+            name = name[: -(len(location) + 1)]
+
+        normalized = name.replace("-", " ").strip()
+        return normalized.title() if normalized else service.location
 
     def _slug_location(self, value: str) -> str:
         """Normalize a location segment to the service-name slug format."""

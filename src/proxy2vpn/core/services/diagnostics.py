@@ -33,6 +33,12 @@ class DiagnosticAnalyzer:
         recent_lines = lines[-10:] if len(lines) > 10 else lines
         recent_text = " ".join(recent_lines).lower()
 
+        server_selection_failure = self._detect_server_selection_failure(
+            recent_lines, recent_text
+        )
+        if server_selection_failure is not None:
+            return [server_selection_failure]
+
         # Authentication failures in recent logs only
         recent_auth_failures = sum(
             "auth_failed" in line.lower() for line in recent_lines
@@ -95,6 +101,40 @@ class DiagnosticAnalyzer:
                 recommendation="",
             )
         ]
+
+    def _detect_server_selection_failure(
+        self, recent_lines: list[str], recent_text: str
+    ) -> DiagnosticResult | None:
+        """Detect OpenVPN server selection failures caused by missing matching servers."""
+
+        markers = (
+            "finding a valid server connection",
+            "filtering servers",
+            "no server found",
+        )
+        if not any(marker in recent_text for marker in markers):
+            return None
+        if "openvpn" not in recent_text and "vpn" not in recent_text:
+            return None
+
+        failure_count = sum(
+            (
+                "no server found" in line.lower()
+                or "finding a valid server connection" in line.lower()
+            )
+            for line in recent_lines
+        )
+        persistent = failure_count >= 2 or "retrying in" in recent_text
+        return DiagnosticResult(
+            check="config_error",
+            passed=False,
+            message="OpenVPN could not find a server matching the configured country/city.",
+            recommendation=(
+                "Verify SERVER_COUNTRIES/SERVER_CITIES, provider hostname, and "
+                "refresh the provider server list."
+            ),
+            persistent=persistent,
+        )
 
     def check_connectivity(
         self,

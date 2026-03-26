@@ -77,7 +77,7 @@ def rotate(
     ctx: typer.Context,
     country: str = typer.Option(None, help="Rotate servers in specific country"),
     provider: str = typer.Option("protonvpn", help="VPN provider"),
-    criteria: str = typer.Option("random", help="random|performance|load"),
+    criteria: str = typer.Option("performance", help="random|performance|load"),
     dry_run: bool = typer.Option(False, help="Show rotation plan only"),
 ):
     """Rotate VPN servers for better availability"""

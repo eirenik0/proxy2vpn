@@ -22,7 +22,9 @@ from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.fleet_state_manager import RotationChange
 from proxy2vpn.core import config
 from proxy2vpn.core.models import ServiceCredentials
+from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
+import proxy2vpn.core.services.health_assessment as health_assessment
 import proxy2vpn.agent.runtime as agent_runtime
 
 
@@ -206,10 +208,28 @@ def test_agent_run_once_healthy_updates_snapshots_only(
 ):
     dummy_client, calls = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
         lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
+            [
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    message="Recent authentication failure detected",
+                    recommendation="Verify credentials",
+                    persistent=True,
+                )
+            ]
+            if service_name == "protonvpn-united-states-new-york"
+            else healthy_results()
+        ),
     )
     monkeypatch.setattr(
         agent_runtime.docker_ops,
@@ -234,10 +254,28 @@ def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
 ):
     dummy_client, calls = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
         lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
+            [
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    message="Recent authentication failure detected",
+                    recommendation="Verify credentials",
+                    persistent=True,
+                )
+            ]
+            if service_name == "protonvpn-united-states-new-york"
+            else healthy_results()
+        ),
     )
     monkeypatch.setattr(
         agent_runtime.docker_ops,
@@ -299,11 +337,31 @@ def test_agent_run_once_executes_sync_diagnostics_off_event_loop(
     assert watchdog.store.load_incidents() == []
 
 
+def test_agent_run_forever_persists_daemon_mode_immediately(
+    agent_compose_file, monkeypatch
+):
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    async def fake_run_cycle(state):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(watchdog, "run_cycle", fake_run_cycle)
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(watchdog.run_forever("daemon"))
+
+    persisted = watchdog.store.read_state()
+    assert persisted is not None
+    assert persisted.status.daemon_mode == "daemon"
+    assert persisted.status.started_at is not None
+
+
 def test_agent_first_unhealthy_cycle_restarts_tunnel(
     agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, calls = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
@@ -340,6 +398,7 @@ def test_agent_unhealthy_after_restart_triggers_restore(
 ):
     dummy_client, calls = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
@@ -428,6 +487,7 @@ def test_agent_persistent_auth_failure_creates_high_severity_incident(
 ):
     dummy_client, _ = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
@@ -471,10 +531,28 @@ def test_agent_persistent_auth_failure_with_healthy_shared_profile_restarts_tunn
 ):
     dummy_client, calls = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
         lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
+            [
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    message="Recent authentication failure detected",
+                    recommendation="Verify credentials",
+                    persistent=True,
+                )
+            ]
+            if service_name == "protonvpn-united-states-new-york"
+            else healthy_results()
+        ),
     )
 
     async def fake_analyze(service_name, analyzer, lines=20, timeout=5):
@@ -518,10 +596,28 @@ def test_agent_open_auth_incident_blocks_repeated_isolated_auth_restart(
 ):
     dummy_client, calls = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
         lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
+            [
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    message="Recent authentication failure detected",
+                    recommendation="Verify credentials",
+                    persistent=True,
+                )
+            ]
+            if service_name == "protonvpn-united-states-new-york"
+            else healthy_results()
+        ),
     )
 
     store = AgentStateStore(shared_profile_agent_compose_file)
@@ -596,6 +692,7 @@ def test_agent_openai_enrichment_populates_human_explanation(
 ):
     dummy_client, _ = control_client_factory
     monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
         agent_runtime.docker_ops,
         "get_container_by_service_name",
@@ -747,6 +844,23 @@ def test_investigation_validation_honors_service_proxy_overrides(
 
     assert "HTTPPROXY_USER is required when HTTPPROXY=on." not in errors
     assert "HTTPPROXY_PASSWORD is required when HTTPPROXY=on." not in errors
+
+
+def test_service_country_fallback_uses_full_country_slug(agent_compose_file):
+    service = VPNService.create(
+        name="protonvpn-united-kingdom-london",
+        port=8080,
+        control_port=30000,
+        provider="protonvpn",
+        profile="test",
+        location="London",
+        environment={},
+        labels={},
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    assert watchdog._service_country(service) == "United Kingdom"
 
 
 def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeypatch):
@@ -1275,7 +1389,7 @@ def test_agent_restore_failure_creates_rotation_incident_after_grace_period(
     assert state.actions[0].result == "failed"
     assert state.services[0].degraded_since is not None
     assert incidents[0].recommended_action == "rotate"
-    assert incidents[0].approval_required is True
+    assert incidents[0].approval_required is False
     assert incidents[0].status == "open"
 
 
@@ -1303,7 +1417,7 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
     incident = AgentIncident(
         id="incident123",
         service_name="protonvpn-united-states-new-york",
-        type="rotation_required",
+        type="rotation_exhausted",
         severity="medium",
         status="open",
         created_at=utc_now(),
@@ -1311,7 +1425,7 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
         failure_count=2,
         summary="Needs rotation",
         recommended_action="rotate",
-        approval_required=True,
+        approval_required=False,
     )
     store.append_incident(incident)
     captured_config = {}
@@ -1400,7 +1514,7 @@ def test_approve_incident_migrates_other_open_incidents_after_service_rename(
         AgentIncident(
             id="incident123",
             service_name="protonvpn-united-states-new-york",
-            type="rotation_required",
+            type="rotation_exhausted",
             severity="medium",
             status="open",
             created_at=utc_now(),
@@ -1408,7 +1522,7 @@ def test_approve_incident_migrates_other_open_incidents_after_service_rename(
             failure_count=2,
             summary="Needs rotation",
             recommended_action="rotate",
-            approval_required=True,
+            approval_required=False,
         )
     )
     store.append_incident(
@@ -1488,7 +1602,7 @@ def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkey
     failed_incident = AgentIncident(
         id="incident123",
         service_name="protonvpn-united-states-new-york",
-        type="rotation_required",
+        type="rotation_exhausted",
         severity="medium",
         status="failed",
         created_at=utc_now(),
@@ -1496,7 +1610,7 @@ def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkey
         failure_count=2,
         summary="Previous rotation failed",
         recommended_action="rotate",
-        approval_required=True,
+        approval_required=False,
     )
     store.append_incident(failed_incident)
 
@@ -1575,7 +1689,7 @@ def test_investigation_context_keeps_rotation_history_after_service_rename(
     incident = AgentIncident(
         id="incident123",
         service_name="protonvpn-united-states-boston",
-        type="rotation_required",
+        type="rotation_exhausted",
         severity="medium",
         status="open",
         created_at=utc_now(),
