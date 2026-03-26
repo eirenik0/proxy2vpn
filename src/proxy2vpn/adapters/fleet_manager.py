@@ -490,12 +490,11 @@ class FleetManager:
 
     async def _deploy_containers(
         self, added_services: list[str], parallel: bool, force: bool
-    ) -> None:
+    ) -> tuple[list[str], list[str], list[str]]:
         """Deploy containers either in parallel or sequential mode."""
         if parallel:
-            await self._start_services_parallel(added_services, force)
-        else:
-            await self._start_services_sequential(added_services, force)
+            return await self._start_services_parallel(added_services, force)
+        return await self._start_services_sequential(added_services, force)
 
     async def _handle_deployment_failure(
         self, added_services: list[str], error: Exception, force: bool
@@ -531,6 +530,27 @@ class FleetManager:
                 )
 
         return error_msg
+
+    async def _start_service(
+        self, service_name: str, force: bool
+    ) -> tuple[str, str | None]:
+        """Start a single service and capture any failure message."""
+        from .docker_ops import start_vpn_service
+
+        try:
+            console.print(f"[blue]🔄[/blue] Starting {service_name}...")
+
+            service = self.compose_manager.get_service(service_name)
+            profile = self.compose_manager.get_profile(service.profile)
+
+            await asyncio.to_thread(start_vpn_service, service, profile, force)
+
+            console.print(f"[green]✅[/green] Started {service_name}")
+            return service_name, None
+        except Exception as e:
+            message = f"Failed to start {service_name}: {e}"
+            console.print(f"[red]❌[/red] {message}")
+            return service_name, message
 
     async def deploy_fleet(
         self,
@@ -568,9 +588,37 @@ class FleetManager:
                 )
 
                 # Deploy containers
-                await self._deploy_containers(added_services, parallel, force)
+                (
+                    started_services,
+                    failed_services,
+                    start_errors,
+                ) = await self._deploy_containers(added_services, parallel, force)
 
-                deployed = len(added_services)
+                if failed_services:
+                    error_source = (
+                        start_errors[0]
+                        if start_errors
+                        else f"{len(failed_services)} service(s) failed to start"
+                    )
+                    error_msg = await self._handle_deployment_failure(
+                        added_services, RuntimeError(error_source), force
+                    )
+                    errors.append(error_msg)
+                    if force:
+                        self._reset_agent_monitoring_state()
+                        deployed = len(started_services)
+                        failed = len(failed_services) + skipped
+                    else:
+                        deployed = 0
+                        failed = len(valid_services) + skipped
+                    return DeploymentResult(
+                        deployed=deployed,
+                        failed=failed,
+                        services=[s.name for s in valid_services],
+                        errors=errors,
+                    )
+
+                deployed = len(started_services)
                 self._reset_agent_monitoring_state()
 
             except Exception as e:
@@ -581,7 +629,7 @@ class FleetManager:
                 return DeploymentResult(
                     deployed=0,
                     failed=len(valid_services) + skipped,
-                    services=[],
+                    services=[s.name for s in valid_services],
                     errors=errors,
                 )
 
@@ -595,52 +643,45 @@ class FleetManager:
         finally:
             agent_lock.release()
 
-    async def _start_services_parallel(self, service_names: list[str], force: bool):
-        """Start services in parallel with limited concurrency"""
-        from .docker_ops import start_vpn_service
-
+    async def _start_services_parallel(
+        self, service_names: list[str], force: bool
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Start services in parallel with limited concurrency."""
         semaphore = asyncio.Semaphore(5)  # Max 5 concurrent starts
 
-        async def start_service(service_name: str):
+        async def start_service(service_name: str) -> tuple[str, str | None]:
             async with semaphore:
-                try:
-                    console.print(f"[blue]🔄[/blue] Starting {service_name}...")
-
-                    # Get service and profile
-                    service = self.compose_manager.get_service(service_name)
-                    profile = self.compose_manager.get_profile(service.profile)
-
-                    await asyncio.to_thread(start_vpn_service, service, profile, force)
-
-                    console.print(f"[green]✅[/green] Started {service_name}")
-
-                except Exception as e:
-                    console.print(f"[red]❌[/red] Failed to start {service_name}: {e}")
-                    raise
+                return await self._start_service(service_name, force)
 
         # Start all services concurrently
         tasks = [start_service(name) for name in service_names]
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        started: list[str] = []
+        failed: list[str] = []
+        errors: list[str] = []
+        for service_name, message in results:
+            if message is None:
+                started.append(service_name)
+            else:
+                failed.append(service_name)
+                errors.append(message)
+        return started, failed, errors
 
-    async def _start_services_sequential(self, service_names: list[str], force: bool):
-        """Start services one by one"""
-        from .docker_ops import start_vpn_service
-
+    async def _start_services_sequential(
+        self, service_names: list[str], force: bool
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Start services one by one."""
+        started: list[str] = []
+        failed: list[str] = []
+        errors: list[str] = []
         for service_name in service_names:
-            try:
-                console.print(f"[blue]🔄[/blue] Starting {service_name}...")
-
-                # Get service and profile
-                service = self.compose_manager.get_service(service_name)
-                profile = self.compose_manager.get_profile(service.profile)
-
-                await asyncio.to_thread(start_vpn_service, service, profile, force)
-
-                console.print(f"[green]✅[/green] Started {service_name}")
-
-            except Exception as e:
-                console.print(f"[red]❌[/red] Failed to start {service_name}: {e}")
-                raise
+            _, message = await self._start_service(service_name, force)
+            if message is None:
+                started.append(service_name)
+            else:
+                failed.append(service_name)
+                errors.append(message)
+        return started, failed, errors
 
     def _sanitize_service_name(self, name: str) -> str:
         """Sanitize service name to be Docker-compatible"""

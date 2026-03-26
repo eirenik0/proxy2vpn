@@ -423,6 +423,74 @@ def test_deploy_fleet_force_skips_rollback_on_error(tmp_path, monkeypatch, capsy
     assert "Rolled back service: svc1" not in out
 
 
+def test_deploy_fleet_force_reports_partial_start_success(
+    tmp_path, monkeypatch, capsys
+):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "test.env"
+    env_path.write_text(
+        "VPN_SERVICE_PROVIDER=protonvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+    manager.add_profile(Profile(name="test", env_file=str(env_path)))
+
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+    plan = DeploymentPlan(provider="prov")
+    plan.services = [
+        ServicePlan(
+            name="svc1",
+            profile="test",
+            location="L1",
+            country="C",
+            port=10000,
+            control_port=30000,
+            provider="prov",
+        ),
+        ServicePlan(
+            name="svc2",
+            profile="test",
+            location="L2",
+            country="C",
+            port=10001,
+            control_port=30001,
+            provider="prov",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.fleet_manager.ensure_network", lambda force: None
+    )
+
+    async def fake_start(service_names, force):
+        assert service_names == ["svc1", "svc2"]
+        return ["svc1"], ["svc2"], ["Failed to start svc2: timeout"]
+
+    monkeypatch.setattr(fleet_manager, "_start_services_parallel", fake_start)
+    monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
+
+    result = asyncio.run(
+        fleet_manager.deploy_fleet(
+            plan,
+            validate_servers=False,
+            parallel=True,
+            force=True,
+        )
+    )
+
+    out = capsys.readouterr().out
+
+    assert result.deployed == 1
+    assert result.failed == 1
+    assert result.services == ["svc1", "svc2"]
+    assert any(
+        "Deployment failed: Failed to start svc2: timeout" in error
+        for error in result.errors
+    )
+    assert "Skipping rollback for forced deploy" in out
+
+
 def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys):
     plan = DeploymentPlan(provider="prov")
     plan.services = [
@@ -461,6 +529,7 @@ def test_deploy_fleet_skips_invalid_locations(monkeypatch, fleet_manager, capsys
 
     async def fake_start(service_names, force):
         start_calls.extend(service_names)
+        return service_names, [], []
 
     monkeypatch.setattr(fleet_manager.compose_manager, "add_service", fake_add_service)
     monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
@@ -729,6 +798,7 @@ def test_deploy_fleet_resets_agent_state_for_fresh_incidents(tmp_path, monkeypat
 
     async def fake_start(service_names, force):
         assert service_names == ["proton-us-philadelphia-0"]
+        return service_names, [], []
 
     monkeypatch.setattr(fleet_manager, "_start_services_parallel", fake_start)
     monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)
@@ -929,6 +999,7 @@ def test_deploy_fleet_creates_many_services_with_real_compose(tmp_path, monkeypa
 
     async def fake_start(service_names, force):
         assert len(service_names) == 14
+        return service_names, [], []
 
     monkeypatch.setattr(fleet_manager, "_start_services_parallel", fake_start)
     monkeypatch.setattr(fleet_manager, "_start_services_sequential", fake_start)

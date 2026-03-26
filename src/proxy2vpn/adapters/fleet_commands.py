@@ -149,7 +149,10 @@ def fleet_deploy(
         )
 
         # Display results
-        console.print("\n[green]✅ Deployment complete![/green]")
+        if result.failed:
+            console.print("\n[yellow]⚠ Deployment completed with issues[/yellow]")
+        else:
+            console.print("\n[green]✅ Deployment complete![/green]")
         console.print(f"  • Deployed: {result.deployed} services")
         if result.failed:
             console.print(f"  • Failed: {result.failed} services")
@@ -158,7 +161,7 @@ def fleet_deploy(
 
         # Show fleet status
         console.print("\n[bold]Fleet Status:[/bold]")
-        _show_fleet_status_sync(result.services)
+        _show_fleet_status_sync(result.services or plan.service_names)
 
     except Exception as e:
         console.print(f"[red]❌ Deployment failed: {e}[/red]")
