@@ -25,7 +25,8 @@ def fleet_plan(
     profiles: str = typer.Option(..., help="Profile slots: acc1:2,acc2:8"),
     port_start: int = typer.Option(20000, help="Starting port number"),
     naming_template: str = typer.Option(
-        "{provider}-{country}-{city}", help="Service naming template"
+        "{provider}-{country}-{city}",
+        help="Service naming template ({provider}, {profile}, {country}, {city})",
     ),
     output: str = typer.Option("deployment-plan.yaml", help="Save plan to file"),
     validate_servers: bool = typer.Option(True, help="Validate server availability"),

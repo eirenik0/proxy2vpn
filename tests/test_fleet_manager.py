@@ -88,6 +88,90 @@ def test_plan_deployment_sanitizes_and_limits(fleet_manager, monkeypatch):
     assert service.port == 21000
 
 
+def test_plan_deployment_appends_after_existing_services(tmp_path, monkeypatch):
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "acc1.env"
+    env_path.write_text(
+        "VPN_SERVICE_PROVIDER=expressvpn\nOPENVPN_USER=user\nOPENVPN_PASSWORD=pass\n"
+    )
+    manager.add_profile(Profile(name="acc1", env_file=str(env_path)))
+
+    existing_service = VPNService.create(
+        name="expressvpn-germany-frankfurt",
+        port=20000,
+        control_port=30000,
+        provider="expressvpn",
+        profile="acc1",
+        location="Frankfurt",
+        environment={
+            "VPN_SERVICE_PROVIDER": "expressvpn",
+            "SERVER_CITIES": "Frankfurt",
+            "SERVER_COUNTRIES": "Germany",
+        },
+        labels={
+            "vpn.type": "vpn",
+            "vpn.port": "20000",
+            "vpn.control_port": "30000",
+            "vpn.provider": "expressvpn",
+            "vpn.profile": "acc1",
+            "vpn.location": "Frankfurt",
+        },
+    )
+    manager.add_service(existing_service)
+
+    fleet_manager = FleetManager(compose_file_path=compose_path)
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_cities",
+        lambda provider, country: ["Frankfurt", "Munich"],
+    )
+
+    config = FleetConfig(
+        countries=["Germany"],
+        profiles={"acc1": 2},
+        port_start=20000,
+    )
+
+    plan = fleet_manager.plan_deployment(config)
+
+    assert [s.name for s in plan.services] == [
+        "expressvpn-germany-frankfurt-2",
+        "expressvpn-germany-munich",
+    ]
+    assert [s.port for s in plan.services] == [20001, 20002]
+    assert [s.control_port for s in plan.services] == [30001, 30002]
+
+
+def test_plan_deployment_supports_profile_in_naming_template(
+    fleet_manager, monkeypatch
+):
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_cities",
+        lambda provider, country: ["Frankfurt"],
+    )
+
+    profile = Profile(name="acc_one", env_file="env.acc1")
+    profile._provider = "expressvpn"
+    monkeypatch.setattr(
+        fleet_manager.compose_manager, "list_profiles", lambda: [profile]
+    )
+
+    config = FleetConfig(
+        countries=["Germany"],
+        profiles={"acc_one": 1},
+        port_start=20000,
+        naming_template="{provider}-{profile}-{country}-{city}",
+    )
+
+    plan = fleet_manager.plan_deployment(config)
+
+    assert [s.name for s in plan.services] == ["expressvpn-acc_one-germany-frankfurt"]
+
+
 def test_plan_deployment_unique_ips(fleet_manager, monkeypatch):
     fleet_manager.server_manager.data = {
         "version": 1,

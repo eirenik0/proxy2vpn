@@ -147,6 +147,35 @@ proxy2vpn fleet deploy --parallel
 proxy2vpn fleet status --show-allocation
 ```
 
+### Expanding an Existing Fleet
+
+If you add another VPN account/profile later, treat it as an additive deployment:
+
+```bash
+# Add a new profile first
+proxy2vpn profile add expressvpn-extra profiles/expressvpn-extra.env
+
+# Plan only the extra capacity you want to add
+proxy2vpn fleet plan \
+  --countries "Germany,France" \
+  --profiles "expressvpn-extra:4" \
+  --output add-expressvpn-extra.yaml
+
+# Next step: deploy that plan
+proxy2vpn fleet deploy --plan-file add-expressvpn-extra.yaml --parallel --validate-first
+
+# Confirm allocation after the new services are added
+proxy2vpn fleet status --show-allocation
+```
+
+Notes:
+
+- `fleet deploy` is additive by default. It appends new services to the existing compose file.
+- Use `--force` only when you explicitly want to recreate/replace existing fleet services.
+- When a planned city name already exists, proxy2vpn automatically keeps the old service and creates a new name such as `expressvpn-germany-frankfurt-2`.
+- Ports are planned from the next free values, so adding a second plan does not reuse ports that are already occupied.
+- If you want names that reflect the profile used, set `--naming-template "{provider}-{profile}-{country}-{city}"`.
+
 ### CI: Ephemeral US Proxies
 
 ```bash
@@ -253,6 +282,8 @@ proxy2vpn fleet deploy --parallel
 ```
 
 **Result**: 18 endpoints automatically distributed across 3 VPN providers, with coordinated port allocation and intelligent load balancing.
+
+If you later add more capacity with another account from the same provider, run a new `fleet plan` for just the additional slots and deploy that plan file. Reusing the same countries or cities is supported: names are auto-suffixed on collisions, and `--naming-template "{provider}-{profile}-{country}-{city}"` makes profile ownership explicit.
 
 ### Scenario: Global Web Scraping Infrastructure
 
