@@ -1032,7 +1032,10 @@ class AgentWatchdog:
                     "service definition is incomplete or inconsistent."
                 )
                 action_plan = self._auth_config_action_plan(context)
-            elif context.healthy_shared_profile_peers:
+            elif (
+                "auth_failure" in issues_by_check
+                and context.healthy_shared_profile_peers
+            ):
                 summary = (
                     f"{context.service_name}: auth-like failures look isolated to this "
                     f"service because profile '{context.profile_name or 'unknown'}' is "
@@ -1159,10 +1162,24 @@ class AgentWatchdog:
                 "if needed, rotate or adjust only this service rather than the whole "
                 "profile."
             )
-        plan.append(
-            f"Recreate only this service with `proxy2vpn vpn update {service_name}` "
-            f"and validate recovery with `proxy2vpn vpn test {service_name}`."
-        )
+        if context.control_api_reachable is False:
+            plan.append(
+                "The control API is currently unreachable, so a manual tunnel restart "
+                "is unlikely to succeed."
+            )
+            plan.append(
+                f"Recreate only this service with `proxy2vpn vpn update {service_name}` "
+                f"and validate recovery with `proxy2vpn vpn test {service_name}`."
+            )
+        else:
+            plan.append(
+                f"Request a tunnel restart with `proxy2vpn vpn restart-tunnel {service_name}` "
+                f"and retest with `proxy2vpn vpn test {service_name}` before recreating the container."
+            )
+            plan.append(
+                f"If the service remains unhealthy after the tunnel restart, recreate only "
+                f"this service with `proxy2vpn vpn update {service_name}`."
+            )
         plan.append(
             "Run `proxy2vpn agent run --once` to refresh watchdog state and confirm "
             "whether the isolated incident closes."

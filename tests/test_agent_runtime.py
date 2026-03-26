@@ -508,7 +508,7 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
     )
 
     async def fake_control_api(service):
-        return False
+        return True
 
     watchdog = AgentWatchdog(agent_compose_file, store=store)
     monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
@@ -618,7 +618,7 @@ def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeyp
     )
 
     async def fake_control_api(service):
-        return False
+        return True
 
     class DummyInvestigator:
         def investigate(self, context):
@@ -712,7 +712,7 @@ def test_investigate_incident_deprioritizes_accountwide_issue_when_shared_profil
     )
 
     async def fake_control_api(service):
-        return False
+        return True
 
     watchdog = AgentWatchdog(shared_profile_agent_compose_file, store=store)
     monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
@@ -728,6 +728,19 @@ def test_investigate_incident_deprioritizes_accountwide_issue_when_shared_profil
     assert any(
         "Do not rotate the shared profile credentials yet" in step
         for step in investigated.investigation.action_plan
+    )
+    restart_step = next(
+        step
+        for step in investigated.investigation.action_plan
+        if "proxy2vpn vpn restart-tunnel protonvpn-united-states-new-york" in step
+    )
+    update_step = next(
+        step
+        for step in investigated.investigation.action_plan
+        if "proxy2vpn vpn update protonvpn-united-states-new-york" in step
+    )
+    assert investigated.investigation.action_plan.index(restart_step) < (
+        investigated.investigation.action_plan.index(update_step)
     )
 
 

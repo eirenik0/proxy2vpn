@@ -177,6 +177,10 @@ class OpenAIIncidentInvestigator(_OpenAIResponderBase):
                 "Treat healthy peer services sharing the same profile as evidence "
                 "against account-wide or credential-wide failures unless explicit "
                 "configuration errors contradict that. "
+                "When the incident shows auth_failure, healthy peer services share "
+                "the same profile, and the control API is reachable, prefer "
+                "restarting that service's tunnel before recommending container "
+                "recreation. "
                 "Do not expose secrets, redact credential values, and keep action_plan "
                 "to safe operational steps that a proxy2vpn operator can execute."
             ),
