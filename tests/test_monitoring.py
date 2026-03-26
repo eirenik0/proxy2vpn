@@ -33,26 +33,14 @@ def test_monitor_health_handles_errors(monkeypatch):
 
 
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
-def test_monitor_vpn_health(tmp_path):
-    env_file = tmp_path / "test.env"
-    env_file.write_text("")
-    profile = docker_ops.Profile(
-        name="test", env_file=str(env_file), image="alpine", cap_add=[], devices=[]
-    )
-    service = docker_ops.VPNService.create(
-        name="vpn-test",
-        port=12345,
-        control_port=30000,
-        provider="",
-        profile="test",
-        location="",
-        environment={},
-        labels={"vpn.type": "vpn", "vpn.port": "12345", "vpn.control_port": "30000"},
+def test_monitor_vpn_health(docker_profile_factory, docker_service_factory):
+    profile = docker_profile_factory(image="nginx:alpine")
+    service = docker_service_factory(
+        proxy_port_base=24000,
+        control_port_base=34000,
     )
     docker_ops.create_vpn_container(service, profile)
     docker_ops.start_container(service.name)
     diagnostics = monitoring.monitor_vpn_health()
     names = {d["name"] for d in diagnostics}
     assert service.name in names
-    docker_ops.stop_container(service.name)
-    docker_ops.remove_container(service.name)

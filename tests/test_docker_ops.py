@@ -262,54 +262,32 @@ def test_restart_and_logs():
 
 
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
-def test_create_vpn_container_merges_env(tmp_path):
-    env_file = tmp_path / "test.env"
-    env_file.write_text("FOO=bar\nVAR=base\n")
-    profile = docker_ops.Profile(
-        name="test",
-        env_file=str(env_file),
-        image="alpine",
-        cap_add=[],
-        devices=[],
-    )
-    service = docker_ops.VPNService.create(
-        name="vpn-test",
-        port=12345,
-        control_port=30000,
-        provider="",
-        profile="test",
-        location="",
+def test_create_vpn_container_merges_env(
+    docker_profile_factory, docker_service_factory
+):
+    profile = docker_profile_factory(env_contents="FOO=bar\nVAR=base\n")
+    service = docker_service_factory(
         environment={"VAR": "override"},
-        labels={"vpn.type": "vpn", "vpn.port": "12345"},
     )
     container = docker_ops.create_vpn_container(service, profile)
     env_vars = container.attrs["Config"]["Env"]
     assert "FOO=bar" in env_vars
     assert "VAR=override" in env_vars
-    docker_ops.remove_container("vpn-test")
 
 
 @pytest.mark.skipif(not docker_available(), reason="Docker is not available")
-def test_recreate_vpn_container():
-    profile = docker_ops.Profile(
-        name="test", env_file="", image="alpine", cap_add=[], devices=[]
-    )
-    service = docker_ops.VPNService.create(
-        name="vpn-recreate",
-        port=12346,
-        control_port=30001,
-        provider="",
-        profile="test",
-        location="",
-        environment={},
-        labels={"vpn.type": "vpn", "vpn.port": "12346"},
+def test_recreate_vpn_container(docker_profile_factory, docker_service_factory):
+    profile = docker_profile_factory()
+    service = docker_service_factory(
+        base_name="vpn-recreate",
+        proxy_port_base=23000,
+        control_port_base=33000,
     )
     first = docker_ops.create_vpn_container(service, profile)
     first_id = first.id
     second = docker_ops.recreate_vpn_container(service, profile)
     second_id = second.id
     assert first_id != second_id
-    docker_ops.remove_container(service.name)
 
 
 def test_start_all_vpn_containers_start_or_create(monkeypatch):
