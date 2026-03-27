@@ -54,5 +54,8 @@ jobs:
       - name: Validate changelog fragments
         run: make changelog-check
 
+      - name: Verify curl availability for proxied health checks
+        run: curl --version
+
       - name: Run tests
         run: make test

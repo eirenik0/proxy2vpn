@@ -1,13 +1,13 @@
 import asyncio
 import pathlib
 import sys
+from types import SimpleNamespace
 
 from aiohttp import web
 
-# Ensure src package is importable
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
-from proxy2vpn import ip_utils
+from proxy2vpn.adapters import ip_utils
 
 
 def test_parse_ip_from_html():
@@ -74,3 +74,32 @@ def test_fetch_ip_async_retries(monkeypatch):
         await app_runner.cleanup()
 
     asyncio.run(runner())
+
+
+def test_fetch_ip_async_prefers_curl_for_proxy(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(ip_utils.shutil, "which", lambda name: "/usr/bin/curl")
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="1.1.1.1\n")
+
+    monkeypatch.setattr(ip_utils.subprocess, "run", fake_run)
+
+    result = asyncio.run(
+        ip_utils.fetch_ip_async(
+            proxies={"http": "http://user:pass@localhost:8080"},
+            timeout=5,
+        )
+    )
+
+    assert result == "1.1.1.1"
+    assert calls
+    command, kwargs = calls[0]
+    assert command[:3] == ["curl", "-fsSL", "--connect-timeout"]
+    assert "-x" in command
+    assert "http://localhost:8080" in command
+    assert "--proxy-user" in command
+    assert "user:pass" in command
+    assert kwargs["capture_output"] is True

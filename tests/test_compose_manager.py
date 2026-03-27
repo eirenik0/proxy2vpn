@@ -26,6 +26,9 @@ def test_read_config_and_services(tmp_path):
     assert manager.config["health_check_interval"] == "5"
     services = manager.list_services()
     assert {s.name for s in services} == {"testvpn1", "testvpn2"}
+    assert {s.labels[config.COMPOSE_FILE_LABEL] for s in services} == {
+        str(compose_path.resolve())
+    }
 
 
 def test_profile_management(tmp_path):
@@ -131,6 +134,9 @@ def test_add_service_after_init(tmp_path):
     loaded_service = manager.get_service("vpn1")
     assert loaded_service.port == 12345
     assert loaded_service.profile == "andr"
+    assert loaded_service.labels[config.COMPOSE_FILE_LABEL] == str(
+        compose_path.resolve()
+    )
     auth_config = tmp_path / config.CONTROL_AUTH_CONFIG_FILE
     auth_config.write_text('[[roles]]\nname = "proxy2vpn"\nauth = "none"\n')
     assert validate_compose(compose_path) == []

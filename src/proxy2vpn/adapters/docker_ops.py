@@ -693,9 +693,13 @@ def cleanup_orphaned_containers(manager: ComposeManager) -> list[str]:
         containers = get_vpn_containers(all=True)
     except RuntimeError:
         return []
+    compose_owner = str(manager.compose_path.expanduser().resolve())
     defined = {svc.name for svc in manager.list_services()}
     removed: list[str] = []
     for container in containers:
+        owner = (container.labels or {}).get(config.COMPOSE_FILE_LABEL, "").strip()
+        if owner != compose_owner:
+            continue
         if container.name not in defined:
             try:
                 container.remove(force=True)

@@ -65,6 +65,10 @@ CONTROL_API_ENDPOINTS = {
 # API can be queried without manual setup.
 CONTROL_AUTH_CONFIG_FILE: Path = Path("control-server-auth.toml")
 
+# Label written to compose-managed services and containers so runtime
+# cleanup can distinguish ownership when multiple compose files exist.
+COMPOSE_FILE_LABEL = "proxy2vpn.compose_file"
+
 # Default content of the control server authentication configuration.
 # It declares a single role allowing access to the endpoints required by
 # proxy2vpn with ``auth = "none"`` so no credentials are needed.
