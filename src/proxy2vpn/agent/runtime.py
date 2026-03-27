@@ -277,6 +277,9 @@ class AgentWatchdog:
                         for item in investigation.findings
                         if item and item.strip()
                     ],
+                    log_evidence=[
+                        item.strip() for item in context.log_evidence if item.strip()
+                    ],
                     action_plan=[
                         item.strip()
                         for item in investigation.action_plan
@@ -674,6 +677,118 @@ class AgentWatchdog:
             analyzer,
             timeout,
         )
+
+    async def _collect_recent_log_lines(
+        self,
+        service_name: str,
+        lines: int = 20,
+    ) -> list[str]:
+        def _read_logs() -> list[str]:
+            return [
+                str(line).strip()
+                for line in docker_ops.container_logs(
+                    service_name, lines=lines, follow=False
+                )
+            ]
+
+        try:
+            return await asyncio.to_thread(_read_logs)
+        except Exception:
+            return []
+
+    def _select_log_evidence(
+        self,
+        log_lines: list[str],
+        issues: list[DiagnosticResult] | None = None,
+        max_lines: int = 6,
+    ) -> list[str]:
+        normalized = [line.strip() for line in log_lines if str(line).strip()]
+        if not normalized:
+            return []
+
+        generic_keywords = (
+            "error",
+            "warn",
+            "fail",
+            "auth",
+            "route",
+            "rtnetlink",
+            "unreachable",
+            "certificate",
+            "tls",
+            "dns",
+            "tun0",
+            "proxy",
+        )
+        failing_checks = {
+            issue.check for issue in (issues or []) if not issue.passed and issue.check
+        }
+        priority_keywords: tuple[str, ...] = ()
+        if "route_error" in failing_checks:
+            priority_keywords = (
+                "rtnetlink answers: file exists",
+                "linux route add command failed",
+                "route installation may fail",
+                "network unreachable",
+                "route",
+                "tun0",
+            )
+        elif "auth_failure" in failing_checks:
+            priority_keywords = (
+                "auth_failed",
+                "authentication failure",
+                "auth",
+                "credentials",
+            )
+        elif "config_error" in failing_checks:
+            priority_keywords = (
+                "config",
+                "configuration",
+                "invalid",
+                "missing",
+            )
+        elif "tls_error" in failing_checks:
+            priority_keywords = ("tls", "certificate", "ssl")
+        elif "dns_error" in failing_checks:
+            priority_keywords = ("dns",)
+        elif "connectivity" in failing_checks:
+            priority_keywords = ("proxy", "connect", "port", "timeout")
+
+        selected = self._matching_log_lines(
+            normalized,
+            priority_keywords,
+            max_lines=max_lines,
+        )
+        if not selected:
+            selected = self._matching_log_lines(
+                normalized,
+                generic_keywords,
+                max_lines=max_lines,
+            )
+        return selected or normalized[-max_lines:]
+
+    def _matching_log_lines(
+        self,
+        log_lines: list[str],
+        keywords: tuple[str, ...],
+        max_lines: int,
+    ) -> list[str]:
+        if not keywords:
+            return []
+
+        matches: list[str] = []
+        seen: set[str] = set()
+        for line in log_lines:
+            line_lower = line.lower()
+            if not any(token in line_lower for token in keywords):
+                continue
+            if line in seen:
+                continue
+            seen.add(line)
+            matches.append(line)
+            if len(matches) >= max_lines:
+                break
+        return matches
 
     def _append_action(
         self,
@@ -1409,14 +1524,18 @@ class AgentWatchdog:
             )
 
         results: list[DiagnosticResult] = []
+        log_lines: list[str] = []
+        log_evidence: list[str] = []
         analyzer = DiagnosticAnalyzer()
         if container_status == "running":
+            log_lines = await self._collect_recent_log_lines(incident.service_name)
             try:
                 results = await self._analyze_service_logs(
                     incident.service_name, analyzer
                 )
             except Exception:
                 results = []
+            log_evidence = self._select_log_evidence(log_lines, issues=results)
 
         health_score = (
             analyzer.health_score(results)
@@ -1476,6 +1595,7 @@ class AgentWatchdog:
             other_unhealthy_shared_profile_peers=other_unhealthy_shared_profile_peers,
             shared_profile_peer_probe_failures=shared_profile_peer_probe_failures,
             issues=self._diagnostic_payload(results),
+            log_evidence=log_evidence,
             recent_actions=recent_actions,
             human_explanation=incident.human_explanation,
         )
@@ -1714,6 +1834,11 @@ class AgentWatchdog:
                 findings,
                 "The Gluetun control API is not reachable on the configured control port.",
             )
+        if context.log_evidence:
+            self._append_unique(
+                findings,
+                "Recent log evidence is attached below and should drive the next operator action.",
+            )
         if context.human_explanation:
             self._append_unique(findings, context.human_explanation)
         for error in context.profile_validation_errors[:4]:
@@ -1777,16 +1902,29 @@ class AgentWatchdog:
             "rotation_exhausted",
             "provider_outage_suspected",
         }:
-            summary = (
-                f"{context.service_name}: automatic remediation did not recover the "
-                "service, so a supervised rotation is the next step."
-            )
-            action_plan = self._rotation_action_plan(context)
+            if "route_error" in issues_by_check:
+                summary = (
+                    f"{context.service_name}: recent logs show OpenVPN route setup "
+                    "errors, so review the local route state before rotating endpoints."
+                )
+                action_plan = self._generic_action_plan(context)
+            else:
+                summary = (
+                    f"{context.service_name}: automatic remediation did not recover the "
+                    "service, so a supervised rotation is the next step."
+                )
+                action_plan = self._rotation_action_plan(context)
         else:
-            summary = (
-                f"{context.service_name}: review the current incident evidence and "
-                "apply a manual fix before re-running health checks."
-            )
+            if "route_error" in issues_by_check:
+                summary = (
+                    f"{context.service_name}: recent logs show OpenVPN route setup "
+                    "errors that need manual review before more automation."
+                )
+            else:
+                summary = (
+                    f"{context.service_name}: review the current incident evidence and "
+                    "apply a manual fix before re-running health checks."
+                )
             action_plan = self._generic_action_plan(context)
 
         return InvestigationPlan(
@@ -1845,6 +1983,18 @@ class AgentWatchdog:
 
     def _generic_action_plan(self, context: InvestigationContext) -> list[str]:
         service_name = context.service_name
+        issue_checks = {issue.get("check") for issue in context.issues}
+        if "route_error" in issue_checks:
+            return [
+                "Review the attached route-related log evidence and confirm the same lines with "
+                f"`proxy2vpn vpn logs {service_name} --lines 100`.",
+                "Inspect duplicate or stale routes, IPv6 route injection, and other local "
+                "network state around `tun0` before changing credentials or rotating providers.",
+                f"Recreate the service with `proxy2vpn vpn update {service_name}` if the route "
+                "state looks stale or inconsistent.",
+                f"Validate the tunnel with `proxy2vpn vpn test {service_name}` and "
+                "`proxy2vpn agent run --once`.",
+            ]
         return [
             f"Review recent logs with `proxy2vpn vpn logs {service_name} --lines 100`.",
             "Inspect the service profile and compose configuration for drift or "

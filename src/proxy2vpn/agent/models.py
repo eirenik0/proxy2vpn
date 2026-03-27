@@ -49,6 +49,7 @@ class IncidentInvestigation(BaseModel):
 
     summary: str
     findings: list[str] = Field(default_factory=list)
+    log_evidence: list[str] = Field(default_factory=list)
     action_plan: list[str] = Field(default_factory=list)
     investigated_at: datetime
 

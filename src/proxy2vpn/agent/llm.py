@@ -58,6 +58,7 @@ class InvestigationContext(BaseModel):
     other_unhealthy_shared_profile_peers: list[str] = Field(default_factory=list)
     shared_profile_peer_probe_failures: list[str] = Field(default_factory=list)
     issues: list[dict[str, Any]]
+    log_evidence: list[str] = Field(default_factory=list)
     recent_actions: list[dict[str, str]]
     human_explanation: str | None = None
 
@@ -176,6 +177,8 @@ class OpenAIIncidentInvestigator(_OpenAIResponderBase):
             system_prompt=(
                 "You investigate proxy2vpn watchdog incidents. "
                 "Be concise, factual, and operator-oriented. "
+                "Use the provided log_evidence as primary evidence when present and "
+                "do not infer config/auth problems that the logs do not support. "
                 "Treat healthy peer services sharing the same profile as evidence "
                 "against account-wide or credential-wide failures unless explicit "
                 "configuration errors contradict that. Only treat same-profile peers "

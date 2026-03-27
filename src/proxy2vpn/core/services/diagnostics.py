@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 from pydantic import BaseModel, ConfigDict
 
@@ -79,9 +80,14 @@ class DiagnosticAnalyzer:
                 )
             ]
 
+        route_issue = self._detect_route_setup_issue(recent_lines, recent_text)
+        if route_issue is not None:
+            return [route_issue]
+
         # Configuration issues in recent logs
-        if ("config" in recent_text or "configuration" in recent_text) and any(
-            word in recent_text for word in ("error", "invalid", "missing")
+        if re.search(r"\b(config|configuration)\b", recent_text) and any(
+            re.search(rf"\b{word}\b", recent_text)
+            for word in ("error", "invalid", "missing")
         ):
             return [
                 DiagnosticResult(
@@ -134,6 +140,38 @@ class DiagnosticAnalyzer:
                 "refresh the provider server list."
             ),
             persistent=persistent,
+        )
+
+    def _detect_route_setup_issue(
+        self, recent_lines: list[str], recent_text: str
+    ) -> DiagnosticResult | None:
+        """Detect route installation problems without misclassifying them as config."""
+
+        markers = (
+            "rtnetlink answers: file exists",
+            "linux route add command failed",
+            "route installation may fail",
+            "network unreachable",
+        )
+        if not any(marker in recent_text for marker in markers):
+            return None
+        if "openvpn" not in recent_text and "vpn" not in recent_text:
+            return None
+        if "route" not in recent_text and "tun0" not in recent_text:
+            return None
+
+        failure_count = sum(
+            any(marker in line.lower() for marker in markers) for line in recent_lines
+        )
+        return DiagnosticResult(
+            check="route_error",
+            passed=False,
+            message="Recent OpenVPN route setup issue detected",
+            recommendation=(
+                "Inspect duplicate or stale routes on tun0, IPv6 route injection, "
+                "and recreate the container if the proxy stays unreachable."
+            ),
+            persistent=failure_count >= 2,
         )
 
     def check_connectivity(
