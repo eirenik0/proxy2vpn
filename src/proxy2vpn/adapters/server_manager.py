@@ -103,6 +103,13 @@ class ServerManager:
             self.data = json.load(f)
         return self.data
 
+    async def ensure_loaded_async(self, verify: bool = True) -> dict[str, dict]:
+        """Ensure the catalog is loaded for async callers."""
+
+        if self.data is not None:
+            return self.data
+        return await self.fetch_server_list_async(verify)
+
     # ------------------------------------------------------------------
     # Lazy load helper
     # ------------------------------------------------------------------

@@ -6,6 +6,7 @@ import typer
 from typer.testing import CliRunner
 
 from proxy2vpn.adapters import fleet_commands
+from proxy2vpn.adapters import fleet_state_manager as fleet_state_manager_mod
 from proxy2vpn.adapters.fleet_manager import DeploymentPlan
 from proxy2vpn.cli.main import app
 
@@ -141,3 +142,45 @@ def test_fleet_status_uses_context_compose_file(monkeypatch, tmp_path):
         )
 
     assert captured["compose_file_path"] == compose_path
+
+
+def test_fleet_rotate_passes_explicit_proton_provider(monkeypatch, tmp_path):
+    compose_path = tmp_path / "alt.yml"
+    captured = {}
+
+    class FakeFleetStateManager:
+        def __init__(self, compose_file_path=None):
+            captured["compose_file_path"] = compose_file_path
+
+        async def rotate_servers(self, config_obj):
+            captured["provider"] = config_obj.provider
+            captured["countries"] = config_obj.countries
+            return SimpleNamespace(
+                dry_run=True,
+                success=True,
+                services_affected=[],
+                execution_time=0.0,
+                errors=[],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        fleet_state_manager_mod,
+        "FleetStateManager",
+        FakeFleetStateManager,
+    )
+
+    with _cli_ctx(compose_path) as ctx:
+        fleet_commands.fleet_rotate(
+            ctx,
+            country="United Kingdom",
+            provider="protonvpn",
+            criteria="performance",
+            dry_run=True,
+        )
+
+    assert captured["compose_file_path"] == str(compose_path)
+    assert captured["provider"] == "protonvpn"
+    assert captured["countries"] == ["United Kingdom"]

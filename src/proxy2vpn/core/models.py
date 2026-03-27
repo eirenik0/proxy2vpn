@@ -114,6 +114,16 @@ class VPNService(BaseModel):
             self.config.environment.pop("SERVER_CITIES", None)
             self.config.labels.pop("vpn.location", None)
 
+    def set_country(self, country: str) -> None:
+        """Update the effective service country and related compose metadata."""
+
+        if country:
+            self.config.environment["SERVER_COUNTRIES"] = country
+            self.config.labels["vpn.country"] = country
+        else:
+            self.config.environment.pop("SERVER_COUNTRIES", None)
+            self.config.labels.pop("vpn.country", None)
+
     @classmethod
     def create(
         cls,

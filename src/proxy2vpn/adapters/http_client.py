@@ -251,6 +251,8 @@ class GluetunControlClient(HTTPClient):
         base_url: str,
         timeout: float = DEFAULT_TIMEOUT,
         verify_ssl: bool = VERIFY_SSL,
+        retry_attempts: int = MAX_RETRIES,
+        retry_backoff: float = 0.5,
         settings: GluetunControlSettings | None = None,
     ):
         parsed = urlparse(base_url)
@@ -263,6 +265,7 @@ class GluetunControlClient(HTTPClient):
             timeout=timeout,
             verify_ssl=verify_ssl,
             auth=auth,
+            retry=RetryPolicy(attempts=retry_attempts, backoff=retry_backoff),
         )
         super().__init__(config)
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from inspect import isawaitable
+from typing import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,8 +51,18 @@ class HealthAssessment(BaseModel):
 class HealthAssessmentService:
     """Assess VPN service health using the shared diagnostic stack."""
 
-    def __init__(self, threshold: int = 60) -> None:
+    def __init__(
+        self,
+        threshold: int = 60,
+        *,
+        probe_timeout: int = 5,
+        control_api_timeout: float = 5.0,
+        control_api_retry_attempts: int = 0,
+    ) -> None:
         self.threshold = threshold
+        self.probe_timeout = probe_timeout
+        self.control_api_timeout = control_api_timeout
+        self.control_api_retry_attempts = control_api_retry_attempts
 
     async def assess_service(
         self,
@@ -58,10 +70,11 @@ class HealthAssessmentService:
         *,
         peer_assessments: dict[str, HealthAssessment] | None = None,
         lines: int = 20,
-        timeout: int = 5,
+        timeout: int | None = None,
     ) -> HealthAssessment:
         """Return a complete health assessment for one service."""
 
+        effective_timeout = timeout or self.probe_timeout
         container = docker_ops.get_container_by_service_name(service.name)
         assessed_at = datetime.now(timezone.utc)
         if container is None:
@@ -99,13 +112,13 @@ class HealthAssessmentService:
             )
 
         analyzer = DiagnosticAnalyzer()
-        direct_ip = await self._direct_ip(timeout) if has_proxy_port else None
+        direct_ip = await self._direct_ip(effective_timeout) if has_proxy_port else None
         results = await asyncio.to_thread(
             docker_ops.analyze_container_logs,
             service.name,
             lines,
             analyzer,
-            timeout,
+            effective_timeout,
             direct_ip,
         )
         health_score = analyzer.health_score(results)
@@ -115,7 +128,7 @@ class HealthAssessmentService:
         if has_proxy_port:
             try:
                 current_egress_ip = await docker_ops.get_container_ip_async(
-                    container, timeout=timeout
+                    container, timeout=effective_timeout
                 )
             except Exception:
                 current_egress_ip = None
@@ -141,34 +154,54 @@ class HealthAssessmentService:
         services: list[VPNService],
         *,
         lines: int = 20,
-        timeout: int = 5,
+        timeout: int | None = None,
+        progress_callback: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> dict[str, HealthAssessment]:
         """Assess a batch of services and enrich each result with peer evidence."""
 
-        assessment_tasks = [
-            self.assess_service(service, lines=lines, timeout=timeout)
-            for service in services
-        ]
-        results = await asyncio.gather(*assessment_tasks, return_exceptions=True)
         assessments: dict[str, HealthAssessment] = {}
-        for service, result in zip(services, results, strict=True):
-            if isinstance(result, HealthAssessment):
-                assessments[result.service_name] = result
-                continue
 
-            logger.warning(
-                "health_assessment_failed",
-                extra={"service_name": service.name, "error": str(result)},
-            )
-            assessments[service.name] = HealthAssessment(
-                service_name=service.name,
-                assessed_at=datetime.now(timezone.utc),
-                container_status="unknown",
-                health_score=0,
-                health_class="assessment_failed",
-                failing_checks=["assessment_error"],
-                control_api_reachable=False,
-            )
+        async def _assess(
+            service: VPNService,
+        ) -> tuple[VPNService, HealthAssessment | None, Exception | None]:
+            try:
+                assessment = await self.assess_service(
+                    service,
+                    lines=lines,
+                    timeout=timeout,
+                )
+                return service, assessment, None
+            except Exception as exc:
+                return service, None, exc
+
+        assessment_tasks = [
+            asyncio.create_task(_assess(service)) for service in services
+        ]
+
+        for task in asyncio.as_completed(assessment_tasks):
+            service, assessment, error = await task
+            if assessment is not None:
+                assessments[assessment.service_name] = assessment
+            else:
+                logger.warning(
+                    "health_assessment_failed",
+                    extra={"service_name": service.name, "error": str(error)},
+                )
+                assessments[service.name] = HealthAssessment(
+                    service_name=service.name,
+                    assessed_at=datetime.now(timezone.utc),
+                    container_status="unknown",
+                    health_score=0,
+                    health_class="assessment_failed",
+                    failing_checks=["assessment_error"],
+                    control_api_reachable=False,
+                )
+
+            if progress_callback is not None:
+                callback_result = progress_callback(service.name)
+                if isawaitable(callback_result):
+                    await callback_result
+
         enriched = {
             name: assessment.model_copy(
                 update={
@@ -207,7 +240,11 @@ class HealthAssessmentService:
     async def _control_api_reachable(self, service: VPNService) -> bool:
         base_url = f"http://localhost:{service.control_port}/v1"
         try:
-            async with GluetunControlClient(base_url) as client:
+            async with GluetunControlClient(
+                base_url,
+                timeout=self.control_api_timeout,
+                retry_attempts=self.control_api_retry_attempts,
+            ) as client:
                 await client.status()
             return True
         except Exception:

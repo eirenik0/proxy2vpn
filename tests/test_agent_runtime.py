@@ -156,6 +156,35 @@ def unhealthy_results() -> list[DiagnosticResult]:
     ]
 
 
+def tls_unhealthy_results() -> list[DiagnosticResult]:
+    return [
+        DiagnosticResult(
+            check="tls_error",
+            passed=False,
+            message="Recent TLS or certificate issue detected",
+            recommendation="Check certificates and TLS settings.",
+        )
+    ]
+
+
+def persistent_route_results() -> list[DiagnosticResult]:
+    return [
+        DiagnosticResult(
+            check="route_error",
+            passed=False,
+            message="Recent OpenVPN route setup issue detected",
+            recommendation="Inspect duplicate or stale routes on tun0.",
+            persistent=True,
+        ),
+        DiagnosticResult(
+            check="connectivity",
+            passed=False,
+            message="VPN proxy connection failed",
+            recommendation="Check container status and port accessibility.",
+        ),
+    ]
+
+
 @pytest.fixture
 def agent_compose_file(tmp_path):
     return _write_agent_compose(tmp_path)
@@ -183,7 +212,7 @@ def control_client_factory():
     calls = {"status": 0, "restart_tunnel": 0}
 
     class DummyControlClient:
-        def __init__(self, base_url):
+        def __init__(self, base_url, *args, **kwargs):
             self.base_url = base_url
 
         async def __aenter__(self):
@@ -247,6 +276,167 @@ def test_agent_run_once_healthy_updates_snapshots_only(
     assert watchdog.store.state_file.exists()
     assert watchdog.store.load_incidents() == []
     assert calls["status"] == 1
+
+
+def test_agent_run_cycle_persists_active_cycle_progress(
+    agent_compose_file, monkeypatch
+):
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "cleanup_orphaned_containers",
+        lambda manager: [],
+    )
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    observed = {}
+
+    async def fake_assess(services, lines=20, timeout=None, progress_callback=None):
+        if progress_callback is not None:
+            callback_result = progress_callback(service.name)
+            if asyncio.iscoroutine(callback_result):
+                await callback_result
+        persisted = watchdog.store.read_state()
+        observed["phase"] = persisted.status.active_cycle_phase if persisted else None
+        observed["started"] = (
+            persisted.status.active_cycle_started_at if persisted else None
+        )
+        observed["service_name"] = (
+            persisted.status.active_cycle_service_name if persisted else None
+        )
+        observed["progress"] = persisted.status.last_progress_at if persisted else None
+        return {
+            service.name: health_assessment.HealthAssessment(
+                service_name=service.name,
+                assessed_at=utc_now(),
+                container_status="running",
+                health_score=100,
+                health_class="healthy",
+                failing_checks=[],
+                results=healthy_results(),
+                control_api_reachable=True,
+            )
+        }
+
+    async def fake_process_service(**kwargs):
+        service = kwargs["service"]
+        return ServiceSnapshot(
+            service_name=service.name,
+            container_status="running",
+            health_score=100,
+            last_check_at=utc_now(),
+        )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+    monkeypatch.setattr(watchdog._health_assessor, "assess_services", fake_assess)
+    monkeypatch.setattr(watchdog, "_process_service", fake_process_service)
+
+    state = asyncio.run(watchdog.run_once())
+
+    assert observed["phase"] == "assessing_services"
+    assert observed["started"] is not None
+    assert observed["service_name"] == service.name
+    assert observed["progress"] is not None
+    assert state.status.active_cycle_phase is None
+    assert state.status.active_cycle_started_at is None
+
+
+def test_agent_run_cycle_persists_inflight_service_progress(
+    agent_compose_file, monkeypatch, control_client_factory
+):
+    dummy_client, _calls = control_client_factory
+    service = ComposeManager(agent_compose_file).list_services()[0]
+
+    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "cleanup_orphaned_containers",
+        lambda manager: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: unhealthy_results(),
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    async def fake_evaluate(_service):
+        return {
+            "container_status": "running",
+            "health_score": 100,
+            "results": healthy_results(),
+        }
+
+    monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
+
+    persisted_states: list[AgentState] = []
+    original_write_state = watchdog.store.write_state
+
+    def capture_write_state(state: AgentState) -> None:
+        persisted_states.append(state.model_copy(deep=True))
+        original_write_state(state)
+
+    monkeypatch.setattr(watchdog.store, "write_state", capture_write_state)
+
+    state = asyncio.run(watchdog.run_once())
+
+    assert any(
+        persisted.status.active_cycle_phase == "processing_services"
+        and persisted.status.active_cycle_service_name == service.name
+        and persisted.status.last_progress_at is not None
+        and any(action.action == "restart_tunnel" for action in persisted.actions)
+        for persisted in persisted_states
+    )
+    assert state.status.active_cycle_service_name is None
+    assert state.status.last_progress_at is not None
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "message"),
+    [
+        ("cleanup", "docker unavailable"),
+        ("assess", "assessment failed"),
+    ],
+)
+def test_agent_run_cycle_clears_active_cycle_state_on_setup_failure(
+    agent_compose_file, monkeypatch, failure_stage, message
+):
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    def fail_cleanup(manager):
+        raise RuntimeError(message)
+
+    async def fail_assess(services, lines=20, timeout=None, progress_callback=None):
+        raise RuntimeError(message)
+
+    if failure_stage == "cleanup":
+        monkeypatch.setattr(
+            agent_runtime.docker_ops,
+            "cleanup_orphaned_containers",
+            fail_cleanup,
+        )
+    else:
+        monkeypatch.setattr(
+            agent_runtime.docker_ops,
+            "cleanup_orphaned_containers",
+            lambda manager: [],
+        )
+        monkeypatch.setattr(watchdog._health_assessor, "assess_services", fail_assess)
+
+    with pytest.raises(RuntimeError, match=message):
+        asyncio.run(watchdog.run_once())
+
+    persisted = watchdog.store.read_state()
+    assert persisted is not None
+    assert persisted.status.active_cycle_phase is None
+    assert persisted.status.active_cycle_started_at is None
+    assert persisted.status.last_error == message
+    assert persisted.status.last_loop_at is not None
 
 
 def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
@@ -489,7 +679,7 @@ def test_agent_run_cycle_cleans_orphaned_containers(agent_compose_file, monkeypa
         cleaned.append(str(manager.compose_path))
         return ["orphan-vpn"]
 
-    async def fake_assess_services(services):
+    async def fake_assess_services(services, progress_callback=None):
         return {}
 
     async def fake_process_service(
@@ -1561,6 +1751,217 @@ def test_agent_restore_failure_creates_rotation_incident_after_grace_period(
     assert incidents[0].recommended_action == "rotate"
     assert incidents[0].approval_required is False
     assert incidents[0].status == "open"
+
+
+def test_agent_tls_failure_after_restart_rotates_immediately(
+    agent_compose_file, monkeypatch
+):
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "cleanup_orphaned_containers",
+        lambda manager: [],
+    )
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    assessment = health_assessment.HealthAssessment(
+        service_name=service.name,
+        assessed_at=utc_now(),
+        container_status="running",
+        health_score=0,
+        health_class="connectivity",
+        failing_checks=["connectivity"],
+        results=unhealthy_results(),
+        control_api_reachable=True,
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    async def fake_assess(services, lines=20, timeout=None, progress_callback=None):
+        return {service.name: assessment}
+
+    async def fake_evaluate(_service):
+        return {
+            "container_status": "running",
+            "health_score": 0,
+            "results": tls_unhealthy_results(),
+        }
+
+    async def fake_restart(_service, _state, trigger="first_unhealthy_cycle"):
+        return "success"
+
+    async def fake_rotate(service_name):
+        return SimpleNamespace(
+            success=True,
+            errors=[],
+            rotation_changes=[
+                RotationChange(
+                    requested_service_name=service_name,
+                    final_service_name="protonvpn-united-states-boston",
+                    old_location="United States / New York",
+                    new_location="United States / Boston",
+                    candidate_locations=["United States / Boston"],
+                    attempted_locations=["United States / Boston"],
+                )
+            ],
+        )
+
+    async def fail_restore(*args, **kwargs):
+        raise AssertionError("tls failures should skip restore and rotate immediately")
+
+    monkeypatch.setattr(watchdog._health_assessor, "assess_services", fake_assess)
+    monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
+    monkeypatch.setattr(watchdog, "_restart_tunnel", fake_restart)
+    monkeypatch.setattr(watchdog, "_restore_service", fail_restore)
+    monkeypatch.setattr(watchdog, "_rotate_service_via_fleet", fake_rotate)
+
+    state = asyncio.run(watchdog.run_once())
+
+    assert state.actions[-1].action == "rotate"
+    assert state.actions[-1].result == "success"
+    assert state.services[0].service_name == "protonvpn-united-states-boston"
+    assert state.services[0].last_action == "rotate"
+
+
+def test_agent_persistent_route_failure_rotates_on_next_cycle_after_one_restore(
+    agent_compose_file, monkeypatch
+):
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "cleanup_orphaned_containers",
+        lambda manager: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops, "start_vpn_service", lambda *args: None
+    )
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    assessment = health_assessment.HealthAssessment(
+        service_name=service.name,
+        assessed_at=utc_now(),
+        container_status="running",
+        health_score=0,
+        health_class="connectivity",
+        failing_checks=["route_error", "connectivity"],
+        results=persistent_route_results(),
+        control_api_reachable=False,
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+    rotate_calls: list[str] = []
+
+    async def fake_assess(services, lines=20, timeout=None, progress_callback=None):
+        return {service.name: assessment}
+
+    async def fake_evaluate(_service):
+        return {
+            "container_status": "running",
+            "health_score": 0,
+            "results": persistent_route_results(),
+        }
+
+    async def fake_rotate(service_name):
+        rotate_calls.append(service_name)
+        return SimpleNamespace(
+            success=True,
+            errors=[],
+            rotation_changes=[
+                RotationChange(
+                    requested_service_name=service_name,
+                    final_service_name="protonvpn-united-states-boston",
+                    old_location="United States / New York",
+                    new_location="United States / Boston",
+                    candidate_locations=["United States / Boston"],
+                    attempted_locations=["United States / Boston"],
+                )
+            ],
+        )
+
+    monkeypatch.setattr(watchdog._health_assessor, "assess_services", fake_assess)
+    monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
+    monkeypatch.setattr(watchdog, "_rotate_service_via_fleet", fake_rotate)
+
+    first_state = asyncio.run(watchdog.run_once())
+    second_state = asyncio.run(watchdog.run_once())
+
+    assert first_state.actions[-1].action == "restore"
+    assert rotate_calls == [service.name]
+    assert second_state.actions[-1].action == "rotate"
+    assert second_state.services[0].service_name == "protonvpn-united-states-boston"
+
+
+def test_rotate_service_via_fleet_passes_provider_fallback_policy(
+    agent_compose_file, monkeypatch
+):
+    captured = {}
+    settings = AgentSettings(
+        fallback_countries_by_provider={"protonvpn": ["Canada", "Netherlands"]},
+        probe_timeout_seconds=4,
+    )
+
+    class DummyFleetManager:
+        def __init__(self, compose_file):
+            self.compose_file = compose_file
+
+        async def rotate_service(self, service_name, config_obj):
+            captured["service_name"] = service_name
+            captured["fallback_countries"] = config_obj.fallback_countries
+            captured["require_unique_egress_ip"] = config_obj.require_unique_egress_ip
+            captured["health_check_timeout"] = config_obj.health_check_timeout
+            return SimpleNamespace(success=True, errors=[], rotation_changes=[])
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", DummyFleetManager)
+
+    watchdog = AgentWatchdog(agent_compose_file, settings=settings)
+    asyncio.run(watchdog._rotate_service_via_fleet("protonvpn-united-states-new-york"))
+
+    assert captured == {
+        "service_name": "protonvpn-united-states-new-york",
+        "fallback_countries": ["Canada", "Netherlands"],
+        "require_unique_egress_ip": True,
+        "health_check_timeout": 4,
+    }
+
+
+def test_rotate_service_via_fleet_returns_failed_result_when_service_missing(
+    agent_compose_file, monkeypatch
+):
+    captured = {}
+
+    class DummyFleetManager:
+        def __init__(self, compose_file):
+            self.compose_file = compose_file
+
+        async def rotate_service(self, service_name, config_obj):
+            captured["service_name"] = service_name
+            captured["fallback_countries"] = config_obj.fallback_countries
+            return SimpleNamespace(
+                success=False,
+                errors=[f"Service '{service_name}' not found"],
+                rotation_changes=[],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", DummyFleetManager)
+
+    watchdog = AgentWatchdog(
+        agent_compose_file,
+        settings=AgentSettings(
+            fallback_countries_by_provider={"protonvpn": ["Canada", "Netherlands"]}
+        ),
+    )
+    result = asyncio.run(
+        watchdog._rotate_service_via_fleet("protonvpn-united-states-boston")
+    )
+
+    assert result.success is False
+    assert result.errors == ["Service 'protonvpn-united-states-boston' not found"]
+    assert captured == {
+        "service_name": "protonvpn-united-states-boston",
+        "fallback_countries": [],
+    }
 
 
 def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypatch):

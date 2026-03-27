@@ -77,9 +77,22 @@ class OperationConfig:
     rotation_verification_attempts: int = 3
     rotation_verification_delay_seconds: int = 10
     bad_city_cooldown_seconds: int = 3600
+    fallback_countries: List[str] = field(default_factory=list)
+    require_unique_egress_ip: bool = True
     countries: Optional[List[str]] = None
     provider: Optional[str] = None
     profile: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RotationTarget:
+    """One concrete country/city rotation target."""
+
+    country: str
+    city: str
+
+    def label(self) -> str:
+        return f"{self.country} / {self.city}"
 
 
 @dataclass
@@ -91,6 +104,9 @@ class ServiceRotationPlan:
     new_location: str
     reason: str
     candidate_locations: List[str] = field(default_factory=list)
+    old_target: RotationTarget | None = None
+    new_target: RotationTarget | None = None
+    candidate_targets: List[RotationTarget] = field(default_factory=list)
 
 
 @dataclass
@@ -103,6 +119,10 @@ class RotationChange:
     new_location: str
     candidate_locations: List[str] = field(default_factory=list)
     attempted_locations: List[str] = field(default_factory=list)
+    old_target: RotationTarget | None = None
+    new_target: RotationTarget | None = None
+    candidate_targets: List[RotationTarget] = field(default_factory=list)
+    attempted_targets: List[RotationTarget] = field(default_factory=list)
 
 
 @dataclass
@@ -189,6 +209,7 @@ class FleetStateManager:
         # Operation history for debugging
         self.operation_history: List[OperationResult] = []
         self.bad_rotation_cities: Dict[Tuple[str, str, str], datetime] = {}
+        self.bad_rotation_ips: Dict[str, datetime] = {}
 
         self._initialized = True
         logger.info("FleetStateManager initialized")
@@ -219,6 +240,11 @@ class FleetStateManager:
         logger.debug(
             f"Synced {len(self.services)} VPN services and {len(self.allocated_ports)} total ports from compose manager"
         )
+
+    async def _ensure_server_catalog_loaded(self) -> None:
+        """Preload server metadata before async planning paths use sync accessors."""
+
+        await self.server_manager.ensure_loaded_async()
 
     def _allocate_ports(self, count: int) -> List[Tuple[int, int]]:
         """Atomically allocate multiple port pairs (proxy_port, control_port)."""
@@ -464,21 +490,23 @@ class FleetStateManager:
             try:
                 # Extract country from service
                 country = self._extract_country_from_service(service)
-                if config.countries and country not in config.countries:
+                if (
+                    config.provider
+                    and service.provider.casefold() != config.provider.casefold()
+                ):
+                    continue
+                if config.countries and country.casefold() not in {
+                    item.casefold() for item in config.countries
+                }:
                     continue
 
-                # Get alternative cities
-                available_cities = self.server_manager.list_cities(
-                    service.provider, country
-                )
-                alternative_cities = self._rank_rotation_candidates(
+                alternative_targets = self._build_rotation_targets(
                     service=service,
                     country=country,
-                    available_cities=available_cities,
                     config=config,
                 )
 
-                if not alternative_cities:
+                if not alternative_targets:
                     logger.warning(
                         f"No alternative cities found for {service_name} in {country}"
                     )
@@ -487,15 +515,25 @@ class FleetStateManager:
                 # Select the best candidate first, but keep the rest so execution
                 # can fall through if the first choice does not yield a healthy
                 # service with a genuinely new egress IP.
-                new_location = alternative_cities[0]
+                new_target = alternative_targets[0]
 
                 plan.append(
                     ServiceRotationPlan(
                         service_name=service_name,
-                        old_location=service.location,
-                        new_location=new_location,
+                        old_location=self._format_rotation_target(
+                            RotationTarget(country=country, city=service.location)
+                        ),
+                        new_location=self._format_rotation_target(new_target),
                         reason="health_check_failed",
-                        candidate_locations=alternative_cities,
+                        candidate_locations=[
+                            self._format_rotation_target(target)
+                            for target in alternative_targets
+                        ],
+                        old_target=RotationTarget(
+                            country=country, city=service.location
+                        ),
+                        new_target=new_target,
+                        candidate_targets=alternative_targets,
                     )
                 )
 
@@ -511,6 +549,14 @@ class FleetStateManager:
         """Return a normalized lookup key for one rotation candidate city."""
 
         return (provider.casefold(), country.casefold(), city.casefold())
+
+    def _rotation_target_key(
+        self, provider: str, target: RotationTarget
+    ) -> Tuple[str, str, str]:
+        return self._rotation_city_key(provider, target.country, target.city)
+
+    def _format_rotation_target(self, target: RotationTarget) -> str:
+        return target.label()
 
     def _prune_bad_rotation_cities(self, cooldown_seconds: int) -> None:
         """Drop expired bad-city markers so candidate ranking can recover over time."""
@@ -563,6 +609,26 @@ class FleetStateManager:
             None,
         )
 
+    def _prune_bad_rotation_ips(self, cooldown_seconds: int) -> None:
+        cutoff = datetime.now().timestamp() - max(1, cooldown_seconds)
+        expired = [
+            ip
+            for ip, failed_at in self.bad_rotation_ips.items()
+            if failed_at.timestamp() < cutoff
+        ]
+        for ip in expired:
+            self.bad_rotation_ips.pop(ip, None)
+
+    def _is_bad_rotation_ip(self, ip_address: str, cooldown_seconds: int) -> bool:
+        self._prune_bad_rotation_ips(cooldown_seconds)
+        return ip_address.casefold() in self.bad_rotation_ips
+
+    def _mark_bad_rotation_ip(self, ip_address: str) -> None:
+        self.bad_rotation_ips[ip_address.casefold()] = datetime.now()
+
+    def _clear_bad_rotation_ip(self, ip_address: str) -> None:
+        self.bad_rotation_ips.pop(ip_address.casefold(), None)
+
     def _extract_country_from_service(self, service: VPNService) -> str:
         """Extract country from service name or location."""
         country = service.environment.get("SERVER_COUNTRIES", "").strip()
@@ -597,6 +663,53 @@ class FleetStateManager:
         normalized = name.replace("-", " ").strip()
         return normalized.title() if normalized else service.location
 
+    def _canonical_country_name(self, provider: str, country: str) -> str | None:
+        available = self.server_manager.list_countries(provider)
+        if not available:
+            return country
+        lookup = {item.casefold(): item for item in available}
+        return lookup.get(country.casefold())
+
+    def _build_rotation_targets(
+        self,
+        service: VPNService,
+        country: str,
+        config: OperationConfig,
+    ) -> List[RotationTarget]:
+        candidate_targets: List[RotationTarget] = []
+        seen: set[tuple[str, str]] = set()
+
+        country_sequence: list[str] = [country]
+        for fallback_country in config.fallback_countries:
+            canonical = self._canonical_country_name(service.provider, fallback_country)
+            if canonical is None:
+                continue
+            if canonical.casefold() == country.casefold():
+                continue
+            if canonical.casefold() in {item.casefold() for item in country_sequence}:
+                continue
+            country_sequence.append(canonical)
+
+        for target_country in country_sequence:
+            available_cities = self.server_manager.list_cities(
+                service.provider, target_country
+            )
+            ranked_cities = self._rank_rotation_candidates(
+                service=service,
+                country=target_country,
+                available_cities=available_cities,
+                config=config,
+            )
+            for city in ranked_cities:
+                key = (target_country.casefold(), city.casefold())
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidate_targets.append(
+                    RotationTarget(country=target_country, city=city)
+                )
+        return candidate_targets
+
     def _rank_rotation_candidates(
         self,
         service: VPNService,
@@ -607,12 +720,15 @@ class FleetStateManager:
         """Order candidate cities using fleet-aware heuristics."""
 
         current_location = service.location.casefold()
+        current_country = self._extract_country_from_service(service).casefold()
         seen: set[str] = set()
         candidates: List[str] = []
         skipped_bad_cities: List[str] = []
         for city in available_cities:
             normalized = city.casefold()
-            if normalized == current_location or normalized in seen:
+            if normalized in seen or (
+                country.casefold() == current_country and normalized == current_location
+            ):
                 continue
             seen.add(normalized)
             if self._is_bad_rotation_city(
@@ -714,6 +830,7 @@ class FleetStateManager:
         service: VPNService,
         target_location: str,
         *,
+        target_country: str | None = None,
         current_name: str | None = None,
         target_name: str | None = None,
     ) -> str:
@@ -723,16 +840,43 @@ class FleetStateManager:
             return target_name
 
         active_name = current_name or service.name
+        current_country_slug = self._slug_location(
+            self._extract_country_from_service(service)
+        )
+        target_country_slug = self._slug_location(
+            target_country or self._extract_country_from_service(service)
+        )
         current_slug = self._slug_location(service.location)
         target_slug = self._slug_location(target_location)
-        if not current_slug or not target_slug or current_slug == target_slug:
+        if not current_slug or not target_slug:
             return active_name
 
-        if current_slug not in active_name:
-            return active_name
+        candidate = active_name
+        replaced = False
+        if (
+            current_country_slug
+            and target_country_slug
+            and current_country_slug != target_country_slug
+            and current_country_slug in candidate
+        ):
+            candidate = candidate.replace(current_country_slug, target_country_slug, 1)
+            replaced = True
 
-        prefix, suffix = active_name.rsplit(current_slug, 1)
-        candidate = f"{prefix}{target_slug}{suffix}"
+        if current_slug != target_slug and current_slug in candidate:
+            prefix, suffix = candidate.rsplit(current_slug, 1)
+            candidate = f"{prefix}{target_slug}{suffix}"
+            replaced = True
+
+        if not replaced:
+            provider_slug = self._slug_location(service.provider)
+            numeric_suffix = ""
+            tail = active_name.rsplit("-", 1)[-1]
+            if tail.isdigit():
+                numeric_suffix = f"-{tail}"
+            candidate = (
+                f"{provider_slug}-{target_country_slug}-{target_slug}{numeric_suffix}"
+            )
+
         existing_names = {item.name for item in self.compose_manager.list_services()}
         existing_names.discard(active_name)
         if candidate not in existing_names:
@@ -776,18 +920,22 @@ class FleetStateManager:
         service: VPNService,
         location: str,
         settle_seconds: int = 10,
+        country: str | None = None,
         target_name: str | None = None,
     ) -> str:
         """Apply one candidate location and recreate the service container."""
 
         profile = self.compose_manager.get_profile(service.profile)
         previous_name = service.name
+        target_country = country or self._extract_country_from_service(service)
         next_name = self._derive_rotated_service_name(
             service,
             location,
+            target_country=target_country,
             current_name=previous_name,
             target_name=target_name,
         )
+        service.set_country(target_country)
         service.set_location(location)
         service.set_name(next_name)
         self.compose_manager.replace_service(previous_name, service)
@@ -802,6 +950,34 @@ class FleetStateManager:
         await asyncio.to_thread(start_container, service.name)
         await asyncio.sleep(settle_seconds)
         return next_name
+
+    async def _collect_reserved_egress_ips(
+        self,
+        *,
+        exclude_services: set[str],
+        timeout: int,
+    ) -> set[str]:
+        reserved_ips: set[str] = set()
+
+        async def _probe(service_name: str) -> str | None:
+            _, health = await self._check_service_health(service_name, timeout=timeout)
+            if not health.is_healthy:
+                return None
+            return await self._get_service_egress_ip(service_name, timeout=timeout)
+
+        tasks = [
+            _probe(service.name)
+            for service in self.services.values()
+            if service.name not in exclude_services
+        ]
+        if not tasks:
+            return reserved_ips
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, str) and result:
+                reserved_ips.add(result)
+        return reserved_ips
 
     async def _execute_rotation_plan(
         self, plan: List[ServiceRotationPlan], config: OperationConfig
@@ -835,13 +1011,23 @@ class FleetStateManager:
 
         # Execute rotations with limited concurrency
         semaphore = asyncio.Semaphore(config.max_parallel)
+        reserved_ips = await self._collect_reserved_egress_ips(
+            exclude_services={rotation.service_name for rotation in plan},
+            timeout=config.health_check_timeout,
+        )
+        reserved_ips_lock = asyncio.Lock()
 
         async def rotate_single_service(
             rotation_plan: ServiceRotationPlan,
         ) -> Tuple[str, bool, RotationChange | None, str]:
             async with semaphore:
                 try:
-                    change = await self._execute_single_rotation(rotation_plan, config)
+                    change = await self._execute_single_rotation(
+                        rotation_plan,
+                        config,
+                        reserved_ips=reserved_ips,
+                        reserved_ips_lock=reserved_ips_lock,
+                    )
                     return rotation_plan.service_name, True, change, ""
                 except Exception as e:
                     return rotation_plan.service_name, False, None, str(e)
@@ -907,6 +1093,9 @@ class FleetStateManager:
         self,
         rotation_plan: ServiceRotationPlan,
         config: OperationConfig | None = None,
+        *,
+        reserved_ips: set[str] | None = None,
+        reserved_ips_lock: asyncio.Lock | None = None,
     ) -> RotationChange:
         """Execute rotation for a single service and return final rotation metadata."""
         config_obj = config or OperationConfig()
@@ -917,20 +1106,28 @@ class FleetStateManager:
         original_name = service.name
         original_location = service.location
         country = self._extract_country_from_service(service)
+        original_target = rotation_plan.old_target or RotationTarget(
+            country=country, city=original_location
+        )
         previous_ip = await self._get_service_egress_ip(
             service_name,
             timeout=config_obj.health_check_timeout,
         )
-        candidate_locations = rotation_plan.candidate_locations or [
-            rotation_plan.new_location
-        ]
+        candidate_targets = rotation_plan.candidate_targets or (
+            [rotation_plan.new_target]
+            if rotation_plan.new_target is not None
+            else [
+                RotationTarget(country=country, city=city)
+                for city in (
+                    rotation_plan.candidate_locations or [rotation_plan.new_location]
+                )
+            ]
+        )
         attempt_limit = max(1, config_obj.rotation_attempt_limit)
-        attempted_locations: List[str] = []
+        attempted_targets: List[RotationTarget] = []
         failures: List[str] = []
 
-        for attempt_number, candidate_location in enumerate(
-            candidate_locations, start=1
-        ):
+        for attempt_number, candidate_target in enumerate(candidate_targets, start=1):
             if attempt_number > attempt_limit:
                 failures.append(
                     f"stopped after {attempt_limit} rotation attempts for {service_name}"
@@ -940,37 +1137,52 @@ class FleetStateManager:
                     extra={
                         "service_name": service_name,
                         "attempt_limit": attempt_limit,
-                        "attempted_locations": attempted_locations,
+                        "attempted_locations": [
+                            self._format_rotation_target(target)
+                            for target in attempted_targets
+                        ],
                     },
                 )
                 break
             try:
-                attempted_locations.append(candidate_location)
+                attempted_targets.append(candidate_target)
                 logger.info(
                     "rotation_attempt_started",
                     extra={
                         "service_name": service_name,
                         "attempt": attempt_number,
                         "attempt_limit": attempt_limit,
-                        "candidate_location": candidate_location,
+                        "candidate_location": self._format_rotation_target(
+                            candidate_target
+                        ),
                     },
                 )
                 active_name = await self._apply_rotation_location(
-                    service, candidate_location
+                    service,
+                    candidate_target.city,
+                    country=candidate_target.country,
                 )
-                verified, verification_failures = await self._verify_rotation_candidate(
+                (
+                    verified,
+                    verification_failures,
+                    current_ip,
+                ) = await self._verify_rotation_candidate(
                     service_name=active_name,
                     previous_ip=previous_ip,
                     config=config_obj,
+                    reserved_ips=reserved_ips,
+                    reserved_ips_lock=reserved_ips_lock,
                 )
                 if not verified:
                     self._mark_bad_rotation_city(
                         service.provider,
-                        country,
-                        candidate_location,
+                        candidate_target.country,
+                        candidate_target.city,
                     )
+                    if current_ip:
+                        self._mark_bad_rotation_ip(current_ip)
                     failures.append(
-                        f"{candidate_location}: {' | '.join(verification_failures)}"
+                        f"{self._format_rotation_target(candidate_target)}: {' | '.join(verification_failures)}"
                     )
                     logger.warning(
                         "rotation_attempt_failed",
@@ -978,7 +1190,9 @@ class FleetStateManager:
                             "service_name": service_name,
                             "attempt": attempt_number,
                             "attempt_limit": attempt_limit,
-                            "candidate_location": candidate_location,
+                            "candidate_location": self._format_rotation_target(
+                                candidate_target
+                            ),
                             "verification_failures": verification_failures,
                         },
                     )
@@ -986,16 +1200,20 @@ class FleetStateManager:
 
                 self._clear_bad_rotation_city(
                     service.provider,
-                    country,
-                    candidate_location,
+                    candidate_target.country,
+                    candidate_target.city,
                 )
+                if current_ip:
+                    self._clear_bad_rotation_ip(current_ip)
                 logger.info(
                     "rotation_attempt_succeeded",
                     extra={
                         "service_name": service_name,
                         "attempt": attempt_number,
                         "attempt_limit": attempt_limit,
-                        "candidate_location": candidate_location,
+                        "candidate_location": self._format_rotation_target(
+                            candidate_target
+                        ),
                         "final_service_name": active_name,
                     },
                 )
@@ -1003,10 +1221,20 @@ class FleetStateManager:
                 return RotationChange(
                     requested_service_name=service_name,
                     final_service_name=active_name,
-                    old_location=original_location,
-                    new_location=candidate_location,
-                    candidate_locations=list(candidate_locations),
-                    attempted_locations=list(attempted_locations),
+                    old_location=self._format_rotation_target(original_target),
+                    new_location=self._format_rotation_target(candidate_target),
+                    candidate_locations=[
+                        self._format_rotation_target(target)
+                        for target in candidate_targets
+                    ],
+                    attempted_locations=[
+                        self._format_rotation_target(target)
+                        for target in attempted_targets
+                    ],
+                    old_target=original_target,
+                    new_target=candidate_target,
+                    candidate_targets=list(candidate_targets),
+                    attempted_targets=list(attempted_targets),
                 )
             except Exception as exc:
                 logger.warning(
@@ -1015,26 +1243,31 @@ class FleetStateManager:
                         "service_name": service.name,
                         "attempt": attempt_number,
                         "attempt_limit": attempt_limit,
-                        "candidate_location": candidate_location,
+                        "candidate_location": self._format_rotation_target(
+                            candidate_target
+                        ),
                         "error": str(exc),
                     },
                 )
                 self._mark_bad_rotation_city(
                     service.provider,
-                    country,
-                    candidate_location,
+                    candidate_target.country,
+                    candidate_target.city,
                 )
-                failures.append(f"{candidate_location}: {exc}")
+                failures.append(
+                    f"{self._format_rotation_target(candidate_target)}: {exc}"
+                )
 
         try:
             await self._apply_rotation_location(
                 service,
                 original_location,
+                country=original_target.country,
                 target_name=original_name,
             )
         except Exception as exc:
             failures.append(
-                f"rollback to {original_name} ({original_location}) failed after exhausted candidates: {exc}"
+                f"rollback to {original_name} ({self._format_rotation_target(original_target)}) failed after exhausted candidates: {exc}"
             )
 
         raise Exception(
@@ -1047,7 +1280,10 @@ class FleetStateManager:
         service_name: str,
         previous_ip: str | None,
         config: OperationConfig,
-    ) -> Tuple[bool, List[str]]:
+        *,
+        reserved_ips: set[str] | None = None,
+        reserved_ips_lock: asyncio.Lock | None = None,
+    ) -> Tuple[bool, List[str], str | None]:
         """Verify one rotated candidate with repeated health and vpn-test probes."""
 
         attempts = max(1, config.rotation_verification_attempts)
@@ -1078,9 +1314,24 @@ class FleetStateManager:
                     attempt_failures.append("unable to verify new egress IP")
                 elif current_ip == previous_ip:
                     attempt_failures.append(f"egress IP did not change ({current_ip})")
+            if current_ip and self._is_bad_rotation_ip(
+                current_ip, config.bad_city_cooldown_seconds
+            ):
+                attempt_failures.append(f"egress IP recently failed ({current_ip})")
+            if (
+                config.require_unique_egress_ip
+                and current_ip
+                and reserved_ips is not None
+                and current_ip in reserved_ips
+            ):
+                attempt_failures.append(
+                    f"egress IP already used by healthy fleet ({current_ip})"
+                )
 
-            if vpn_test_passed and (
-                not previous_ip or (current_ip and current_ip != previous_ip)
+            if (
+                vpn_test_passed
+                and (not previous_ip or (current_ip and current_ip != previous_ip))
+                and not attempt_failures
             ):
                 if not health.is_healthy:
                     logger.info(
@@ -1090,7 +1341,22 @@ class FleetStateManager:
                             "health_score": health.health_score,
                         },
                     )
-                return True, failures
+                if (
+                    config.require_unique_egress_ip
+                    and current_ip
+                    and reserved_ips is not None
+                    and reserved_ips_lock is not None
+                ):
+                    async with reserved_ips_lock:
+                        if current_ip in reserved_ips:
+                            failures.append(
+                                f"attempt {attempt}/{attempts}: egress IP already used by healthy fleet ({current_ip})"
+                            )
+                            if attempt < attempts and retry_delay:
+                                await asyncio.sleep(retry_delay)
+                            continue
+                        reserved_ips.add(current_ip)
+                return True, failures, current_ip
 
             if not health.is_healthy:
                 attempt_failures.append(f"health score {health.health_score}")
@@ -1107,7 +1373,7 @@ class FleetStateManager:
             if attempt < attempts and retry_delay:
                 await asyncio.sleep(retry_delay)
 
-        return False, failures
+        return False, failures, current_ip
 
     def _display_rotation_plan(self, plan: List[ServiceRotationPlan]):
         """Display rotation plan in formatted table."""
@@ -1172,6 +1438,8 @@ class FleetStateManager:
                     f"[yellow]🔄 Found {len(failed_services)} services needing rotation[/yellow]"
                 )
 
+                await self._ensure_server_catalog_loaded()
+
                 # Create rotation plan
                 rotation_plan = self._create_rotation_plan(failed_services, config)
 
@@ -1210,6 +1478,8 @@ class FleetStateManager:
                         errors=[f"Service '{service_name}' not found"],
                         execution_time=time.perf_counter() - start_time,
                     )
+
+                await self._ensure_server_catalog_loaded()
 
                 rotation_plan = self._create_rotation_plan([service_name], config_obj)
                 if not rotation_plan:
@@ -1260,6 +1530,7 @@ class FleetStateManager:
                 self._sync_services_from_compose()
 
                 if action == OperationType.SCALE_UP:
+                    await self._ensure_server_catalog_loaded()
                     result = await self._scale_up(config, factor)
                 else:
                     result = await self._scale_down(config, factor)
@@ -1352,6 +1623,7 @@ class FleetStateManager:
                             "vpn.control_port": str(control_port),
                             "vpn.provider": profile.provider,
                             "vpn.profile": profile.name,
+                            "vpn.country": country,
                             "vpn.location": city,
                         }
 

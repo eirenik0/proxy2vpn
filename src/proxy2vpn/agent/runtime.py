@@ -74,7 +74,12 @@ class AgentWatchdog:
         )
         self.llm_mode = (llm_mode or self.settings.llm_mode).strip() or "disabled"
         self.store = store or AgentStateStore(self.compose_file, settings=self.settings)
-        self._health_assessor = HealthAssessmentService(self.settings.health_threshold)
+        self._health_assessor = HealthAssessmentService(
+            self.settings.health_threshold,
+            probe_timeout=self.settings.probe_timeout_seconds,
+            control_api_timeout=self.settings.control_api_timeout_seconds,
+            control_api_retry_attempts=self.settings.control_api_retry_attempts,
+        )
         self._incident_enricher = self._build_incident_enricher()
         self._incident_investigator = self._build_incident_investigator()
         self._llm_warning_emitted = False
@@ -109,35 +114,52 @@ class AgentWatchdog:
         """Execute one monitoring and remediation cycle."""
 
         manager = ComposeManager(self.compose_file)
-        orphaned = await asyncio.to_thread(
-            docker_ops.cleanup_orphaned_containers, manager
-        )
-        if orphaned:
-            logger.warning(
-                "agent_orphaned_containers_removed",
-                extra={
-                    "compose_path": str(self.compose_file),
-                    "container_names": orphaned,
-                    "count": len(orphaned),
-                },
-            )
-        services = manager.list_services()
-        assessments = await self._health_assessor.assess_services(services)
-        snapshots_by_name = {
-            snapshot.service_name: snapshot for snapshot in state.services
-        }
-        incidents = self.store.load_incidents()
-
+        progress_at = utc_now()
         state.status.compose_path = str(self.compose_file)
         state.status.interval_seconds = self.interval_seconds
         state.status.llm_mode = self.llm_mode
         state.status.last_error = None
-        state.status.service_count = len(services)
-
-        updated_snapshots: list[ServiceSnapshot] = []
+        state.status.active_cycle_started_at = progress_at
+        state.status.active_cycle_phase = "cleanup"
+        state.status.active_cycle_service_name = None
+        state.status.last_progress_at = progress_at
+        self.store.write_state(state)
+        updated_snapshots: list[ServiceSnapshot] = list(state.services)
         cycle_error: Exception | None = None
         try:
+            orphaned = await asyncio.to_thread(
+                docker_ops.cleanup_orphaned_containers, manager
+            )
+            if orphaned:
+                logger.warning(
+                    "agent_orphaned_containers_removed",
+                    extra={
+                        "compose_path": str(self.compose_file),
+                        "container_names": orphaned,
+                        "count": len(orphaned),
+                    },
+                )
+            services = manager.list_services()
+            state.status.service_count = len(services)
+            state.status.active_cycle_phase = "assessing_services"
+            self.store.write_state(state)
+            assessments = await self._health_assessor.assess_services(
+                services,
+                progress_callback=lambda service_name: self._persist_cycle_progress(
+                    state,
+                    service_name=service_name,
+                ),
+            )
+            snapshots_by_name = {
+                snapshot.service_name: snapshot for snapshot in state.services
+            }
+            incidents = self.store.load_incidents()
+            updated_snapshots = []
+            state.status.active_cycle_phase = "processing_services"
+            state.status.last_progress_at = utc_now()
+            self.store.write_state(state)
             for service in services:
+                self._persist_cycle_progress(state, service_name=service.name)
                 snapshot = await self._process_service(
                     manager=manager,
                     service=service,
@@ -148,23 +170,49 @@ class AgentWatchdog:
                     assessment_map=assessments,
                 )
                 updated_snapshots.append(snapshot)
+                self._merge_persisted_snapshot(
+                    state=state,
+                    previous_service_name=service.name,
+                    snapshot=snapshot,
+                )
+                state.status.unhealthy_count = sum(
+                    1
+                    for persisted_snapshot in state.services
+                    if persisted_snapshot.health_score < self.settings.health_threshold
+                )
+                state.status.last_progress_at = utc_now()
+                self.store.write_state(state)
         except Exception as exc:
             state.status.last_error = str(exc)
             logger.error("agent_cycle_failed", extra={"error": str(exc)})
             cycle_error = exc
         finally:
-            state.status.last_loop_at = utc_now()
-
-        state.services = updated_snapshots
-        state.status.unhealthy_count = sum(
-            1
-            for snapshot in updated_snapshots
-            if snapshot.health_score < self.settings.health_threshold
-        )
-        self.store.write_state(state)
+            final_progress_at = utc_now()
+            state.status.last_loop_at = final_progress_at
+            state.status.last_progress_at = final_progress_at
+            state.status.active_cycle_started_at = None
+            state.status.active_cycle_phase = None
+            state.status.active_cycle_service_name = None
+            state.services = updated_snapshots
+            state.status.unhealthy_count = sum(
+                1
+                for snapshot in updated_snapshots
+                if snapshot.health_score < self.settings.health_threshold
+            )
+            self.store.write_state(state)
         if cycle_error is not None:
             raise cycle_error
         return state
+
+    def _persist_cycle_progress(
+        self,
+        state: AgentState,
+        *,
+        service_name: str | None = None,
+    ) -> None:
+        state.status.active_cycle_service_name = service_name
+        state.status.last_progress_at = utc_now()
+        self.store.write_state(state)
 
     async def approve_incident(self, incident_id: str) -> AgentIncident:
         """Deprecated compatibility path for manually triggering a rotation."""
@@ -422,6 +470,9 @@ class AgentWatchdog:
                 )
             return snapshot
 
+        force_immediate_rotation = False
+        route_restore_attempted_this_cycle = False
+
         if (
             container_status == "running"
             and failure_count == 1
@@ -454,13 +505,26 @@ class AgentWatchdog:
             results = post_restart["results"]
             health_score = post_restart["health_score"]
             container_status = post_restart["container_status"]
+            if self._has_failed_check(results, "tls_error"):
+                force_immediate_rotation = True
 
-        if self._can_restore(service.name, state.actions):
+        route_failure = self._has_persistent_route_connectivity_failure(results)
+        if route_failure and self._has_restore_since_degraded(
+            service.name,
+            state.actions,
+            degraded_since,
+        ):
+            force_immediate_rotation = True
+
+        if not force_immediate_rotation and self._can_restore(
+            service.name, state.actions
+        ):
             restore_result, post_restore = await self._restore_service(
                 manager=manager,
                 service=service,
                 state=state,
             )
+            route_restore_attempted_this_cycle = route_failure
             snapshot.last_action = "restore"
             snapshot.last_action_result = restore_result
             snapshot.health_score = post_restore["health_score"]
@@ -480,7 +544,15 @@ class AgentWatchdog:
                 self._resolve_active_incidents(service.name, incidents)
                 return snapshot
 
-        if not self._rotation_grace_elapsed(snapshot):
+            results = post_restore["results"]
+
+        if (
+            route_restore_attempted_this_cycle
+            and self._has_persistent_route_connectivity_failure(results)
+        ):
+            return snapshot
+
+        if not force_immediate_rotation and not self._rotation_grace_elapsed(snapshot):
             grace_remaining = (
                 self.settings.rotation_grace_period_seconds
                 - int((utc_now() - snapshot.degraded_since).total_seconds())
@@ -587,7 +659,11 @@ class AgentWatchdog:
     async def _control_api_reachable(self, service: VPNService) -> bool:
         base_url = f"http://localhost:{service.control_port}/v1"
         try:
-            async with GluetunControlClient(base_url) as client:
+            async with GluetunControlClient(
+                base_url,
+                timeout=self.settings.control_api_timeout_seconds,
+                retry_attempts=self.settings.control_api_retry_attempts,
+            ) as client:
                 await client.status()
             return True
         except Exception:
@@ -601,7 +677,11 @@ class AgentWatchdog:
     ) -> str:
         base_url = f"http://localhost:{service.control_port}/v1"
         try:
-            async with GluetunControlClient(base_url) as client:
+            async with GluetunControlClient(
+                base_url,
+                timeout=self.settings.control_api_timeout_seconds,
+                retry_attempts=self.settings.control_api_retry_attempts,
+            ) as client:
                 await client.restart_tunnel()
             self._append_action(
                 state,
@@ -822,6 +902,31 @@ class AgentWatchdog:
             )
         )
         state.actions = state.actions[-self.settings.action_history_limit :]
+        state.status.last_progress_at = utc_now()
+        self.store.write_state(state)
+
+    def _merge_persisted_snapshot(
+        self,
+        state: AgentState,
+        previous_service_name: str,
+        snapshot: ServiceSnapshot,
+    ) -> None:
+        merged: list[ServiceSnapshot] = []
+        replaced = False
+        for existing_snapshot in state.services:
+            if existing_snapshot.service_name in {
+                previous_service_name,
+                snapshot.service_name,
+            }:
+                if not replaced:
+                    merged.append(snapshot)
+                    replaced = True
+                continue
+            merged.append(existing_snapshot)
+
+        if not replaced:
+            merged.append(snapshot)
+        state.services = merged
 
     def _update_snapshot_action(
         self,
@@ -985,6 +1090,49 @@ class AgentWatchdog:
             ):
                 return action.ts < cutoff
         return True
+
+    def _has_restore_since_degraded(
+        self,
+        service_name: str,
+        actions: list[ActionRecord],
+        degraded_since: datetime | None,
+    ) -> bool:
+        if degraded_since is None:
+            return False
+        for action in reversed(actions):
+            if action.ts < degraded_since:
+                break
+            if (
+                self._action_matches_service(action, service_name)
+                and action.action == "restore"
+            ):
+                return True
+        return False
+
+    def _has_failed_check(
+        self,
+        results: list[DiagnosticResult] | None,
+        check: str,
+    ) -> bool:
+        return any(
+            result.check == check and not result.passed for result in (results or [])
+        )
+
+    def _has_persistent_route_connectivity_failure(
+        self,
+        results: list[DiagnosticResult] | None,
+    ) -> bool:
+        route_error = next(
+            (
+                result
+                for result in (results or [])
+                if result.check == "route_error" and not result.passed
+            ),
+            None,
+        )
+        if route_error is None or not route_error.persistent:
+            return False
+        return self._has_failed_check(results, "connectivity")
 
     def _rotation_grace_elapsed(self, snapshot: ServiceSnapshot) -> bool:
         if snapshot.degraded_since is None:
@@ -1289,6 +1437,16 @@ class AgentWatchdog:
         return incident.service_name == service.name
 
     async def _rotate_service_via_fleet(self, service_name: str) -> Any:
+        fallback_countries: list[str] = []
+        try:
+            service = ComposeManager(self.compose_file).get_service(service_name)
+        except Exception:
+            service = None
+        if service is not None:
+            fallback_countries = self.settings.fallback_countries_by_provider.get(
+                service.provider.casefold(),
+                [],
+            )
         fleet_manager = FleetStateManager(self.compose_file)
         try:
             result = await fleet_manager.rotate_service(
@@ -1297,6 +1455,9 @@ class AgentWatchdog:
                     dry_run=False,
                     criteria=RotationCriteria.PERFORMANCE,
                     rollback_on_failure=True,
+                    health_check_timeout=self.settings.probe_timeout_seconds,
+                    fallback_countries=list(fallback_countries),
+                    require_unique_egress_ip=True,
                 ),
             )
         finally:
