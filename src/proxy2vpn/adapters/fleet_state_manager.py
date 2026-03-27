@@ -241,6 +241,11 @@ class FleetStateManager:
             f"Synced {len(self.services)} VPN services and {len(self.allocated_ports)} total ports from compose manager"
         )
 
+    async def _ensure_server_catalog_loaded(self) -> None:
+        """Preload server metadata before async planning paths use sync accessors."""
+
+        await self.server_manager.ensure_loaded_async()
+
     def _allocate_ports(self, count: int) -> List[Tuple[int, int]]:
         """Atomically allocate multiple port pairs (proxy_port, control_port)."""
         port_pairs = []
@@ -1426,6 +1431,8 @@ class FleetStateManager:
                     f"[yellow]🔄 Found {len(failed_services)} services needing rotation[/yellow]"
                 )
 
+                await self._ensure_server_catalog_loaded()
+
                 # Create rotation plan
                 rotation_plan = self._create_rotation_plan(failed_services, config)
 
@@ -1464,6 +1471,8 @@ class FleetStateManager:
                         errors=[f"Service '{service_name}' not found"],
                         execution_time=time.perf_counter() - start_time,
                     )
+
+                await self._ensure_server_catalog_loaded()
 
                 rotation_plan = self._create_rotation_plan([service_name], config_obj)
                 if not rotation_plan:
@@ -1514,6 +1523,7 @@ class FleetStateManager:
                 self._sync_services_from_compose()
 
                 if action == OperationType.SCALE_UP:
+                    await self._ensure_server_catalog_loaded()
                     result = await self._scale_up(config, factor)
                 else:
                     result = await self._scale_down(config, factor)

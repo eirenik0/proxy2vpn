@@ -996,6 +996,115 @@ def test_create_rotation_plan_orders_same_country_before_fallback_countries(
     ]
 
 
+def test_rotate_service_preloads_server_catalog_for_async_rotation(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
+    monkeypatch.setattr(
+        fleet_state_manager_mod.FleetStateManager,
+        "_instance_compose_path",
+        None,
+    )
+
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "test.env"
+    env_path.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    manager.add_profile(Profile(name="test", env_file=str(env_path)))
+    manager.add_service(
+        VPNService.create(
+            name="protonvpn-canada-toronto",
+            port=20000,
+            control_port=30000,
+            provider="protonvpn",
+            profile="test",
+            location="Toronto",
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": "Toronto",
+                "SERVER_COUNTRIES": "Canada",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20000",
+                "vpn.control_port": "30000",
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "test",
+                "vpn.location": "Toronto",
+            },
+        )
+    )
+
+    fleet_manager = fleet_state_manager_mod.FleetStateManager(str(compose_path))
+    loaded = {}
+
+    async def fake_fetch(verify=True):
+        loaded["called"] = True
+        fleet_manager.server_manager.data = {
+            "protonvpn": {
+                "servers": [
+                    {"country": "Canada", "city": "Toronto", "ips": ["198.51.100.1"]},
+                    {
+                        "country": "Canada",
+                        "city": "Montreal",
+                        "ips": ["198.51.100.2"],
+                    },
+                    {
+                        "country": "Netherlands",
+                        "city": "Amsterdam",
+                        "ips": ["198.51.100.3"],
+                    },
+                ]
+            }
+        }
+        return fleet_manager.server_manager.data
+
+    def fail_sync_update(*args, **kwargs):
+        raise AssertionError("sync update_servers should not run in async rotation")
+
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "fetch_server_list_async",
+        fake_fetch,
+    )
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "update_servers",
+        fail_sync_update,
+    )
+
+    captured = {}
+
+    async def fake_execute(plan, config):
+        captured["candidate_locations"] = plan[0].candidate_locations
+        return fleet_state_manager_mod.OperationResult(
+            operation_type=fleet_state_manager_mod.OperationType.ROTATE,
+            success=True,
+            services_affected=[plan[0].service_name],
+        )
+
+    monkeypatch.setattr(fleet_manager, "_execute_rotation_plan", fake_execute)
+
+    result = asyncio.run(
+        fleet_manager.rotate_service(
+            "protonvpn-canada-toronto",
+            fleet_state_manager_mod.OperationConfig(
+                criteria=fleet_state_manager_mod.RotationCriteria.LOAD,
+                fallback_countries=["Netherlands"],
+            ),
+        )
+    )
+
+    assert loaded["called"] is True
+    assert result.success is True
+    assert captured["candidate_locations"] == [
+        "Canada / Montreal",
+        "Netherlands / Amsterdam",
+    ]
+
+
 def test_execute_single_rotation_updates_country_and_city_for_cross_country_failover(
     monkeypatch, tmp_path
 ):
