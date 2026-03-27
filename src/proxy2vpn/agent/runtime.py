@@ -678,20 +678,18 @@ class AgentWatchdog:
             timeout,
         )
 
-    async def _collect_recent_log_evidence(
+    async def _collect_recent_log_lines(
         self,
         service_name: str,
         lines: int = 20,
-        max_lines: int = 6,
     ) -> list[str]:
         def _read_logs() -> list[str]:
-            raw_lines = [
+            return [
                 str(line).strip()
                 for line in docker_ops.container_logs(
                     service_name, lines=lines, follow=False
                 )
             ]
-            return self._select_log_evidence(raw_lines, max_lines=max_lines)
 
         try:
             return await asyncio.to_thread(_read_logs)
@@ -699,13 +697,16 @@ class AgentWatchdog:
             return []
 
     def _select_log_evidence(
-        self, log_lines: list[str], max_lines: int = 6
+        self,
+        log_lines: list[str],
+        issues: list[DiagnosticResult] | None = None,
+        max_lines: int = 6,
     ) -> list[str]:
         normalized = [line.strip() for line in log_lines if str(line).strip()]
         if not normalized:
             return []
 
-        keywords = (
+        generic_keywords = (
             "error",
             "warn",
             "fail",
@@ -719,21 +720,75 @@ class AgentWatchdog:
             "tun0",
             "proxy",
         )
-        filtered = [
-            line
-            for line in normalized
-            if any(token in line.lower() for token in keywords)
-        ]
-        candidates = filtered or normalized
-        selected = candidates[-max_lines:]
-        deduped: list[str] = []
+        failing_checks = {
+            issue.check for issue in (issues or []) if not issue.passed and issue.check
+        }
+        priority_keywords: tuple[str, ...] = ()
+        if "route_error" in failing_checks:
+            priority_keywords = (
+                "rtnetlink answers: file exists",
+                "linux route add command failed",
+                "route installation may fail",
+                "network unreachable",
+                "route",
+                "tun0",
+            )
+        elif "auth_failure" in failing_checks:
+            priority_keywords = (
+                "auth_failed",
+                "authentication failure",
+                "auth",
+                "credentials",
+            )
+        elif "config_error" in failing_checks:
+            priority_keywords = (
+                "config",
+                "configuration",
+                "invalid",
+                "missing",
+            )
+        elif "tls_error" in failing_checks:
+            priority_keywords = ("tls", "certificate", "ssl")
+        elif "dns_error" in failing_checks:
+            priority_keywords = ("dns",)
+        elif "connectivity" in failing_checks:
+            priority_keywords = ("proxy", "connect", "port", "timeout")
+
+        selected = self._matching_log_lines(
+            normalized,
+            priority_keywords,
+            max_lines=max_lines,
+        )
+        if not selected:
+            selected = self._matching_log_lines(
+                normalized,
+                generic_keywords,
+                max_lines=max_lines,
+            )
+        return selected or normalized[-max_lines:]
+
+    def _matching_log_lines(
+        self,
+        log_lines: list[str],
+        keywords: tuple[str, ...],
+        max_lines: int,
+    ) -> list[str]:
+        if not keywords:
+            return []
+
+        matches: list[str] = []
         seen: set[str] = set()
-        for line in selected:
+        for line in log_lines:
+            line_lower = line.lower()
+            if not any(token in line_lower for token in keywords):
+                continue
             if line in seen:
                 continue
             seen.add(line)
-            deduped.append(line)
-        return deduped
+            matches.append(line)
+            if len(matches) >= max_lines:
+                break
+        return matches
 
     def _append_action(
         self,
@@ -1469,18 +1524,18 @@ class AgentWatchdog:
             )
 
         results: list[DiagnosticResult] = []
+        log_lines: list[str] = []
         log_evidence: list[str] = []
         analyzer = DiagnosticAnalyzer()
         if container_status == "running":
-            log_evidence = await self._collect_recent_log_evidence(
-                incident.service_name
-            )
+            log_lines = await self._collect_recent_log_lines(incident.service_name)
             try:
                 results = await self._analyze_service_logs(
                     incident.service_name, analyzer
                 )
             except Exception:
                 results = []
+            log_evidence = self._select_log_evidence(log_lines, issues=results)
 
         health_score = (
             analyzer.health_score(results)

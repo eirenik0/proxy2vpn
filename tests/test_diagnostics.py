@@ -62,6 +62,25 @@ def test_openvpn_route_warnings_are_not_misclassified_as_config_errors():
     assert "tun0" in route_issue.recommendation
 
 
+def test_route_error_detection_ignores_non_vpn_logs():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    logs = [
+        "2026-03-27T10:19:07Z ERROR [healthcheck] network unreachable while probing upstream route cache",
+        "2026-03-27T10:19:07Z WARN [healthcheck] tun0 metric refresh skipped",
+    ]
+
+    results = analyzer.analyze_logs(logs)
+
+    assert results == [
+        diagnostics.DiagnosticResult(
+            check="logs",
+            passed=True,
+            message="No critical log errors",
+            recommendation="",
+        )
+    ]
+
+
 def test_connectivity(monkeypatch):
     def fake_fetch_ip(proxies=None, timeout=5):
         if proxies:

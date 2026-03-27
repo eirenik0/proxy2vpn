@@ -155,6 +155,8 @@ class DiagnosticAnalyzer:
         )
         if not any(marker in recent_text for marker in markers):
             return None
+        if "openvpn" not in recent_text and "vpn" not in recent_text:
+            return None
         if "route" not in recent_text and "tun0" not in recent_text:
             return None
 

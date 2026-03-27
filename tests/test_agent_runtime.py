@@ -910,6 +910,40 @@ def test_investigate_incident_uses_route_logs_to_shape_generic_action_plan(
     )
 
 
+def test_select_log_evidence_prioritizes_causative_route_lines(agent_compose_file):
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    selected = watchdog._select_log_evidence(
+        [
+            "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
+            "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+            "2026-03-27T10:19:08Z INFO [healthcheck] proxy port probe failed, retry scheduled",
+            "2026-03-27T10:19:09Z INFO [vpn] tun0 statistics refreshed",
+        ],
+        issues=[
+            DiagnosticResult(
+                check="route_error",
+                passed=False,
+                message="Recent OpenVPN route setup issue detected",
+                recommendation="Inspect duplicate or stale routes on tun0.",
+                persistent=True,
+            ),
+            DiagnosticResult(
+                check="connectivity",
+                passed=False,
+                message="VPN proxy connection failed",
+                recommendation="Check container status and port accessibility.",
+            ),
+        ],
+        max_lines=2,
+    )
+
+    assert selected == [
+        "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
+        "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+    ]
+
+
 def test_investigation_validation_honors_service_proxy_overrides(
     agent_compose_file, tmp_path
 ):
