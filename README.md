@@ -34,7 +34,10 @@ Stop wrestling with VPN clients that crash, managing multiple accounts manually,
 
 - Docker and Docker Compose
 - Python 3.10+
+- `curl` on the host running `proxy2vpn`
 - A VPN account from any [supported provider](https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers)
+
+`proxy2vpn` uses `curl` under the hood for proxied public-IP and health checks against authenticated Gluetun HTTP proxies. This path proved more reliable than Python HTTP clients for those proxy checks, and CI verifies that `curl` is available.
 
 ## Quick Installation
 
@@ -210,6 +213,8 @@ proxy2vpn vpn list
 ```
 
 **Docker Integration**: All containers use consistent labeling and networking, making them easy to integrate with existing Docker workflows and monitoring tools.
+
+**Health-check implementation note**: when `proxy2vpn` validates a VPN proxy endpoint, the proxied public-IP check uses `curl` under the hood. Direct control API calls and non-proxied HTTP requests still use the Python HTTP client stack.
 
 ### Compose-root state
 

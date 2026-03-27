@@ -81,6 +81,27 @@ def test_route_error_detection_ignores_non_vpn_logs():
     ]
 
 
+def test_tls_detection_ignores_openssl_library_banner():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    logs = [
+        "2026-03-27T10:56:56Z INFO [openvpn] OpenVPN 2.6.16 aarch64-alpine-linux-musl [SSL (OpenSSL)] [LZO] [LZ4] [EPOLL] [MH/PKTINFO] [AEAD]",
+        "2026-03-27T10:56:56Z INFO [openvpn] library versions: OpenSSL 3.5.5 27 Jan 2026, LZO 2.10",
+        "2026-03-27T10:56:58Z INFO [openvpn] Initialization Sequence Completed",
+    ]
+
+    results = analyzer.analyze_logs(logs)
+
+    assert all(result.check != "tls_error" for result in results)
+    assert results == [
+        diagnostics.DiagnosticResult(
+            check="logs",
+            passed=True,
+            message="No critical log errors",
+            recommendation="",
+        )
+    ]
+
+
 def test_connectivity(monkeypatch):
     def fake_fetch_ip(proxies=None, timeout=5):
         if proxies:

@@ -109,6 +109,18 @@ class AgentWatchdog:
         """Execute one monitoring and remediation cycle."""
 
         manager = ComposeManager(self.compose_file)
+        orphaned = await asyncio.to_thread(
+            docker_ops.cleanup_orphaned_containers, manager
+        )
+        if orphaned:
+            logger.warning(
+                "agent_orphaned_containers_removed",
+                extra={
+                    "compose_path": str(self.compose_file),
+                    "container_names": orphaned,
+                    "count": len(orphaned),
+                },
+            )
         services = manager.list_services()
         assessments = await self._health_assessor.assess_services(services)
         snapshots_by_name = {

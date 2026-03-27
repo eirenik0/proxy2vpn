@@ -482,6 +482,54 @@ def test_agent_missing_container_triggers_restore(agent_compose_file, monkeypatc
     assert started["count"] == 1
 
 
+def test_agent_run_cycle_cleans_orphaned_containers(agent_compose_file, monkeypatch):
+    cleaned = []
+
+    def fake_cleanup(manager):
+        cleaned.append(str(manager.compose_path))
+        return ["orphan-vpn"]
+
+    async def fake_assess_services(services):
+        return {}
+
+    async def fake_process_service(
+        manager,
+        service,
+        previous,
+        state,
+        incidents,
+        assessment,
+        assessment_map,
+    ):
+        return ServiceSnapshot(
+            service_name=service.name,
+            container_status="running",
+            health_score=100,
+            consecutive_failures=0,
+            last_check_at=utc_now(),
+        )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "cleanup_orphaned_containers",
+        fake_cleanup,
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+    monkeypatch.setattr(
+        watchdog._health_assessor,
+        "assess_services",
+        fake_assess_services,
+    )
+    monkeypatch.setattr(watchdog, "_process_service", fake_process_service)
+
+    state = asyncio.run(watchdog.run_once())
+
+    assert cleaned == [str(agent_compose_file)]
+    assert state.status.service_count == 1
+    assert state.status.unhealthy_count == 0
+
+
 def test_agent_persistent_auth_failure_creates_high_severity_incident(
     agent_compose_file, monkeypatch, control_client_factory
 ):

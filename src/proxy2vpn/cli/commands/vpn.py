@@ -1060,7 +1060,7 @@ def restore(
     from proxy2vpn.adapters.docker_ops import (
         analyze_container_logs,
         restart_container,
-        recreate_vpn_container,
+        start_vpn_service,
         get_vpn_containers,
     )
     from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer
@@ -1079,6 +1079,7 @@ def restore(
     analyzer = DiagnosticAnalyzer()
     restored: list[str] = []
     unchanged: list[str] = []
+    failed: list[str] = []
 
     for svc in targets:
         # Compute current health
@@ -1113,15 +1114,30 @@ def restore(
         # Recreate
         profile = manager.get_profile(svc.profile)
         try:
-            recreate_vpn_container(svc, profile)
+            start_vpn_service(svc, profile, force=True)
         except Exception:
-            pass
-        restored.append(svc.name)
+            failed.append(svc.name)
+            continue
+
+        containers = {c.name: c for c in get_vpn_containers(all=True)}
+        score3 = 0
+        if (container := containers.get(svc.name)) is not None:
+            try:
+                results = analyze_container_logs(container.name, analyzer=analyzer)
+                score3 = analyzer.health_score(results)
+            except Exception:
+                score3 = 0
+        if score3 >= threshold:
+            restored.append(svc.name)
+        else:
+            failed.append(svc.name)
 
     for n in restored:
         console.print(format_success_message("Restored", n))
     if unchanged:
         console.print("[yellow]No action needed:[/yellow] " + ", ".join(unchanged))
+    if failed:
+        console.print("[red]Restore failed:[/red] " + ", ".join(failed))
 
 
 @app.command("restart-tunnel")

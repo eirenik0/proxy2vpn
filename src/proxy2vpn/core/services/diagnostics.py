@@ -58,16 +58,9 @@ class DiagnosticAnalyzer:
                 )
             ]
 
-        # TLS issues in recent logs
-        if "tls" in recent_text or "certificate" in recent_text or "ssl" in recent_text:
-            return [
-                DiagnosticResult(
-                    check="tls_error",
-                    passed=False,
-                    message="Recent TLS or certificate issue detected",
-                    recommendation="Check certificates and TLS settings.",
-                )
-            ]
+        tls_issue = self._detect_tls_issue(recent_lines, recent_text)
+        if tls_issue is not None:
+            return [tls_issue]
 
         # DNS issues in recent logs
         if "dns" in recent_text and "fail" in recent_text:
@@ -141,6 +134,49 @@ class DiagnosticAnalyzer:
             ),
             persistent=persistent,
         )
+
+    def _detect_tls_issue(
+        self, recent_lines: list[str], recent_text: str
+    ) -> DiagnosticResult | None:
+        """Detect real TLS/certificate failures without flagging OpenSSL banners."""
+
+        strong_markers = (
+            "tls error",
+            "tlsv1 alert",
+            "certificate verify failed",
+            "certificate has expired",
+            "certificate expired",
+            "x509:",
+            "handshake failed",
+            "ssl routines",
+            "unknown ca",
+        )
+        if any(marker in recent_text for marker in strong_markers):
+            return DiagnosticResult(
+                check="tls_error",
+                passed=False,
+                message="Recent TLS or certificate issue detected",
+                recommendation="Check certificates and TLS settings.",
+            )
+
+        tokens = ("tls", "certificate", "ssl")
+        failure_words = ("error", "fail", "invalid", "expired", "verify", "alert")
+        for line in recent_lines:
+            lowered = line.lower()
+            if "openssl" in lowered and not any(
+                token in lowered for token in ("tls", "certificate")
+            ):
+                continue
+            if any(token in lowered for token in tokens) and any(
+                word in lowered for word in failure_words
+            ):
+                return DiagnosticResult(
+                    check="tls_error",
+                    passed=False,
+                    message="Recent TLS or certificate issue detected",
+                    recommendation="Check certificates and TLS settings.",
+                )
+        return None
 
     def _detect_route_setup_issue(
         self, recent_lines: list[str], recent_text: str
