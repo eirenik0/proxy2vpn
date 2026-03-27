@@ -537,6 +537,128 @@ def test_execute_single_rotation_rolls_back_when_all_candidates_keep_same_ip(
     assert applied_locations == ["Montreal", "Vancouver", "Toronto"]
 
 
+def test_execute_single_rotation_emits_progress_events_for_verification_and_rollback(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
+    monkeypatch.setattr(
+        fleet_state_manager_mod.FleetStateManager,
+        "_instance_compose_path",
+        None,
+    )
+
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "test.env"
+    env_path.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    manager.add_profile(Profile(name="test", env_file=str(env_path)))
+    manager.add_service(
+        VPNService.create(
+            name="protonvpn-canada-toronto",
+            port=20000,
+            control_port=30000,
+            provider="protonvpn",
+            profile="test",
+            location="Toronto",
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": "Toronto",
+                "SERVER_COUNTRIES": "Canada",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20000",
+                "vpn.control_port": "30000",
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "test",
+                "vpn.location": "Toronto",
+            },
+        )
+    )
+
+    fleet_manager = fleet_state_manager_mod.FleetStateManager(str(compose_path))
+    progress_events = []
+
+    async def fake_sleep(*args, **kwargs):
+        return None
+
+    async def fake_check(service_name, timeout=None):
+        return service_name, fleet_state_manager_mod.ServiceHealth(
+            service_name=service_name,
+            is_healthy=True,
+            health_score=100,
+            last_checked=datetime.now(),
+        )
+
+    ip_sequence = iter(["198.51.100.10", "198.51.100.10", "198.51.100.10"])
+
+    async def fake_ip(service_name, timeout=None):
+        return next(ip_sequence)
+
+    async def fake_vpn_test(service_name, timeout=3):
+        return True
+
+    def progress_callback(
+        service_name, step, detail=None, *, current_live_service_name=None
+    ):
+        progress_events.append((service_name, step, detail, current_live_service_name))
+
+    monkeypatch.setattr(fleet_state_manager_mod.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        fleet_state_manager_mod,
+        "recreate_vpn_container",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        fleet_state_manager_mod, "start_container", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(fleet_manager, "_get_service_egress_ip", fake_ip)
+    monkeypatch.setattr(fleet_manager, "_check_service_health", fake_check)
+    monkeypatch.setattr(
+        fleet_state_manager_mod,
+        "test_vpn_connection_async",
+        fake_vpn_test,
+    )
+
+    with pytest.raises(Exception, match="new egress IP"):
+        asyncio.run(
+            fleet_manager._execute_single_rotation(
+                fleet_state_manager_mod.ServiceRotationPlan(
+                    service_name="protonvpn-canada-toronto",
+                    old_location="Toronto",
+                    new_location="Montreal",
+                    reason="health_check_failed",
+                    candidate_locations=["Montreal"],
+                ),
+                fleet_state_manager_mod.OperationConfig(
+                    rotation_verification_attempts=2,
+                    rotation_verification_delay_seconds=0,
+                    rotation_attempt_limit=1,
+                ),
+                progress_callback=progress_callback,
+            )
+        )
+
+    assert [event[1] for event in progress_events] == [
+        "candidate_attempt_started",
+        "candidate_applied",
+        "verification_attempt_started",
+        "verification_attempt_failed",
+        "verification_attempt_started",
+        "verification_attempt_failed",
+        "rollback_started",
+        "rollback_completed",
+    ]
+    assert progress_events[1][3] == "protonvpn-canada-montreal"
+    assert progress_events[-1][3] == "protonvpn-canada-toronto"
+    updated_service = fleet_manager.compose_manager.get_service(
+        "protonvpn-canada-toronto"
+    )
+    assert updated_service.location == "Toronto"
+
+
 def test_execute_single_rotation_preserves_port_suffix_when_renaming(
     monkeypatch, tmp_path
 ):
@@ -996,6 +1118,94 @@ def test_create_rotation_plan_orders_same_country_before_fallback_countries(
     ]
 
 
+def test_create_rotation_plan_excludes_occupied_same_provider_country_targets(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
+    monkeypatch.setattr(
+        fleet_state_manager_mod.FleetStateManager,
+        "_instance_compose_path",
+        None,
+    )
+
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "test.env"
+    env_path.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    manager.add_profile(Profile(name="test", env_file=str(env_path)))
+    manager.add_service(
+        VPNService.create(
+            name="protonvpn-canada-toronto",
+            port=20000,
+            control_port=30000,
+            provider="protonvpn",
+            profile="test",
+            location="Toronto",
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": "Toronto",
+                "SERVER_COUNTRIES": "Canada",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20000",
+                "vpn.control_port": "30000",
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "test",
+                "vpn.location": "Toronto",
+            },
+        )
+    )
+    manager.add_service(
+        VPNService.create(
+            name="protonvpn-canada-montreal",
+            port=20001,
+            control_port=30001,
+            provider="protonvpn",
+            profile="test",
+            location="Montreal",
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": "Montreal",
+                "SERVER_COUNTRIES": "Canada",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20001",
+                "vpn.control_port": "30001",
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "test",
+                "vpn.location": "Montreal",
+            },
+        )
+    )
+
+    fleet_manager = fleet_state_manager_mod.FleetStateManager(str(compose_path))
+    fleet_manager._sync_services_from_compose()
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_countries",
+        lambda provider: ["Canada"],
+    )
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_cities",
+        lambda provider, country: ["Toronto", "Montreal", "Vancouver"],
+    )
+
+    plan = fleet_manager._create_rotation_plan(
+        ["protonvpn-canada-toronto"],
+        fleet_state_manager_mod.OperationConfig(
+            criteria=fleet_state_manager_mod.RotationCriteria.LOAD,
+        ),
+    )
+
+    assert len(plan) == 1
+    assert plan[0].candidate_locations == ["Canada / Vancouver"]
+
+
 def test_create_rotation_plan_filters_services_by_provider_scope(monkeypatch, tmp_path):
     monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
     monkeypatch.setattr(
@@ -1174,7 +1384,7 @@ def test_rotate_service_preloads_server_catalog_for_async_rotation(
 
     captured = {}
 
-    async def fake_execute(plan, config):
+    async def fake_execute(plan, config, progress_callback=None):
         captured["candidate_locations"] = plan[0].candidate_locations
         return fleet_state_manager_mod.OperationResult(
             operation_type=fleet_state_manager_mod.OperationType.ROTATE,
@@ -1199,6 +1409,111 @@ def test_rotate_service_preloads_server_catalog_for_async_rotation(
     assert captured["candidate_locations"] == [
         "Canada / Montreal",
         "Netherlands / Amsterdam",
+    ]
+
+
+def test_rotate_service_returns_failed_result_when_all_targets_are_occupied(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
+    monkeypatch.setattr(
+        fleet_state_manager_mod.FleetStateManager,
+        "_instance_compose_path",
+        None,
+    )
+
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "test.env"
+    env_path.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    manager.add_profile(Profile(name="test", env_file=str(env_path)))
+    manager.add_service(
+        VPNService.create(
+            name="protonvpn-canada-toronto",
+            port=20000,
+            control_port=30000,
+            provider="protonvpn",
+            profile="test",
+            location="Toronto",
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": "Toronto",
+                "SERVER_COUNTRIES": "Canada",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20000",
+                "vpn.control_port": "30000",
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "test",
+                "vpn.location": "Toronto",
+            },
+        )
+    )
+    manager.add_service(
+        VPNService.create(
+            name="protonvpn-canada-montreal",
+            port=20001,
+            control_port=30001,
+            provider="protonvpn",
+            profile="test",
+            location="Montreal",
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": "Montreal",
+                "SERVER_COUNTRIES": "Canada",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20001",
+                "vpn.control_port": "30001",
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "test",
+                "vpn.location": "Montreal",
+            },
+        )
+    )
+
+    fleet_manager = fleet_state_manager_mod.FleetStateManager(str(compose_path))
+
+    async def fake_fetch(verify=True):
+        return {"protonvpn": {"servers": []}}
+
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "fetch_server_list_async",
+        fake_fetch,
+    )
+    fleet_manager.server_manager.data = {"protonvpn": {"servers": []}}
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_countries",
+        lambda provider: ["Canada"],
+    )
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_cities",
+        lambda provider, country: ["Toronto", "Montreal"],
+    )
+
+    result = asyncio.run(
+        fleet_manager.rotate_service(
+            "protonvpn-canada-toronto",
+            fleet_state_manager_mod.OperationConfig(
+                criteria=fleet_state_manager_mod.RotationCriteria.LOAD,
+            ),
+        )
+    )
+
+    assert result.success is False
+    assert result.errors == [
+        "No rotation candidates available for 'protonvpn-canada-toronto'"
+    ]
+    assert sorted(service.name for service in manager.list_services()) == [
+        "protonvpn-canada-montreal",
+        "protonvpn-canada-toronto",
     ]
 
 
@@ -1351,7 +1666,9 @@ def test_verify_rotation_candidate_rejects_duplicate_healthy_fleet_ip(
 
     verified, failures, current_ip = asyncio.run(
         fleet_manager._verify_rotation_candidate(
-            service_name="candidate-service",
+            requested_service_name="protonvpn-canada-toronto",
+            current_live_service_name="candidate-service",
+            candidate_label="Canada / Montreal",
             previous_ip="198.51.100.10",
             config=fleet_state_manager_mod.OperationConfig(
                 rotation_verification_attempts=1,

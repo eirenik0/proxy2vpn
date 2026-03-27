@@ -2,13 +2,14 @@
 
 import asyncio
 from collections import Counter
+import inspect
 import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -123,6 +124,19 @@ class RotationChange:
     new_target: RotationTarget | None = None
     candidate_targets: List[RotationTarget] = field(default_factory=list)
     attempted_targets: List[RotationTarget] = field(default_factory=list)
+
+
+class RotationProgressCallback(Protocol):
+    """Structured progress sink for long-running single-service rotations."""
+
+    def __call__(
+        self,
+        service_name: str,
+        step: str,
+        detail: str | None = None,
+        *,
+        current_live_service_name: str | None = None,
+    ) -> Any: ...
 
 
 @dataclass
@@ -478,6 +492,7 @@ class FleetStateManager:
         This addresses Linus's requirement for validating plans before execution.
         """
         plan = []
+        compose_services = self.compose_manager.list_services()
 
         for service_name in failed_services:
             service = self.services.get(service_name)
@@ -499,11 +514,21 @@ class FleetStateManager:
                     item.casefold() for item in config.countries
                 }:
                     continue
+                if self._is_collision_suffix_service(
+                    service,
+                    compose_services=compose_services,
+                ):
+                    logger.warning(
+                        "Skipping collision-suffixed service %s during rotation planning",
+                        service_name,
+                    )
+                    continue
 
                 alternative_targets = self._build_rotation_targets(
                     service=service,
                     country=country,
                     config=config,
+                    compose_services=compose_services,
                 )
 
                 if not alternative_targets:
@@ -554,6 +579,73 @@ class FleetStateManager:
         self, provider: str, target: RotationTarget
     ) -> Tuple[str, str, str]:
         return self._rotation_city_key(provider, target.country, target.city)
+
+    def _canonical_rotation_name(self, provider: str, country: str, city: str) -> str:
+        return (
+            f"{self._slug_location(provider)}-"
+            f"{self._slug_location(country)}-"
+            f"{self._slug_location(city)}"
+        )
+
+    def _canonical_rotation_service_name(self, service: VPNService) -> str:
+        return self._canonical_rotation_name(
+            service.provider,
+            self._extract_country_from_service(service),
+            service.location,
+        )
+
+    def _is_collision_suffix_service(
+        self,
+        service: VPNService,
+        compose_services: List[VPNService] | None = None,
+    ) -> bool:
+        if not service.provider or not service.location:
+            return False
+        canonical_name = self._canonical_rotation_service_name(service)
+        if service.name == canonical_name or not service.name.startswith(
+            f"{canonical_name}-"
+        ):
+            return False
+        services = (
+            compose_services
+            if compose_services is not None
+            else self.compose_manager.list_services()
+        )
+        return any(other.name == canonical_name for other in services)
+
+    def _occupied_rotation_service_name(
+        self,
+        *,
+        provider: str,
+        country: str,
+        city: str,
+        exclude_service: str | None = None,
+        compose_services: List[VPNService] | None = None,
+    ) -> str | None:
+        services = (
+            compose_services
+            if compose_services is not None
+            else self.compose_manager.list_services()
+        )
+        canonical_name = self._canonical_rotation_name(provider, country, city)
+        fallback_match = None
+        for service in services:
+            if exclude_service and service.name == exclude_service:
+                continue
+            if service.provider.casefold() != provider.casefold():
+                continue
+            if (
+                self._extract_country_from_service(service).casefold()
+                != country.casefold()
+            ):
+                continue
+            if service.location.casefold() != city.casefold():
+                continue
+            if service.name == canonical_name:
+                return service.name
+            if fallback_match is None:
+                fallback_match = service.name
+        return fallback_match
 
     def _format_rotation_target(self, target: RotationTarget) -> str:
         return target.label()
@@ -675,9 +767,12 @@ class FleetStateManager:
         service: VPNService,
         country: str,
         config: OperationConfig,
+        *,
+        compose_services: List[VPNService] | None = None,
     ) -> List[RotationTarget]:
         candidate_targets: List[RotationTarget] = []
         seen: set[tuple[str, str]] = set()
+        skipped_occupied: list[str] = []
 
         country_sequence: list[str] = [country]
         for fallback_country in config.fallback_countries:
@@ -704,10 +799,31 @@ class FleetStateManager:
                 key = (target_country.casefold(), city.casefold())
                 if key in seen:
                     continue
+                occupied_by = self._occupied_rotation_service_name(
+                    provider=service.provider,
+                    country=target_country,
+                    city=city,
+                    exclude_service=service.name,
+                    compose_services=compose_services,
+                )
+                if occupied_by is not None:
+                    skipped_occupied.append(
+                        f"{self._format_rotation_target(RotationTarget(target_country, city))} ({occupied_by})"
+                    )
+                    continue
                 seen.add(key)
                 candidate_targets.append(
                     RotationTarget(country=target_country, city=city)
                 )
+        if skipped_occupied:
+            logger.info(
+                "rotation_candidates_skip_occupied_targets",
+                extra={
+                    "service_name": service.name,
+                    "provider": service.provider,
+                    "occupied_targets": skipped_occupied,
+                },
+            )
         return candidate_targets
 
     def _rank_rotation_candidates(
@@ -791,10 +907,16 @@ class FleetStateManager:
         """Count how many current services already use each city."""
 
         counts: Counter[str] = Counter()
-        for service in self.services.values():
+        compose_services = self.compose_manager.list_services()
+        for service in compose_services:
             if exclude_service and service.name == exclude_service:
                 continue
             if service.provider != provider:
+                continue
+            if self._is_collision_suffix_service(
+                service,
+                compose_services=compose_services,
+            ):
                 continue
             if self._extract_country_from_service(service) != country:
                 continue
@@ -928,6 +1050,19 @@ class FleetStateManager:
         profile = self.compose_manager.get_profile(service.profile)
         previous_name = service.name
         target_country = country or self._extract_country_from_service(service)
+        if target_name is None:
+            occupied_by = self._occupied_rotation_service_name(
+                provider=service.provider,
+                country=target_country,
+                city=location,
+                exclude_service=previous_name,
+            )
+            if occupied_by is not None:
+                raise ValueError(
+                    "Rotation target "
+                    f"{self._format_rotation_target(RotationTarget(target_country, location))} "
+                    f"is already occupied by {occupied_by}"
+                )
         next_name = self._derive_rotated_service_name(
             service,
             location,
@@ -979,8 +1114,32 @@ class FleetStateManager:
                 reserved_ips.add(result)
         return reserved_ips
 
+    async def _emit_rotation_progress(
+        self,
+        progress_callback: RotationProgressCallback | None,
+        *,
+        service_name: str,
+        step: str,
+        detail: str | None = None,
+        current_live_service_name: str | None = None,
+    ) -> None:
+        if progress_callback is None:
+            return
+        result = progress_callback(
+            service_name,
+            step,
+            detail,
+            current_live_service_name=current_live_service_name,
+        )
+        if inspect.isawaitable(result):
+            await result
+
     async def _execute_rotation_plan(
-        self, plan: List[ServiceRotationPlan], config: OperationConfig
+        self,
+        plan: List[ServiceRotationPlan],
+        config: OperationConfig,
+        *,
+        progress_callback: RotationProgressCallback | None = None,
     ) -> OperationResult:
         """
         Execute rotation plan atomically with rollback capability.
@@ -1027,6 +1186,7 @@ class FleetStateManager:
                         config,
                         reserved_ips=reserved_ips,
                         reserved_ips_lock=reserved_ips_lock,
+                        progress_callback=progress_callback,
                     )
                     return rotation_plan.service_name, True, change, ""
                 except Exception as e:
@@ -1096,6 +1256,7 @@ class FleetStateManager:
         *,
         reserved_ips: set[str] | None = None,
         reserved_ips_lock: asyncio.Lock | None = None,
+        progress_callback: RotationProgressCallback | None = None,
     ) -> RotationChange:
         """Execute rotation for a single service and return final rotation metadata."""
         config_obj = config or OperationConfig()
@@ -1157,21 +1318,37 @@ class FleetStateManager:
                         ),
                     },
                 )
+                await self._emit_rotation_progress(
+                    progress_callback,
+                    service_name=service_name,
+                    step="candidate_attempt_started",
+                    detail=self._format_rotation_target(candidate_target),
+                )
                 active_name = await self._apply_rotation_location(
                     service,
                     candidate_target.city,
                     country=candidate_target.country,
+                )
+                await self._emit_rotation_progress(
+                    progress_callback,
+                    service_name=service_name,
+                    step="candidate_applied",
+                    detail=self._format_rotation_target(candidate_target),
+                    current_live_service_name=active_name,
                 )
                 (
                     verified,
                     verification_failures,
                     current_ip,
                 ) = await self._verify_rotation_candidate(
-                    service_name=active_name,
+                    requested_service_name=service_name,
+                    current_live_service_name=active_name,
+                    candidate_label=self._format_rotation_target(candidate_target),
                     previous_ip=previous_ip,
                     config=config_obj,
                     reserved_ips=reserved_ips,
                     reserved_ips_lock=reserved_ips_lock,
+                    progress_callback=progress_callback,
                 )
                 if not verified:
                     self._mark_bad_rotation_city(
@@ -1259,11 +1436,25 @@ class FleetStateManager:
                 )
 
         try:
+            await self._emit_rotation_progress(
+                progress_callback,
+                service_name=service_name,
+                step="rollback_started",
+                detail=self._format_rotation_target(original_target),
+                current_live_service_name=service.name,
+            )
             await self._apply_rotation_location(
                 service,
                 original_location,
                 country=original_target.country,
                 target_name=original_name,
+            )
+            await self._emit_rotation_progress(
+                progress_callback,
+                service_name=service_name,
+                step="rollback_completed",
+                detail=self._format_rotation_target(original_target),
+                current_live_service_name=original_name,
             )
         except Exception as exc:
             failures.append(
@@ -1277,32 +1468,43 @@ class FleetStateManager:
 
     async def _verify_rotation_candidate(
         self,
-        service_name: str,
+        requested_service_name: str,
+        current_live_service_name: str,
+        candidate_label: str,
         previous_ip: str | None,
         config: OperationConfig,
         *,
         reserved_ips: set[str] | None = None,
         reserved_ips_lock: asyncio.Lock | None = None,
+        progress_callback: RotationProgressCallback | None = None,
     ) -> Tuple[bool, List[str], str | None]:
         """Verify one rotated candidate with repeated health and vpn-test probes."""
 
         attempts = max(1, config.rotation_verification_attempts)
         retry_delay = max(0, config.rotation_verification_delay_seconds)
         failures: List[str] = []
+        current_ip: str | None = None
 
         for attempt in range(1, attempts + 1):
+            await self._emit_rotation_progress(
+                progress_callback,
+                service_name=requested_service_name,
+                step="verification_attempt_started",
+                detail=f"{candidate_label} attempt {attempt}/{attempts}",
+                current_live_service_name=current_live_service_name,
+            )
             _, health = await self._check_service_health(
-                service_name,
+                current_live_service_name,
                 timeout=config.health_check_timeout,
             )
             vpn_test_passed = await test_vpn_connection_async(
-                service_name,
+                current_live_service_name,
                 timeout=config.health_check_timeout,
             )
             current_ip = None
             if vpn_test_passed:
                 current_ip = await self._get_service_egress_ip(
-                    service_name,
+                    current_live_service_name,
                     timeout=config.health_check_timeout,
                 )
 
@@ -1337,7 +1539,7 @@ class FleetStateManager:
                     logger.info(
                         "rotation_candidate_verified_by_vpn_test",
                         extra={
-                            "service_name": service_name,
+                            "service_name": requested_service_name,
                             "health_score": health.health_score,
                         },
                     )
@@ -1351,6 +1553,16 @@ class FleetStateManager:
                         if current_ip in reserved_ips:
                             failures.append(
                                 f"attempt {attempt}/{attempts}: egress IP already used by healthy fleet ({current_ip})"
+                            )
+                            await self._emit_rotation_progress(
+                                progress_callback,
+                                service_name=requested_service_name,
+                                step="verification_attempt_failed",
+                                detail=(
+                                    f"{candidate_label} attempt {attempt}/{attempts}: "
+                                    f"egress IP already used by healthy fleet ({current_ip})"
+                                ),
+                                current_live_service_name=current_live_service_name,
                             )
                             if attempt < attempts and retry_delay:
                                 await asyncio.sleep(retry_delay)
@@ -1369,6 +1581,13 @@ class FleetStateManager:
                 else "verification failed"
             )
             failures.append(f"attempt {attempt}/{attempts}: {attempt_summary}")
+            await self._emit_rotation_progress(
+                progress_callback,
+                service_name=requested_service_name,
+                step="verification_attempt_failed",
+                detail=f"{candidate_label} attempt {attempt}/{attempts}: {attempt_summary}",
+                current_live_service_name=current_live_service_name,
+            )
 
             if attempt < attempts and retry_delay:
                 await asyncio.sleep(retry_delay)
@@ -1399,7 +1618,11 @@ class FleetStateManager:
 
         console.print(table)
 
-    async def rotate_servers(self, config: OperationConfig) -> OperationResult:
+    async def rotate_servers(
+        self,
+        config: OperationConfig,
+        progress_callback: RotationProgressCallback | None = None,
+    ) -> OperationResult:
         """
         Main entry point for server rotation.
 
@@ -1442,9 +1665,20 @@ class FleetStateManager:
 
                 # Create rotation plan
                 rotation_plan = self._create_rotation_plan(failed_services, config)
+                for item in rotation_plan:
+                    await self._emit_rotation_progress(
+                        progress_callback,
+                        service_name=item.service_name,
+                        step="plan_selected",
+                        detail=", ".join(item.candidate_locations) or item.new_location,
+                    )
 
                 # Execute rotation plan
-                result = await self._execute_rotation_plan(rotation_plan, config)
+                result = await self._execute_rotation_plan(
+                    rotation_plan,
+                    config,
+                    progress_callback=progress_callback,
+                )
 
                 # Store operation history
                 self.operation_history.append(result)
@@ -1461,7 +1695,10 @@ class FleetStateManager:
                 )
 
     async def rotate_service(
-        self, service_name: str, config: OperationConfig | None = None
+        self,
+        service_name: str,
+        config: OperationConfig | None = None,
+        progress_callback: RotationProgressCallback | None = None,
     ) -> OperationResult:
         """Rotate a single service using the canonical fleet rotation path."""
 
@@ -1493,7 +1730,19 @@ class FleetStateManager:
                         dry_run=config_obj.dry_run,
                     )
 
-                result = await self._execute_rotation_plan(rotation_plan, config_obj)
+                await self._emit_rotation_progress(
+                    progress_callback,
+                    service_name=service_name,
+                    step="plan_selected",
+                    detail=", ".join(rotation_plan[0].candidate_locations)
+                    or rotation_plan[0].new_location,
+                )
+
+                result = await self._execute_rotation_plan(
+                    rotation_plan,
+                    config_obj,
+                    progress_callback=progress_callback,
+                )
                 result.execution_time = time.perf_counter() - start_time
                 self.operation_history.append(result)
                 return result

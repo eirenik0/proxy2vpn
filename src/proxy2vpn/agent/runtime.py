@@ -209,10 +209,49 @@ class AgentWatchdog:
         state: AgentState,
         *,
         service_name: str | None = None,
+        step: str | None = None,
+        detail: str | None = None,
+        current_live_service_name: str | None = None,
     ) -> None:
-        state.status.active_cycle_service_name = service_name
+        active_service_name = current_live_service_name or service_name
+        state.status.active_cycle_service_name = active_service_name
+        if service_name and current_live_service_name:
+            self._sync_inflight_service_name(
+                state,
+                requested_service_name=service_name,
+                current_live_service_name=current_live_service_name,
+            )
         state.status.last_progress_at = utc_now()
+        if step:
+            logger.debug(
+                "agent_cycle_progress",
+                extra={
+                    "compose_path": str(self.compose_file),
+                    "requested_service_name": service_name,
+                    "current_live_service_name": active_service_name,
+                    "step": step,
+                    "detail": detail,
+                },
+            )
         self.store.write_state(state)
+
+    def _sync_inflight_service_name(
+        self,
+        state: AgentState,
+        *,
+        requested_service_name: str,
+        current_live_service_name: str,
+    ) -> None:
+        if requested_service_name == current_live_service_name:
+            return
+        for snapshot in state.services:
+            if snapshot.service_name not in {
+                requested_service_name,
+                current_live_service_name,
+            }:
+                continue
+            snapshot.service_name = current_live_service_name
+            break
 
     async def approve_incident(self, incident_id: str) -> AgentIncident:
         """Deprecated compatibility path for manually triggering a rotation."""
@@ -415,6 +454,12 @@ class AgentWatchdog:
             return snapshot
 
         if self._has_persistent_auth_or_config_failure(results):
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restart_tunnel",
+                detail="starting isolated auth/config recovery",
+            )
             auth_restart = await self._attempt_isolated_auth_restart(
                 state=state,
                 incidents=incidents,
@@ -422,6 +467,12 @@ class AgentWatchdog:
                 assessment=assessment,
             )
             if auth_restart is not None:
+                self._persist_cycle_progress(
+                    state,
+                    service_name=service.name,
+                    step="restart_tunnel",
+                    detail="isolated auth/config recovery completed",
+                )
                 restart_result, post_restart = auth_restart
                 snapshot.last_action = "restart_tunnel"
                 snapshot.last_action_result = restart_result
@@ -478,12 +529,36 @@ class AgentWatchdog:
             and failure_count == 1
             and control_api_reachable
         ):
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restart_tunnel",
+                detail="starting tunnel restart",
+            )
             restart_result = await self._restart_tunnel(service, state)
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restart_tunnel",
+                detail=f"tunnel restart completed with result={restart_result}",
+            )
             snapshot.last_action = "restart_tunnel"
             snapshot.last_action_result = restart_result
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restart_tunnel_recheck",
+                detail="waiting before post-restart health check",
+            )
             await asyncio.sleep(self.settings.recheck_delay_seconds)
 
             post_restart = await self._evaluate_health(service)
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restart_tunnel_recheck",
+                detail="post-restart health check completed",
+            )
             snapshot.container_status = post_restart["container_status"]
             snapshot.health_score = post_restart["health_score"]
             snapshot.last_check_at = utc_now()
@@ -519,10 +594,22 @@ class AgentWatchdog:
         if not force_immediate_rotation and self._can_restore(
             service.name, state.actions
         ):
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restore",
+                detail="starting service restore",
+            )
             restore_result, post_restore = await self._restore_service(
                 manager=manager,
                 service=service,
                 state=state,
+            )
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restore",
+                detail=f"service restore completed with result={restore_result}",
             )
             route_restore_attempted_this_cycle = route_failure
             snapshot.last_action = "restore"
@@ -607,11 +694,28 @@ class AgentWatchdog:
             )
             return snapshot
 
-        rotate_result = await self._rotate_service_via_fleet(service.name)
+        self._persist_cycle_progress(
+            state,
+            service_name=service.name,
+            step="rotate",
+            detail="starting fleet rotation",
+        )
+        rotate_result = await self._rotate_service_via_fleet(service.name, state=state)
         snapshot.last_action = "rotate"
         snapshot.last_action_result = "success" if rotate_result.success else "failed"
         action_details = self._build_rotation_action_details_from_result(
             service.name, rotate_result
+        )
+        self._persist_cycle_progress(
+            state,
+            service_name=service.name,
+            step="rotate",
+            detail=(
+                "fleet rotation completed"
+                if rotate_result.success
+                else "fleet rotation exhausted candidates"
+            ),
+            current_live_service_name=action_details.get("final_service_name"),
         )
         self._append_action(
             state,
@@ -676,6 +780,12 @@ class AgentWatchdog:
         trigger: str = "first_unhealthy_cycle",
     ) -> str:
         base_url = f"http://localhost:{service.control_port}/v1"
+        self._persist_cycle_progress(
+            state,
+            service_name=service.name,
+            step="restart_tunnel",
+            detail="contacting control API for tunnel restart",
+        )
         try:
             async with GluetunControlClient(
                 base_url,
@@ -691,6 +801,12 @@ class AgentWatchdog:
                 result="success",
                 details={"control_port": str(service.control_port)},
             )
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restart_tunnel",
+                detail="control API tunnel restart completed",
+            )
             return "success"
         except Exception as exc:
             self._append_action(
@@ -701,6 +817,12 @@ class AgentWatchdog:
                 result="failed",
                 details={"error": str(exc)},
             )
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restart_tunnel",
+                detail="control API tunnel restart failed",
+            )
             return "failed"
 
     async def _restore_service(
@@ -710,12 +832,36 @@ class AgentWatchdog:
         state: AgentState,
     ) -> tuple[str, dict[str, object]]:
         try:
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restore",
+                detail="recreating VPN service",
+            )
             profile = manager.get_profile(service.profile)
             await asyncio.to_thread(
                 docker_ops.start_vpn_service, service, profile, True
             )
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restore",
+                detail="service recreate completed",
+            )
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restore_recheck",
+                detail="waiting before restore health check",
+            )
             await asyncio.sleep(self.settings.recheck_delay_seconds)
             health = await self._evaluate_health(service)
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restore_recheck",
+                detail="restore health check completed",
+            )
             result = (
                 "success"
                 if health["health_score"] >= self.settings.health_threshold
@@ -738,6 +884,12 @@ class AgentWatchdog:
                 trigger="automatic_remediation",
                 result="failed",
                 details={"error": str(exc), "profile": service.profile},
+            )
+            self._persist_cycle_progress(
+                state,
+                service_name=service.name,
+                step="restore",
+                detail="service restore failed",
             )
             return "failed", {
                 "container_status": "missing",
@@ -1171,8 +1323,20 @@ class AgentWatchdog:
             state,
             trigger="isolated_auth_failure",
         )
+        self._persist_cycle_progress(
+            state,
+            service_name=service.name,
+            step="restart_tunnel_recheck",
+            detail="waiting before isolated auth restart health check",
+        )
         await asyncio.sleep(self.settings.recheck_delay_seconds)
         post_restart = await self._evaluate_health(service)
+        self._persist_cycle_progress(
+            state,
+            service_name=service.name,
+            step="restart_tunnel_recheck",
+            detail="isolated auth restart health check completed",
+        )
         return restart_result, post_restart
 
     def _incident_type_for_block(self, block_reason: str) -> str:
@@ -1436,7 +1600,12 @@ class AgentWatchdog:
             )
         return incident.service_name == service.name
 
-    async def _rotate_service_via_fleet(self, service_name: str) -> Any:
+    async def _rotate_service_via_fleet(
+        self,
+        service_name: str,
+        *,
+        state: AgentState | None = None,
+    ) -> Any:
         fallback_countries: list[str] = []
         try:
             service = ComposeManager(self.compose_file).get_service(service_name)
@@ -1449,6 +1618,24 @@ class AgentWatchdog:
             )
         fleet_manager = FleetStateManager(self.compose_file)
         try:
+            progress_callback = None
+            if state is not None:
+
+                def progress_callback(
+                    requested_service_name: str,
+                    step: str,
+                    detail: str | None = None,
+                    *,
+                    current_live_service_name: str | None = None,
+                ) -> None:
+                    self._persist_cycle_progress(
+                        state,
+                        service_name=requested_service_name,
+                        step=f"rotate:{step}",
+                        detail=detail,
+                        current_live_service_name=current_live_service_name,
+                    )
+
             result = await fleet_manager.rotate_service(
                 service_name,
                 OperationConfig(
@@ -1459,6 +1646,7 @@ class AgentWatchdog:
                     fallback_countries=list(fallback_countries),
                     require_unique_egress_ip=True,
                 ),
+                progress_callback=progress_callback,
             )
         finally:
             await fleet_manager.close()

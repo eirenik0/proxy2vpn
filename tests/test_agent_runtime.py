@@ -1788,7 +1788,7 @@ def test_agent_tls_failure_after_restart_rotates_immediately(
     async def fake_restart(_service, _state, trigger="first_unhealthy_cycle"):
         return "success"
 
-    async def fake_rotate(service_name):
+    async def fake_rotate(service_name, state=None):
         return SimpleNamespace(
             success=True,
             errors=[],
@@ -1857,7 +1857,7 @@ def test_agent_persistent_route_failure_rotates_on_next_cycle_after_one_restore(
             "results": persistent_route_results(),
         }
 
-    async def fake_rotate(service_name):
+    async def fake_rotate(service_name, state=None):
         rotate_calls.append(service_name)
         return SimpleNamespace(
             success=True,
@@ -1900,7 +1900,9 @@ def test_rotate_service_via_fleet_passes_provider_fallback_policy(
         def __init__(self, compose_file):
             self.compose_file = compose_file
 
-        async def rotate_service(self, service_name, config_obj):
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
             captured["service_name"] = service_name
             captured["fallback_countries"] = config_obj.fallback_countries
             captured["require_unique_egress_ip"] = config_obj.require_unique_egress_ip
@@ -1932,7 +1934,9 @@ def test_rotate_service_via_fleet_returns_failed_result_when_service_missing(
         def __init__(self, compose_file):
             self.compose_file = compose_file
 
-        async def rotate_service(self, service_name, config_obj):
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
             captured["service_name"] = service_name
             captured["fallback_countries"] = config_obj.fallback_countries
             return SimpleNamespace(
@@ -1962,6 +1966,176 @@ def test_rotate_service_via_fleet_returns_failed_result_when_service_missing(
         "service_name": "protonvpn-united-states-boston",
         "fallback_countries": [],
     }
+
+
+def test_rotate_service_via_fleet_persists_progress_and_live_service_name(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    state = AgentState(
+        status=AgentStatus(
+            compose_path=str(agent_compose_file),
+            daemon_mode="once",
+            interval_seconds=AgentSettings().interval_seconds,
+            llm_mode="disabled",
+            active_cycle_started_at=utc_now(),
+            active_cycle_phase="processing_services",
+        ),
+        services=[
+            ServiceSnapshot(
+                service_name="protonvpn-united-states-new-york",
+                container_status="running",
+                health_score=0,
+                consecutive_failures=2,
+                last_check_at=utc_now(),
+            )
+        ],
+    )
+    store.write_state(state)
+    observed = {}
+
+    class DummyFleetManager:
+        def __init__(self, compose_file):
+            self.compose_file = compose_file
+
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
+            assert progress_callback is not None
+            progress_callback(
+                service_name,
+                "plan_selected",
+                "United States / Boston",
+            )
+            persisted = store.read_state()
+            observed["plan_service_name"] = persisted.status.active_cycle_service_name
+            observed["plan_progress"] = persisted.status.last_progress_at
+            progress_callback(
+                service_name,
+                "candidate_applied",
+                "United States / Boston",
+                current_live_service_name="protonvpn-united-states-boston",
+            )
+            persisted = store.read_state()
+            observed["phase"] = persisted.status.active_cycle_phase
+            observed["live_service_name"] = persisted.status.active_cycle_service_name
+            observed["snapshot_service_name"] = persisted.services[0].service_name
+            observed["live_progress"] = persisted.status.last_progress_at
+            return SimpleNamespace(
+                success=True,
+                errors=[],
+                rotation_changes=[
+                    RotationChange(
+                        requested_service_name=service_name,
+                        final_service_name="protonvpn-united-states-boston",
+                        old_location="United States / New York",
+                        new_location="United States / Boston",
+                        candidate_locations=["United States / Boston"],
+                        attempted_locations=["United States / Boston"],
+                    )
+                ],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", DummyFleetManager)
+
+    result = asyncio.run(
+        watchdog._rotate_service_via_fleet(
+            "protonvpn-united-states-new-york",
+            state=state,
+        )
+    )
+
+    assert result.success is True
+    assert observed["plan_service_name"] == "protonvpn-united-states-new-york"
+    assert observed["plan_progress"] is not None
+    assert observed["phase"] == "processing_services"
+    assert observed["live_service_name"] == "protonvpn-united-states-boston"
+    assert observed["snapshot_service_name"] == "protonvpn-united-states-boston"
+    assert observed["live_progress"] is not None
+
+
+def test_agent_rotation_failure_clears_active_cycle_state_after_inflight_rename(
+    agent_compose_file, monkeypatch
+):
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "cleanup_orphaned_containers",
+        lambda manager: [],
+    )
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    assessment = health_assessment.HealthAssessment(
+        service_name=service.name,
+        assessed_at=utc_now(),
+        container_status="running",
+        health_score=0,
+        health_class="connectivity",
+        failing_checks=["connectivity"],
+        results=unhealthy_results(),
+        control_api_reachable=True,
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    async def fake_assess(services, lines=20, timeout=None, progress_callback=None):
+        return {service.name: assessment}
+
+    async def fake_evaluate(_service):
+        return {
+            "container_status": "running",
+            "health_score": 0,
+            "results": tls_unhealthy_results(),
+        }
+
+    async def fake_restart(_service, _state, trigger="first_unhealthy_cycle"):
+        return "success"
+
+    class DummyFleetManager:
+        def __init__(self, compose_file):
+            self.compose_file = compose_file
+
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
+            assert progress_callback is not None
+            progress_callback(
+                service_name,
+                "candidate_applied",
+                "United States / Boston",
+                current_live_service_name="protonvpn-united-states-boston",
+            )
+            progress_callback(
+                service_name,
+                "rollback_completed",
+                "United States / New York",
+                current_live_service_name=service_name,
+            )
+            return SimpleNamespace(
+                success=False,
+                errors=["No rotation candidates available"],
+                rotation_changes=[],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(watchdog._health_assessor, "assess_services", fake_assess)
+    monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
+    monkeypatch.setattr(watchdog, "_restart_tunnel", fake_restart)
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", DummyFleetManager)
+
+    state = asyncio.run(watchdog.run_once())
+    persisted = watchdog.store.read_state()
+
+    assert state.status.active_cycle_phase is None
+    assert state.status.active_cycle_service_name is None
+    assert persisted is not None
+    assert persisted.status.active_cycle_phase is None
+    assert persisted.status.active_cycle_service_name is None
+    assert persisted.services[0].service_name == "protonvpn-united-states-new-york"
 
 
 def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypatch):
@@ -2005,7 +2179,9 @@ def test_approve_incident_rotates_once_and_resolves(agent_compose_file, monkeypa
         def __init__(self, compose_file):
             self.compose_file = compose_file
 
-        async def rotate_service(self, service_name, config_obj):
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
             captured_config["criteria"] = config_obj.criteria
             return SimpleNamespace(
                 success=True,
@@ -2116,7 +2292,9 @@ def test_approve_incident_migrates_other_open_incidents_after_service_rename(
         def __init__(self, compose_file):
             self.compose_file = compose_file
 
-        async def rotate_service(self, service_name, config_obj):
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
             return SimpleNamespace(
                 success=True,
                 errors=[],
