@@ -222,12 +222,18 @@ def status(
         status_data.active_cycle_started_at is not None
         and status_data.active_cycle_phase is not None
     ):
+        service_suffix = ""
+        if status_data.active_cycle_service_name:
+            service_suffix = f" ({status_data.active_cycle_service_name})"
         cycle_line = (
-            f"\nActive cycle: {status_data.active_cycle_phase} since "
+            f"\nActive cycle: {status_data.active_cycle_phase}{service_suffix} since "
             f"{status_data.active_cycle_started_at}"
         )
+    progress_line = ""
+    if status_data.last_progress_at is not None:
+        progress_line = f"\nLast progress: {status_data.last_progress_at}"
     console.print(
-        f"Compose: {status_data.compose_path}\nMode: {status_data.daemon_mode}\nDaemon: {daemon_line}\nLog file: {daemon_data['log_file']}\nLast loop: {status_data.last_loop_at or 'never'}{cycle_line}\nServices: {status_data.service_count}\nUnhealthy: {status_data.unhealthy_count}\nLLM: {status_data.llm_mode}"
+        f"Compose: {status_data.compose_path}\nMode: {status_data.daemon_mode}\nDaemon: {daemon_line}\nLog file: {daemon_data['log_file']}\nLast loop: {status_data.last_loop_at or 'never'}{progress_line}{cycle_line}\nServices: {status_data.service_count}\nUnhealthy: {status_data.unhealthy_count}\nLLM: {status_data.llm_mode}"
     )
     if status_data.last_error:
         console.print(f"[red]Last error:[/red] {status_data.last_error}")

@@ -21,7 +21,9 @@ class AgentStatus(BaseModel):
     started_at: datetime | None = None
     active_cycle_started_at: datetime | None = None
     active_cycle_phase: str | None = None
+    active_cycle_service_name: str | None = None
     last_loop_at: datetime | None = None
+    last_progress_at: datetime | None = None
     interval_seconds: int
     service_count: int = 0
     unhealthy_count: int = 0

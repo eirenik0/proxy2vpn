@@ -114,12 +114,15 @@ class AgentWatchdog:
         """Execute one monitoring and remediation cycle."""
 
         manager = ComposeManager(self.compose_file)
+        progress_at = utc_now()
         state.status.compose_path = str(self.compose_file)
         state.status.interval_seconds = self.interval_seconds
         state.status.llm_mode = self.llm_mode
         state.status.last_error = None
-        state.status.active_cycle_started_at = utc_now()
+        state.status.active_cycle_started_at = progress_at
         state.status.active_cycle_phase = "cleanup"
+        state.status.active_cycle_service_name = None
+        state.status.last_progress_at = progress_at
         self.store.write_state(state)
         updated_snapshots: list[ServiceSnapshot] = list(state.services)
         cycle_error: Exception | None = None
@@ -147,8 +150,12 @@ class AgentWatchdog:
             incidents = self.store.load_incidents()
             updated_snapshots = []
             state.status.active_cycle_phase = "processing_services"
+            state.status.last_progress_at = utc_now()
             self.store.write_state(state)
             for service in services:
+                state.status.active_cycle_service_name = service.name
+                state.status.last_progress_at = utc_now()
+                self.store.write_state(state)
                 snapshot = await self._process_service(
                     manager=manager,
                     service=service,
@@ -159,14 +166,29 @@ class AgentWatchdog:
                     assessment_map=assessments,
                 )
                 updated_snapshots.append(snapshot)
+                self._merge_persisted_snapshot(
+                    state=state,
+                    previous_service_name=service.name,
+                    snapshot=snapshot,
+                )
+                state.status.unhealthy_count = sum(
+                    1
+                    for persisted_snapshot in state.services
+                    if persisted_snapshot.health_score < self.settings.health_threshold
+                )
+                state.status.last_progress_at = utc_now()
+                self.store.write_state(state)
         except Exception as exc:
             state.status.last_error = str(exc)
             logger.error("agent_cycle_failed", extra={"error": str(exc)})
             cycle_error = exc
         finally:
-            state.status.last_loop_at = utc_now()
+            final_progress_at = utc_now()
+            state.status.last_loop_at = final_progress_at
+            state.status.last_progress_at = final_progress_at
             state.status.active_cycle_started_at = None
             state.status.active_cycle_phase = None
+            state.status.active_cycle_service_name = None
             state.services = updated_snapshots
             state.status.unhealthy_count = sum(
                 1
@@ -866,6 +888,31 @@ class AgentWatchdog:
             )
         )
         state.actions = state.actions[-self.settings.action_history_limit :]
+        state.status.last_progress_at = utc_now()
+        self.store.write_state(state)
+
+    def _merge_persisted_snapshot(
+        self,
+        state: AgentState,
+        previous_service_name: str,
+        snapshot: ServiceSnapshot,
+    ) -> None:
+        merged: list[ServiceSnapshot] = []
+        replaced = False
+        for existing_snapshot in state.services:
+            if existing_snapshot.service_name in {
+                previous_service_name,
+                snapshot.service_name,
+            }:
+                if not replaced:
+                    merged.append(snapshot)
+                    replaced = True
+                continue
+            merged.append(existing_snapshot)
+
+        if not replaced:
+            merged.append(snapshot)
+        state.services = merged
 
     def _update_snapshot_action(
         self,

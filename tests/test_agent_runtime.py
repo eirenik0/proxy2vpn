@@ -329,6 +329,63 @@ def test_agent_run_cycle_persists_active_cycle_progress(
     assert state.status.active_cycle_started_at is None
 
 
+def test_agent_run_cycle_persists_inflight_service_progress(
+    agent_compose_file, monkeypatch, control_client_factory
+):
+    dummy_client, _calls = control_client_factory
+    service = ComposeManager(agent_compose_file).list_services()[0]
+
+    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "cleanup_orphaned_containers",
+        lambda manager: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: unhealthy_results(),
+    )
+
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    async def fake_evaluate(_service):
+        return {
+            "container_status": "running",
+            "health_score": 100,
+            "results": healthy_results(),
+        }
+
+    monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
+
+    persisted_states: list[AgentState] = []
+    original_write_state = watchdog.store.write_state
+
+    def capture_write_state(state: AgentState) -> None:
+        persisted_states.append(state.model_copy(deep=True))
+        original_write_state(state)
+
+    monkeypatch.setattr(watchdog.store, "write_state", capture_write_state)
+
+    state = asyncio.run(watchdog.run_once())
+
+    assert any(
+        persisted.status.active_cycle_phase == "processing_services"
+        and persisted.status.active_cycle_service_name == service.name
+        and persisted.status.last_progress_at is not None
+        and any(action.action == "restart_tunnel" for action in persisted.actions)
+        for persisted in persisted_states
+    )
+    assert state.status.active_cycle_service_name is None
+    assert state.status.last_progress_at is not None
+
+
 @pytest.mark.parametrize(
     ("failure_stage", "message"),
     [
