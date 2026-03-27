@@ -329,6 +329,49 @@ def test_agent_run_cycle_persists_active_cycle_progress(
     assert state.status.active_cycle_started_at is None
 
 
+@pytest.mark.parametrize(
+    ("failure_stage", "message"),
+    [
+        ("cleanup", "docker unavailable"),
+        ("assess", "assessment failed"),
+    ],
+)
+def test_agent_run_cycle_clears_active_cycle_state_on_setup_failure(
+    agent_compose_file, monkeypatch, failure_stage, message
+):
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    def fail_cleanup(manager):
+        raise RuntimeError(message)
+
+    async def fail_assess(services, lines=20, timeout=None):
+        raise RuntimeError(message)
+
+    if failure_stage == "cleanup":
+        monkeypatch.setattr(
+            agent_runtime.docker_ops,
+            "cleanup_orphaned_containers",
+            fail_cleanup,
+        )
+    else:
+        monkeypatch.setattr(
+            agent_runtime.docker_ops,
+            "cleanup_orphaned_containers",
+            lambda manager: [],
+        )
+        monkeypatch.setattr(watchdog._health_assessor, "assess_services", fail_assess)
+
+    with pytest.raises(RuntimeError, match=message):
+        asyncio.run(watchdog.run_once())
+
+    persisted = watchdog.store.read_state()
+    assert persisted is not None
+    assert persisted.status.active_cycle_phase is None
+    assert persisted.status.active_cycle_started_at is None
+    assert persisted.status.last_error == message
+    assert persisted.status.last_loop_at is not None
+
+
 def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
     agent_compose_file, monkeypatch, control_client_factory
 ):
@@ -1810,6 +1853,47 @@ def test_rotate_service_via_fleet_passes_provider_fallback_policy(
         "fallback_countries": ["Canada", "Netherlands"],
         "require_unique_egress_ip": True,
         "health_check_timeout": 4,
+    }
+
+
+def test_rotate_service_via_fleet_returns_failed_result_when_service_missing(
+    agent_compose_file, monkeypatch
+):
+    captured = {}
+
+    class DummyFleetManager:
+        def __init__(self, compose_file):
+            self.compose_file = compose_file
+
+        async def rotate_service(self, service_name, config_obj):
+            captured["service_name"] = service_name
+            captured["fallback_countries"] = config_obj.fallback_countries
+            return SimpleNamespace(
+                success=False,
+                errors=[f"Service '{service_name}' not found"],
+                rotation_changes=[],
+            )
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", DummyFleetManager)
+
+    watchdog = AgentWatchdog(
+        agent_compose_file,
+        settings=AgentSettings(
+            fallback_countries_by_provider={"protonvpn": ["Canada", "Netherlands"]}
+        ),
+    )
+    result = asyncio.run(
+        watchdog._rotate_service_via_fleet("protonvpn-united-states-boston")
+    )
+
+    assert result.success is False
+    assert result.errors == ["Service 'protonvpn-united-states-boston' not found"]
+    assert captured == {
+        "service_name": "protonvpn-united-states-boston",
+        "fallback_countries": [],
     }
 
 

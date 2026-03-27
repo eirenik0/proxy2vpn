@@ -121,31 +121,31 @@ class AgentWatchdog:
         state.status.active_cycle_started_at = utc_now()
         state.status.active_cycle_phase = "cleanup"
         self.store.write_state(state)
-        orphaned = await asyncio.to_thread(
-            docker_ops.cleanup_orphaned_containers, manager
-        )
-        if orphaned:
-            logger.warning(
-                "agent_orphaned_containers_removed",
-                extra={
-                    "compose_path": str(self.compose_file),
-                    "container_names": orphaned,
-                    "count": len(orphaned),
-                },
-            )
-        services = manager.list_services()
-        state.status.service_count = len(services)
-        state.status.active_cycle_phase = "assessing_services"
-        self.store.write_state(state)
-        assessments = await self._health_assessor.assess_services(services)
-        snapshots_by_name = {
-            snapshot.service_name: snapshot for snapshot in state.services
-        }
-        incidents = self.store.load_incidents()
-
-        updated_snapshots: list[ServiceSnapshot] = []
+        updated_snapshots: list[ServiceSnapshot] = list(state.services)
         cycle_error: Exception | None = None
         try:
+            orphaned = await asyncio.to_thread(
+                docker_ops.cleanup_orphaned_containers, manager
+            )
+            if orphaned:
+                logger.warning(
+                    "agent_orphaned_containers_removed",
+                    extra={
+                        "compose_path": str(self.compose_file),
+                        "container_names": orphaned,
+                        "count": len(orphaned),
+                    },
+                )
+            services = manager.list_services()
+            state.status.service_count = len(services)
+            state.status.active_cycle_phase = "assessing_services"
+            self.store.write_state(state)
+            assessments = await self._health_assessor.assess_services(services)
+            snapshots_by_name = {
+                snapshot.service_name: snapshot for snapshot in state.services
+            }
+            incidents = self.store.load_incidents()
+            updated_snapshots = []
             state.status.active_cycle_phase = "processing_services"
             self.store.write_state(state)
             for service in services:
@@ -167,14 +167,13 @@ class AgentWatchdog:
             state.status.last_loop_at = utc_now()
             state.status.active_cycle_started_at = None
             state.status.active_cycle_phase = None
-
-        state.services = updated_snapshots
-        state.status.unhealthy_count = sum(
-            1
-            for snapshot in updated_snapshots
-            if snapshot.health_score < self.settings.health_threshold
-        )
-        self.store.write_state(state)
+            state.services = updated_snapshots
+            state.status.unhealthy_count = sum(
+                1
+                for snapshot in updated_snapshots
+                if snapshot.health_score < self.settings.health_threshold
+            )
+            self.store.write_state(state)
         if cycle_error is not None:
             raise cycle_error
         return state
@@ -1377,11 +1376,16 @@ class AgentWatchdog:
         return incident.service_name == service.name
 
     async def _rotate_service_via_fleet(self, service_name: str) -> Any:
-        service = ComposeManager(self.compose_file).get_service(service_name)
-        fallback_countries = self.settings.fallback_countries_by_provider.get(
-            service.provider.casefold(),
-            [],
-        )
+        fallback_countries: list[str] = []
+        try:
+            service = ComposeManager(self.compose_file).get_service(service_name)
+        except Exception:
+            service = None
+        if service is not None:
+            fallback_countries = self.settings.fallback_countries_by_provider.get(
+                service.provider.casefold(),
+                [],
+            )
         fleet_manager = FleetStateManager(self.compose_file)
         try:
             result = await fleet_manager.rotate_service(
