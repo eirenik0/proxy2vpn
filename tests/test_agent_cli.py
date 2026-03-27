@@ -320,6 +320,9 @@ def test_agent_investigate_cli_prints_action_plan(tmp_path, monkeypatch):
                 "OPENVPN_PASSWORD is missing from the profile env file.",
                 "VPN proxy connection failed after the configuration error.",
             ],
+            log_evidence=[
+                "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)"
+            ],
             action_plan=[
                 "Inspect the profile env file.",
                 "Recreate the service with proxy2vpn vpn update protonvpn-united-states-new-york.",
@@ -342,6 +345,8 @@ def test_agent_investigate_cli_prints_action_plan(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "Credentials or profile settings need correction." in result.output
+    assert "Log evidence:" in result.output
+    assert "RTNETLINK answers: File exists" in result.output
     assert "Action plan:" in result.output
     assert "1. Inspect the profile env file." in result.output
 
@@ -363,6 +368,9 @@ def test_agent_investigate_cli_json_is_machine_readable(tmp_path, monkeypatch):
         investigation=IncidentInvestigation(
             summary="Credentials or profile settings need correction.",
             findings=["OPENVPN_PASSWORD is missing from the profile env file."],
+            log_evidence=[
+                "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2"
+            ],
             action_plan=["Inspect the profile env file."],
             investigated_at=utc_now(),
         ),
@@ -392,6 +400,9 @@ def test_agent_investigate_cli_json_is_machine_readable(tmp_path, monkeypatch):
     assert set(payload.keys()) == {"incident"}
     assert payload["incident"]["investigation"]["action_plan"] == [
         "Inspect the profile env file."
+    ]
+    assert payload["incident"]["investigation"]["log_evidence"] == [
+        "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2"
     ]
 
 

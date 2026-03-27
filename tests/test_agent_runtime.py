@@ -772,6 +772,16 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
             ),
         ],
     )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "container_logs",
+        lambda *args, **kwargs: iter(
+            [
+                "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
+                "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+            ]
+        ),
+    )
 
     async def fake_control_api(service):
         return True
@@ -789,6 +799,10 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
         "OPENVPN_PASSWORD is missing" in finding
         for finding in investigated.investigation.findings
     )
+    assert investigated.investigation.log_evidence == [
+        "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
+        "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+    ]
     assert any(
         "proxy2vpn vpn update protonvpn-united-states-new-york" in step
         for step in investigated.investigation.action_plan
@@ -820,6 +834,80 @@ def test_investigate_incident_rejects_closed_incidents(agent_compose_file):
     assert persisted.status == "dismissed"
     assert persisted.updated_at == incident.updated_at
     assert persisted.investigation is None
+
+
+def test_investigate_incident_uses_route_logs_to_shape_generic_action_plan(
+    agent_compose_file, monkeypatch
+):
+    store = AgentStateStore(agent_compose_file)
+    store.append_incident(
+        AgentIncident(
+            id="incident123",
+            service_name="protonvpn-united-states-new-york",
+            type="rotation_exhausted",
+            severity="medium",
+            status="open",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            failure_count=3,
+            summary="Automatic remediation failed",
+            recommended_action="rotate",
+            approval_required=False,
+        )
+    )
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer("running"),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="route_error",
+                passed=False,
+                message="Recent OpenVPN route setup issue detected",
+                recommendation="Inspect duplicate or stale routes on tun0.",
+                persistent=True,
+            ),
+            DiagnosticResult(
+                check="connectivity",
+                passed=False,
+                message="VPN proxy connection failed",
+                recommendation="Check container status and port accessibility.",
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "container_logs",
+        lambda *args, **kwargs: iter(
+            [
+                "2026-03-27T10:19:07Z INFO [openvpn] sitnl_send: rtnl: generic error (-101): Network unreachable",
+                "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
+                "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+            ]
+        ),
+    )
+
+    async def fake_control_api(service):
+        return True
+
+    watchdog = AgentWatchdog(agent_compose_file, store=store)
+    monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
+
+    investigated = asyncio.run(watchdog.investigate_incident("incident123"))
+
+    assert investigated.investigation is not None
+    assert "route setup errors" in investigated.investigation.summary
+    assert investigated.investigation.log_evidence[0].endswith(
+        "generic error (-101): Network unreachable"
+    )
+    assert investigated.investigation.action_plan[0].startswith(
+        "Review the attached route-related log evidence"
+    )
 
 
 def test_investigation_validation_honors_service_proxy_overrides(

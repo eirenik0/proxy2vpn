@@ -44,6 +44,24 @@ def test_openvpn_server_selection_failure_is_detected():
     assert "SERVER_COUNTRIES/SERVER_CITIES" in failure.recommendation
 
 
+def test_openvpn_route_warnings_are_not_misclassified_as_config_errors():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    logs = [
+        "2026-03-27T10:19:07Z INFO [openvpn] sitnl_send: rtnl: generic error (-101): Network unreachable",
+        "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
+        "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+        "2026-03-27T10:19:07Z WARN [openvpn] OpenVPN was configured to add an IPv6 route. However, no IPv6 has been configured for tun0, therefore the route installation may fail or may not work as expected.",
+    ]
+
+    results = analyzer.analyze_logs(logs)
+
+    assert all(result.check != "config_error" for result in results)
+    route_issue = next(r for r in results if r.check == "route_error")
+    assert route_issue.passed is False
+    assert "route setup issue" in route_issue.message
+    assert "tun0" in route_issue.recommendation
+
+
 def test_connectivity(monkeypatch):
     def fake_fetch_ip(proxies=None, timeout=5):
         if proxies:

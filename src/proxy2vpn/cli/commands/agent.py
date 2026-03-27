@@ -353,6 +353,11 @@ async def investigate(
         for finding in investigation.findings:
             console.print(f"- {finding}")
 
+    if investigation.log_evidence:
+        console.print("\nLog evidence:")
+        for line in investigation.log_evidence:
+            console.print(f"- {line}")
+
     if investigation.action_plan:
         console.print("\nAction plan:")
         for index, step in enumerate(investigation.action_plan, start=1):
