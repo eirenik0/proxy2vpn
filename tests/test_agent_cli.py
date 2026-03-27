@@ -193,7 +193,8 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypa
 
     runner = CliRunner()
     status_result = runner.invoke(
-        app, ["--compose-file", str(compose_file), "agent", "status", "--json"]
+        app,
+        ["--compose-file", str(compose_file), "agent", "status", "--json", "--live"],
     )
     incidents_result = runner.invoke(
         app, ["--compose-file", str(compose_file), "agent", "incidents", "--json"]
@@ -216,6 +217,8 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypa
         "compose_path",
         "daemon_mode",
         "started_at",
+        "active_cycle_started_at",
+        "active_cycle_phase",
         "last_loop_at",
         "interval_seconds",
         "service_count",
@@ -230,7 +233,7 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypa
     assert incidents_payload["incidents"][0]["recommended_action"] == "rotate"
 
 
-def test_agent_status_shows_health_analysis_status_bar(tmp_path, monkeypatch):
+def test_agent_status_live_shows_health_analysis_status_bar(tmp_path, monkeypatch):
     compose_file = _write_agent_compose(tmp_path)
     state = AgentState(
         status=AgentStatus(
@@ -293,11 +296,61 @@ def test_agent_status_shows_health_analysis_status_bar(tmp_path, monkeypatch):
 
     runner = CliRunner()
     result = runner.invoke(
-        app, ["--compose-file", str(compose_file), "agent", "status"]
+        app, ["--compose-file", str(compose_file), "agent", "status", "--live"]
     )
 
     assert result.exit_code == 0
     assert status_messages == ["[cyan]Analyzing health[/cyan]"]
+
+
+def test_agent_status_default_uses_persisted_state_only(tmp_path, monkeypatch):
+    compose_file = _write_agent_compose(tmp_path)
+    state = AgentState(
+        status=AgentStatus(
+            compose_path=str(compose_file),
+            daemon_mode="daemon",
+            started_at=utc_now(),
+            active_cycle_started_at=utc_now(),
+            active_cycle_phase="assessing_services",
+            interval_seconds=AgentSettings().interval_seconds,
+            service_count=1,
+            unhealthy_count=1,
+            last_error=None,
+            llm_mode="disabled",
+        ),
+        services=[],
+    )
+
+    class DummyStore:
+        daemon_log_path = Path("daemon.log")
+
+        def read_state(self):
+            return state
+
+        def daemon_process(self):
+            return None
+
+        def read_daemon_pid(self):
+            return None
+
+    class DummyWatchdog:
+        def __init__(self, compose_file):
+            self.store = DummyStore()
+
+        async def build_remediation_overview(self, state):
+            raise AssertionError("default status should not run live remediation")
+
+    monkeypatch.setattr(agent_commands, "AgentWatchdog", DummyWatchdog)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["--compose-file", str(compose_file), "agent", "status", "--json"]
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "remediation" not in payload
+    assert payload["status"]["active_cycle_phase"] == "assessing_services"
 
 
 def test_agent_investigate_cli_prints_action_plan(tmp_path, monkeypatch):

@@ -15,7 +15,7 @@ class DummyContainer:
 
 
 class DummyControlClient:
-    def __init__(self, base_url):
+    def __init__(self, base_url, *args, **kwargs):
         self.base_url = base_url
 
     async def __aenter__(self):

@@ -185,6 +185,11 @@ async def run(
 def status(
     ctx: typer.Context,
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help="Run a live reassessment and remediation overview before printing status",
+    ),
 ):
     """Show persisted watchdog state for the active compose root."""
 
@@ -192,12 +197,14 @@ def status(
     watchdog = AgentWatchdog(compose_file)
     state = watchdog.store.read_state() or watchdog.empty_state()
     daemon_data = _daemon_payload(watchdog.store)
-    with console.status("[cyan]Analyzing health[/cyan]", spinner="dots"):
-        remediation = asyncio.run(watchdog.build_remediation_overview(state))
 
     payload = state.model_dump(mode="json")
     payload["daemon"] = daemon_data
-    payload["remediation"] = remediation
+    remediation = None
+    if live:
+        with console.status("[cyan]Analyzing health[/cyan]", spinner="dots"):
+            remediation = asyncio.run(watchdog.build_remediation_overview(state))
+        payload["remediation"] = remediation
     if json_output:
         typer.echo(json.dumps(payload, indent=2))
         return
@@ -210,13 +217,22 @@ def status(
         if daemon_pid is not None
         else daemon_status
     )
+    cycle_line = ""
+    if (
+        status_data.active_cycle_started_at is not None
+        and status_data.active_cycle_phase is not None
+    ):
+        cycle_line = (
+            f"\nActive cycle: {status_data.active_cycle_phase} since "
+            f"{status_data.active_cycle_started_at}"
+        )
     console.print(
-        f"Compose: {status_data.compose_path}\nMode: {status_data.daemon_mode}\nDaemon: {daemon_line}\nLog file: {daemon_data['log_file']}\nLast loop: {status_data.last_loop_at or 'never'}\nServices: {status_data.service_count}\nUnhealthy: {status_data.unhealthy_count}\nLLM: {status_data.llm_mode}"
+        f"Compose: {status_data.compose_path}\nMode: {status_data.daemon_mode}\nDaemon: {daemon_line}\nLog file: {daemon_data['log_file']}\nLast loop: {status_data.last_loop_at or 'never'}{cycle_line}\nServices: {status_data.service_count}\nUnhealthy: {status_data.unhealthy_count}\nLLM: {status_data.llm_mode}"
     )
     if status_data.last_error:
         console.print(f"[red]Last error:[/red] {status_data.last_error}")
 
-    if remediation["blocked"]:
+    if remediation and remediation["blocked"]:
         console.print("\n[bold]Remediation:[/bold]")
         for entry in remediation["services"]:
             if not entry.get("suppressed"):

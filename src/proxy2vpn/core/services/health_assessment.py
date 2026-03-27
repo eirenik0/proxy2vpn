@@ -49,8 +49,18 @@ class HealthAssessment(BaseModel):
 class HealthAssessmentService:
     """Assess VPN service health using the shared diagnostic stack."""
 
-    def __init__(self, threshold: int = 60) -> None:
+    def __init__(
+        self,
+        threshold: int = 60,
+        *,
+        probe_timeout: int = 5,
+        control_api_timeout: float = 5.0,
+        control_api_retry_attempts: int = 0,
+    ) -> None:
         self.threshold = threshold
+        self.probe_timeout = probe_timeout
+        self.control_api_timeout = control_api_timeout
+        self.control_api_retry_attempts = control_api_retry_attempts
 
     async def assess_service(
         self,
@@ -58,10 +68,11 @@ class HealthAssessmentService:
         *,
         peer_assessments: dict[str, HealthAssessment] | None = None,
         lines: int = 20,
-        timeout: int = 5,
+        timeout: int | None = None,
     ) -> HealthAssessment:
         """Return a complete health assessment for one service."""
 
+        effective_timeout = timeout or self.probe_timeout
         container = docker_ops.get_container_by_service_name(service.name)
         assessed_at = datetime.now(timezone.utc)
         if container is None:
@@ -99,13 +110,13 @@ class HealthAssessmentService:
             )
 
         analyzer = DiagnosticAnalyzer()
-        direct_ip = await self._direct_ip(timeout) if has_proxy_port else None
+        direct_ip = await self._direct_ip(effective_timeout) if has_proxy_port else None
         results = await asyncio.to_thread(
             docker_ops.analyze_container_logs,
             service.name,
             lines,
             analyzer,
-            timeout,
+            effective_timeout,
             direct_ip,
         )
         health_score = analyzer.health_score(results)
@@ -115,7 +126,7 @@ class HealthAssessmentService:
         if has_proxy_port:
             try:
                 current_egress_ip = await docker_ops.get_container_ip_async(
-                    container, timeout=timeout
+                    container, timeout=effective_timeout
                 )
             except Exception:
                 current_egress_ip = None
@@ -141,7 +152,7 @@ class HealthAssessmentService:
         services: list[VPNService],
         *,
         lines: int = 20,
-        timeout: int = 5,
+        timeout: int | None = None,
     ) -> dict[str, HealthAssessment]:
         """Assess a batch of services and enrich each result with peer evidence."""
 
@@ -207,7 +218,11 @@ class HealthAssessmentService:
     async def _control_api_reachable(self, service: VPNService) -> bool:
         base_url = f"http://localhost:{service.control_port}/v1"
         try:
-            async with GluetunControlClient(base_url) as client:
+            async with GluetunControlClient(
+                base_url,
+                timeout=self.control_api_timeout,
+                retry_attempts=self.control_api_retry_attempts,
+            ) as client:
                 await client.status()
             return True
         except Exception:

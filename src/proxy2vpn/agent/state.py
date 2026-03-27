@@ -111,6 +111,8 @@ class AgentStateStore:
                     "service_count": 0,
                     "unhealthy_count": 0,
                     "last_error": None,
+                    "active_cycle_started_at": None,
+                    "active_cycle_phase": None,
                     "last_loop_at": None,
                 }
             )
