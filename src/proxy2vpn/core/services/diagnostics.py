@@ -26,6 +26,15 @@ class DiagnosticResult(BaseModel):
 class DiagnosticAnalyzer:
     """Simple VPN health checks on container logs and connectivity."""
 
+    _AUTH_FAILURE_PATTERNS = (
+        re.compile(r"\bauth[_ -]?failed\b"),
+        re.compile(r"\bauth(?:entication)? (?:failed|failure|error)\b"),
+        re.compile(r"\bverify username/password\b"),
+        re.compile(r"\bbad username/password\b"),
+        re.compile(r"\bcredentials? (?:were )?(?:rejected|invalid|failed)\b"),
+        re.compile(r"\buser(?:name)?/password(?: verification)? failed\b"),
+    )
+
     def analyze_logs(self, log_lines: Iterable[str]) -> list[DiagnosticResult]:
         """Recent log analysis - focus on latest logs to avoid outdated issues."""
         lines = [str(line) for line in log_lines]
@@ -40,23 +49,9 @@ class DiagnosticAnalyzer:
         if server_selection_failure is not None:
             return [server_selection_failure]
 
-        # Authentication failures in recent logs only
-        recent_auth_failures = sum(
-            "auth_failed" in line.lower() for line in recent_lines
-        )
-        if recent_auth_failures > 0 or (
-            "auth" in recent_text and "fail" in recent_text
-        ):
-            persistent = recent_auth_failures >= 2
-            return [
-                DiagnosticResult(
-                    check="auth_failure",
-                    passed=False,
-                    message="Recent authentication failure detected",
-                    recommendation="Verify credentials and provider configuration.",
-                    persistent=persistent,
-                )
-            ]
+        auth_failure = self._detect_auth_failure(recent_lines)
+        if auth_failure is not None:
+            return [auth_failure]
 
         tls_issue = self._detect_tls_issue(recent_lines, recent_text)
         if tls_issue is not None:
@@ -132,6 +127,29 @@ class DiagnosticAnalyzer:
                 "Verify SERVER_COUNTRIES/SERVER_CITIES, provider hostname, and "
                 "refresh the provider server list."
             ),
+            persistent=persistent,
+        )
+
+    def _detect_auth_failure(self, recent_lines: list[str]) -> DiagnosticResult | None:
+        """Detect real authentication failures without matching auth-related setup logs."""
+
+        failure_count = 0
+        for line in recent_lines:
+            lowered = line.lower()
+            if any(pattern.search(lowered) for pattern in self._AUTH_FAILURE_PATTERNS):
+                failure_count += 1
+
+        if failure_count == 0:
+            return None
+
+        persistent = failure_count >= 2 or any(
+            "retrying in" in line.lower() for line in recent_lines
+        )
+        return DiagnosticResult(
+            check="auth_failure",
+            passed=False,
+            message="Recent authentication failure detected",
+            recommendation="Verify credentials and provider configuration.",
             persistent=persistent,
         )
 

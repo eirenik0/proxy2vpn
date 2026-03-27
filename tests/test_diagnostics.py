@@ -28,6 +28,23 @@ def test_temporal_analysis_prefers_latest_log_lines():
     ]
 
 
+def test_auth_detection_ignores_authentication_setup_lines_for_route_failures():
+    analyzer = diagnostics.DiagnosticAnalyzer()
+    logs = [
+        "2026-03-27T12:05:49Z INFO [http server] read 1 roles from authentication file",
+        "2026-03-27T12:05:50Z WARN [vpn] restarting VPN because it failed to pass the healthcheck: startup check: all check tries failed: parallel attempt 1/2 failed: dialing: dial tcp4: lookup cloudflare.com: i/o timeout",
+        "2026-03-27T12:05:59Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
+        "2026-03-27T12:05:59Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+        "2026-03-27T12:06:07Z INFO [vpn] retrying in 15s",
+    ]
+
+    results = analyzer.analyze_logs(logs)
+
+    assert all(result.check != "auth_failure" for result in results)
+    route_issue = next(r for r in results if r.check == "route_error")
+    assert route_issue.passed is False
+
+
 def test_openvpn_server_selection_failure_is_detected():
     analyzer = diagnostics.DiagnosticAnalyzer()
     logs = [
