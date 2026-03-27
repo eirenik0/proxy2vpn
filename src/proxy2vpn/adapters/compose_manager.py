@@ -101,10 +101,22 @@ class ComposeManager:
             self.compose_path, validate_locations=validate_locations
         )
 
+    def _compose_label_value(self) -> str:
+        """Return the canonical compose file label value for managed services."""
+
+        return str(self.compose_path.expanduser().resolve())
+
+    def _with_compose_ownership(self, service: VPNService) -> VPNService:
+        """Annotate SERVICE with the active compose file ownership label."""
+
+        service.labels[config.COMPOSE_FILE_LABEL] = self._compose_label_value()
+        return service
+
     def list_services(self) -> list[VPNService]:
         services = self.data.get("services", {})
         return [
-            VPNService.from_compose_service(name, svc) for name, svc in services.items()
+            self._with_compose_ownership(VPNService.from_compose_service(name, svc))
+            for name, svc in services.items()
         ]
 
     def list_services_with_profiles(self) -> list[tuple[VPNService, Profile]]:
@@ -120,7 +132,9 @@ class ComposeManager:
         services = self.data.get("services", {})
         if name not in services:
             raise KeyError(f"Service '{name}' not found")
-        return VPNService.from_compose_service(name, services[name])
+        return self._with_compose_ownership(
+            VPNService.from_compose_service(name, services[name])
+        )
 
     def get_service_with_profile(self, name: str) -> tuple[VPNService, Profile]:
         """Return the service and its resolved profile."""
@@ -144,6 +158,7 @@ class ComposeManager:
         return profile_map
 
     def _merged_service_config(self, service: VPNService) -> CommentedMap:
+        self._with_compose_ownership(service)
         profile_map = self._profile_map_for_service(service.profile)
         merged_config = CommentedMap()
         # Store the merge metadata directly instead of going through

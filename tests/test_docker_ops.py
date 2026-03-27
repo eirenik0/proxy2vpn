@@ -95,17 +95,28 @@ def test_test_vpn_connection(monkeypatch):
 
 def test_cleanup_orphans(monkeypatch):
     class C:
-        def __init__(self, name: str) -> None:
+        def __init__(self, name: str, owner: str | None) -> None:
             self.name = name
+            self.labels = {}
+            if owner is not None:
+                self.labels[docker_ops.config.COMPOSE_FILE_LABEL] = owner
             self.removed = False
 
         def remove(self, force: bool = False) -> None:
             self.removed = True
 
-    containers = [C("a"), C("b")]
+    compose_owner = str(pathlib.Path("/tmp/compose-a.yml").resolve())
+    containers = [
+        C("a", compose_owner),
+        C("b", compose_owner),
+        C("c", str(pathlib.Path("/tmp/compose-b.yml").resolve())),
+        C("d", None),
+    ]
     monkeypatch.setattr(docker_ops, "get_vpn_containers", lambda all=True: containers)
 
     class M:
+        compose_path = pathlib.Path(compose_owner)
+
         def list_services(self):
             class S:
                 name = "a"
@@ -115,6 +126,8 @@ def test_cleanup_orphans(monkeypatch):
     removed = docker_ops.cleanup_orphaned_containers(M())
     assert removed == ["b"]
     assert containers[1].removed
+    assert containers[2].removed is False
+    assert containers[3].removed is False
 
 
 def test_collect_proxy_info(monkeypatch):
