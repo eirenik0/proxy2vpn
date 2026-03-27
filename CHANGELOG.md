@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.18.0]
+
+### Bug fixes
+
+- Agent investigations now retain recent log evidence, show it in `agent investigate`, and avoid misclassifying OpenVPN route setup warnings as auth/config failures. (#232)
+- Fix false unhealthy VPN detections by hardening proxy IP probes, TLS log parsing, and restore/orphan cleanup behavior. (#999)
+- Avoid misclassifying Gluetun healthcheck and route failures as authentication errors so watchdog remediation can rotate broken VPNs automatically. (#1000)
+- Hardened watchdog recovery with cross-country failover, fleet-wide unique egress IP checks, and faster observable daemon cycles. (#1001)
+- Keep agent status progress fresh during long remediation cycles by persisting in-flight actions and current service progress. (#1002)
+- Persist watchdog remediation progress during long fleet rotations, avoid collision-suffixed automatic rotation targets, and clear stale pinned hostnames when automatic city rotation retargets a service. (#1003)
+
+
 ## [0.17.0]
 
 ### Bug fixes
