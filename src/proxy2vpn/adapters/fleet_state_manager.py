@@ -1013,6 +1013,36 @@ class FleetStateManager:
             index += 1
         return f"{candidate_with_port}-{index}"
 
+    def _clear_pinned_hostname_for_rotation(
+        self,
+        service: VPNService,
+        *,
+        target_country: str,
+        target_location: str,
+    ) -> None:
+        """Drop hostname pinning when rotating to a different country or city."""
+
+        current_country = self._extract_country_from_service(service)
+        current_location = service.location
+        if (
+            current_country.casefold() == target_country.casefold()
+            and current_location.casefold() == target_location.casefold()
+        ):
+            return
+
+        pinned_hostname = service.environment.pop("SERVER_HOSTNAMES", None)
+        service.labels.pop("vpn.hostname", None)
+        if pinned_hostname:
+            logger.info(
+                "rotation_cleared_pinned_hostname",
+                extra={
+                    "service_name": service.name,
+                    "previous_hostname": pinned_hostname,
+                    "target_country": target_country,
+                    "target_location": target_location,
+                },
+            )
+
     async def _get_service_egress_ip(
         self, service_name: str, timeout: int | None = None
     ) -> str | None:
@@ -1044,11 +1074,12 @@ class FleetStateManager:
         settle_seconds: int = 10,
         country: str | None = None,
         target_name: str | None = None,
+        replace_name: str | None = None,
     ) -> str:
         """Apply one candidate location and recreate the service container."""
 
         profile = self.compose_manager.get_profile(service.profile)
-        previous_name = service.name
+        previous_name = replace_name or service.name
         target_country = country or self._extract_country_from_service(service)
         if target_name is None:
             occupied_by = self._occupied_rotation_service_name(
@@ -1069,6 +1100,11 @@ class FleetStateManager:
             target_country=target_country,
             current_name=previous_name,
             target_name=target_name,
+        )
+        self._clear_pinned_hostname_for_rotation(
+            service,
+            target_country=target_country,
+            target_location=location,
         )
         service.set_country(target_country)
         service.set_location(location)
@@ -1264,6 +1300,7 @@ class FleetStateManager:
 
         # Get current service from compose manager
         service = self.compose_manager.get_service(service_name)
+        original_service = service.model_copy(deep=True)
         original_name = service.name
         original_location = service.location
         country = self._extract_country_from_service(service)
@@ -1444,10 +1481,11 @@ class FleetStateManager:
                 current_live_service_name=service.name,
             )
             await self._apply_rotation_location(
-                service,
-                original_location,
+                original_service.model_copy(deep=True),
+                original_service.location,
                 country=original_target.country,
                 target_name=original_name,
+                replace_name=service.name,
             )
             await self._emit_rotation_progress(
                 progress_callback,

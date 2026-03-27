@@ -236,7 +236,9 @@ def test_batch_health_check_uses_single_container_snapshot(monkeypatch, tmp_path
     assert all(result.is_healthy for result in results.values())
 
 
-def test_execute_single_rotation_preserves_server_hostname(monkeypatch, tmp_path):
+def test_execute_single_rotation_clears_server_hostname_when_city_changes(
+    monkeypatch, tmp_path
+):
     monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
     monkeypatch.setattr(
         fleet_state_manager_mod.FleetStateManager,
@@ -325,8 +327,8 @@ def test_execute_single_rotation_preserves_server_hostname(monkeypatch, tmp_path
     updated_service = fleet_manager.compose_manager.get_service(
         "protonvpn-canada-montreal"
     )
-    assert updated_service.environment["SERVER_HOSTNAMES"] == "us10562.nordvpn.com"
-    assert updated_service.labels["vpn.hostname"] == "us10562.nordvpn.com"
+    assert "SERVER_HOSTNAMES" not in updated_service.environment
+    assert "vpn.hostname" not in updated_service.labels
     assert updated_service.environment["SERVER_CITIES"] == "Montreal"
     assert updated_service.labels["vpn.location"] == "Montreal"
 
@@ -535,6 +537,116 @@ def test_execute_single_rotation_rolls_back_when_all_candidates_keep_same_ip(
     assert updated_service.name == "protonvpn-canada-toronto"
     assert updated_service.location == "Toronto"
     assert applied_locations == ["Montreal", "Vancouver", "Toronto"]
+
+
+def test_execute_single_rotation_rollback_restores_original_server_hostname(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
+    monkeypatch.setattr(
+        fleet_state_manager_mod.FleetStateManager,
+        "_instance_compose_path",
+        None,
+    )
+
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    env_path = tmp_path / "test.env"
+    env_path.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    manager.add_profile(Profile(name="test", env_file=str(env_path)))
+
+    service = VPNService.create(
+        name="protonvpn-canada-toronto",
+        port=20000,
+        control_port=30000,
+        provider="protonvpn",
+        profile="test",
+        location="Toronto",
+        environment={
+            "VPN_SERVICE_PROVIDER": "protonvpn",
+            "SERVER_CITIES": "Toronto",
+            "SERVER_COUNTRIES": "Canada",
+            "SERVER_HOSTNAMES": "ca1.protonvpn.test",
+        },
+        labels={
+            "vpn.type": "vpn",
+            "vpn.port": "20000",
+            "vpn.control_port": "30000",
+            "vpn.provider": "protonvpn",
+            "vpn.profile": "test",
+            "vpn.location": "Toronto",
+            "vpn.hostname": "ca1.protonvpn.test",
+        },
+    )
+    manager.add_service(service)
+
+    fleet_manager = fleet_state_manager_mod.FleetStateManager(str(compose_path))
+    applied_locations: list[str] = []
+
+    async def fake_sleep(*args, **kwargs):
+        return None
+
+    async def fake_check(service_name, timeout=None):
+        return service_name, fleet_state_manager_mod.ServiceHealth(
+            service_name=service_name,
+            is_healthy=True,
+            health_score=100,
+            last_checked=datetime.now(),
+        )
+
+    ip_sequence = iter(["198.51.100.10", "198.51.100.10"])
+
+    async def fake_ip(service_name, timeout=None):
+        return next(ip_sequence)
+
+    async def fake_vpn_test(service_name, timeout=3):
+        return True
+
+    monkeypatch.setattr(fleet_state_manager_mod.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        fleet_state_manager_mod,
+        "recreate_vpn_container",
+        lambda service, profile: applied_locations.append(service.location),
+    )
+    monkeypatch.setattr(
+        fleet_state_manager_mod, "start_container", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(fleet_manager, "_get_service_egress_ip", fake_ip)
+    monkeypatch.setattr(fleet_manager, "_check_service_health", fake_check)
+    monkeypatch.setattr(
+        fleet_state_manager_mod,
+        "test_vpn_connection_async",
+        fake_vpn_test,
+    )
+
+    with pytest.raises(Exception, match="new egress IP"):
+        asyncio.run(
+            fleet_manager._execute_single_rotation(
+                fleet_state_manager_mod.ServiceRotationPlan(
+                    service_name="protonvpn-canada-toronto",
+                    old_location="Toronto",
+                    new_location="Montreal",
+                    reason="health_check_failed",
+                    candidate_locations=["Montreal"],
+                ),
+                fleet_state_manager_mod.OperationConfig(
+                    rotation_attempt_limit=1,
+                    rotation_verification_attempts=1,
+                    rotation_verification_delay_seconds=0,
+                ),
+            )
+        )
+
+    restored_service = fleet_manager.compose_manager.get_service(
+        "protonvpn-canada-toronto"
+    )
+    assert restored_service.environment["SERVER_HOSTNAMES"] == "ca1.protonvpn.test"
+    assert restored_service.labels["vpn.hostname"] == "ca1.protonvpn.test"
+    assert restored_service.environment["SERVER_CITIES"] == "Toronto"
+    assert restored_service.labels["vpn.location"] == "Toronto"
+    assert applied_locations == ["Montreal", "Toronto"]
 
 
 def test_execute_single_rotation_emits_progress_events_for_verification_and_rollback(
