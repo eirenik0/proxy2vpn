@@ -490,7 +490,14 @@ class FleetStateManager:
             try:
                 # Extract country from service
                 country = self._extract_country_from_service(service)
-                if config.countries and country not in config.countries:
+                if (
+                    config.provider
+                    and service.provider.casefold() != config.provider.casefold()
+                ):
+                    continue
+                if config.countries and country.casefold() not in {
+                    item.casefold() for item in config.countries
+                }:
                     continue
 
                 alternative_targets = self._build_rotation_targets(

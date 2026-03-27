@@ -996,6 +996,103 @@ def test_create_rotation_plan_orders_same_country_before_fallback_countries(
     ]
 
 
+def test_create_rotation_plan_filters_services_by_provider_scope(monkeypatch, tmp_path):
+    monkeypatch.setattr(fleet_state_manager_mod.FleetStateManager, "_instance", None)
+    monkeypatch.setattr(
+        fleet_state_manager_mod.FleetStateManager,
+        "_instance_compose_path",
+        None,
+    )
+
+    compose_path = tmp_path / "compose.yml"
+    ComposeManager.create_initial_compose(compose_path, force=True)
+    manager = ComposeManager(compose_path)
+
+    proton_env = tmp_path / "proton.env"
+    proton_env.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    nord_env = tmp_path / "nord.env"
+    nord_env.write_text("VPN_SERVICE_PROVIDER=nordvpn\n")
+    manager.add_profile(Profile(name="proton", env_file=str(proton_env)))
+    manager.add_profile(Profile(name="nord", env_file=str(nord_env)))
+    manager.add_service(
+        VPNService.create(
+            name="protonvpn-united-kingdom-london",
+            port=20000,
+            control_port=30000,
+            provider="protonvpn",
+            profile="proton",
+            location="London",
+            environment={
+                "VPN_SERVICE_PROVIDER": "protonvpn",
+                "SERVER_CITIES": "London",
+                "SERVER_COUNTRIES": "United Kingdom",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20000",
+                "vpn.control_port": "30000",
+                "vpn.provider": "protonvpn",
+                "vpn.profile": "proton",
+                "vpn.location": "London",
+            },
+        )
+    )
+    manager.add_service(
+        VPNService.create(
+            name="nordvpn-united-kingdom-manchester",
+            port=20001,
+            control_port=30001,
+            provider="nordvpn",
+            profile="nord",
+            location="Manchester",
+            environment={
+                "VPN_SERVICE_PROVIDER": "nordvpn",
+                "SERVER_CITIES": "Manchester",
+                "SERVER_COUNTRIES": "United Kingdom",
+            },
+            labels={
+                "vpn.type": "vpn",
+                "vpn.port": "20001",
+                "vpn.control_port": "30001",
+                "vpn.provider": "nordvpn",
+                "vpn.profile": "nord",
+                "vpn.location": "Manchester",
+            },
+        )
+    )
+
+    fleet_manager = fleet_state_manager_mod.FleetStateManager(str(compose_path))
+    fleet_manager._sync_services_from_compose()
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_countries",
+        lambda provider: ["United Kingdom"],
+    )
+    monkeypatch.setattr(
+        fleet_manager.server_manager,
+        "list_cities",
+        lambda provider, country: {
+            "protonvpn": ["London", "Manchester"],
+            "nordvpn": ["London", "Manchester"],
+        }[provider],
+    )
+
+    plan = fleet_manager._create_rotation_plan(
+        [
+            "protonvpn-united-kingdom-london",
+            "nordvpn-united-kingdom-manchester",
+        ],
+        fleet_state_manager_mod.OperationConfig(
+            criteria=fleet_state_manager_mod.RotationCriteria.LOAD,
+            provider="nordvpn",
+            countries=["United Kingdom"],
+        ),
+    )
+
+    assert [item.service_name for item in plan] == ["nordvpn-united-kingdom-manchester"]
+    assert plan[0].candidate_locations == ["United Kingdom / London"]
+
+
 def test_rotate_service_preloads_server_catalog_for_async_rotation(
     monkeypatch, tmp_path
 ):

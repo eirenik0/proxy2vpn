@@ -229,7 +229,7 @@ def fleet_rotate(
         dry_run=dry_run,
         criteria=criteria_enum,
         countries=[country] if country else None,
-        provider=provider if provider != "protonvpn" else None,
+        provider=provider,
     )
 
     async def run_rotation():
