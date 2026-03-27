@@ -289,12 +289,20 @@ def test_agent_run_cycle_persists_active_cycle_progress(
     service = ComposeManager(agent_compose_file).list_services()[0]
     observed = {}
 
-    async def fake_assess(services, lines=20, timeout=None):
+    async def fake_assess(services, lines=20, timeout=None, progress_callback=None):
+        if progress_callback is not None:
+            callback_result = progress_callback(service.name)
+            if asyncio.iscoroutine(callback_result):
+                await callback_result
         persisted = watchdog.store.read_state()
         observed["phase"] = persisted.status.active_cycle_phase if persisted else None
         observed["started"] = (
             persisted.status.active_cycle_started_at if persisted else None
         )
+        observed["service_name"] = (
+            persisted.status.active_cycle_service_name if persisted else None
+        )
+        observed["progress"] = persisted.status.last_progress_at if persisted else None
         return {
             service.name: health_assessment.HealthAssessment(
                 service_name=service.name,
@@ -325,6 +333,8 @@ def test_agent_run_cycle_persists_active_cycle_progress(
 
     assert observed["phase"] == "assessing_services"
     assert observed["started"] is not None
+    assert observed["service_name"] == service.name
+    assert observed["progress"] is not None
     assert state.status.active_cycle_phase is None
     assert state.status.active_cycle_started_at is None
 
@@ -401,7 +411,7 @@ def test_agent_run_cycle_clears_active_cycle_state_on_setup_failure(
     def fail_cleanup(manager):
         raise RuntimeError(message)
 
-    async def fail_assess(services, lines=20, timeout=None):
+    async def fail_assess(services, lines=20, timeout=None, progress_callback=None):
         raise RuntimeError(message)
 
     if failure_stage == "cleanup":
@@ -669,7 +679,7 @@ def test_agent_run_cycle_cleans_orphaned_containers(agent_compose_file, monkeypa
         cleaned.append(str(manager.compose_path))
         return ["orphan-vpn"]
 
-    async def fake_assess_services(services):
+    async def fake_assess_services(services, progress_callback=None):
         return {}
 
     async def fake_process_service(
@@ -1765,7 +1775,7 @@ def test_agent_tls_failure_after_restart_rotates_immediately(
 
     watchdog = AgentWatchdog(agent_compose_file)
 
-    async def fake_assess(services, lines=20, timeout=None):
+    async def fake_assess(services, lines=20, timeout=None, progress_callback=None):
         return {service.name: assessment}
 
     async def fake_evaluate(_service):
@@ -1837,7 +1847,7 @@ def test_agent_persistent_route_failure_rotates_on_next_cycle_after_one_restore(
     watchdog = AgentWatchdog(agent_compose_file)
     rotate_calls: list[str] = []
 
-    async def fake_assess(services, lines=20, timeout=None):
+    async def fake_assess(services, lines=20, timeout=None, progress_callback=None):
         return {service.name: assessment}
 
     async def fake_evaluate(_service):

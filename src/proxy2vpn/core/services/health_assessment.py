@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from inspect import isawaitable
+from typing import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -153,33 +155,53 @@ class HealthAssessmentService:
         *,
         lines: int = 20,
         timeout: int | None = None,
+        progress_callback: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> dict[str, HealthAssessment]:
         """Assess a batch of services and enrich each result with peer evidence."""
 
-        assessment_tasks = [
-            self.assess_service(service, lines=lines, timeout=timeout)
-            for service in services
-        ]
-        results = await asyncio.gather(*assessment_tasks, return_exceptions=True)
         assessments: dict[str, HealthAssessment] = {}
-        for service, result in zip(services, results, strict=True):
-            if isinstance(result, HealthAssessment):
-                assessments[result.service_name] = result
-                continue
 
-            logger.warning(
-                "health_assessment_failed",
-                extra={"service_name": service.name, "error": str(result)},
-            )
-            assessments[service.name] = HealthAssessment(
-                service_name=service.name,
-                assessed_at=datetime.now(timezone.utc),
-                container_status="unknown",
-                health_score=0,
-                health_class="assessment_failed",
-                failing_checks=["assessment_error"],
-                control_api_reachable=False,
-            )
+        async def _assess(
+            service: VPNService,
+        ) -> tuple[VPNService, HealthAssessment | None, Exception | None]:
+            try:
+                assessment = await self.assess_service(
+                    service,
+                    lines=lines,
+                    timeout=timeout,
+                )
+                return service, assessment, None
+            except Exception as exc:
+                return service, None, exc
+
+        assessment_tasks = [
+            asyncio.create_task(_assess(service)) for service in services
+        ]
+
+        for task in asyncio.as_completed(assessment_tasks):
+            service, assessment, error = await task
+            if assessment is not None:
+                assessments[assessment.service_name] = assessment
+            else:
+                logger.warning(
+                    "health_assessment_failed",
+                    extra={"service_name": service.name, "error": str(error)},
+                )
+                assessments[service.name] = HealthAssessment(
+                    service_name=service.name,
+                    assessed_at=datetime.now(timezone.utc),
+                    container_status="unknown",
+                    health_score=0,
+                    health_class="assessment_failed",
+                    failing_checks=["assessment_error"],
+                    control_api_reachable=False,
+                )
+
+            if progress_callback is not None:
+                callback_result = progress_callback(service.name)
+                if isawaitable(callback_result):
+                    await callback_result
+
         enriched = {
             name: assessment.model_copy(
                 update={

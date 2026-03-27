@@ -143,7 +143,13 @@ class AgentWatchdog:
             state.status.service_count = len(services)
             state.status.active_cycle_phase = "assessing_services"
             self.store.write_state(state)
-            assessments = await self._health_assessor.assess_services(services)
+            assessments = await self._health_assessor.assess_services(
+                services,
+                progress_callback=lambda service_name: self._persist_cycle_progress(
+                    state,
+                    service_name=service_name,
+                ),
+            )
             snapshots_by_name = {
                 snapshot.service_name: snapshot for snapshot in state.services
             }
@@ -153,9 +159,7 @@ class AgentWatchdog:
             state.status.last_progress_at = utc_now()
             self.store.write_state(state)
             for service in services:
-                state.status.active_cycle_service_name = service.name
-                state.status.last_progress_at = utc_now()
-                self.store.write_state(state)
+                self._persist_cycle_progress(state, service_name=service.name)
                 snapshot = await self._process_service(
                     manager=manager,
                     service=service,
@@ -199,6 +203,16 @@ class AgentWatchdog:
         if cycle_error is not None:
             raise cycle_error
         return state
+
+    def _persist_cycle_progress(
+        self,
+        state: AgentState,
+        *,
+        service_name: str | None = None,
+    ) -> None:
+        state.status.active_cycle_service_name = service_name
+        state.status.last_progress_at = utc_now()
+        self.store.write_state(state)
 
     async def approve_incident(self, incident_id: str) -> AgentIncident:
         """Deprecated compatibility path for manually triggering a rotation."""

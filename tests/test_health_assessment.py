@@ -88,3 +88,54 @@ def test_assess_services_isolates_per_service_failures(monkeypatch):
     assert assessments["protonvpn-united-states-new-york"].health_score == 0
     assert assessments["protonvpn-united-states-boston"].health_class == "healthy"
     assert assessments["protonvpn-united-states-boston"].health_score == 100
+
+
+def test_assess_services_reports_progress_as_services_complete(monkeypatch):
+    assessor = health_assessment.HealthAssessmentService()
+    completed: list[str] = []
+
+    async def fake_assess_service(
+        service, *, peer_assessments=None, lines=20, timeout=None
+    ):
+        if service.name.endswith("new-york"):
+            await asyncio.sleep(0.01)
+        return health_assessment.HealthAssessment(
+            service_name=service.name,
+            assessed_at=health_assessment.datetime.now(health_assessment.timezone.utc),
+            container_status="running",
+            health_score=100,
+            health_class="healthy",
+            results=[
+                DiagnosticResult(
+                    check="connectivity",
+                    passed=True,
+                    message="VPN working",
+                    recommendation="",
+                )
+            ],
+            control_api_reachable=True,
+        )
+
+    async def progress(service_name: str):
+        completed.append(service_name)
+
+    monkeypatch.setattr(assessor, "assess_service", fake_assess_service)
+
+    assessments = asyncio.run(
+        assessor.assess_services(
+            [
+                _service("protonvpn-united-states-new-york"),
+                _service("protonvpn-united-states-boston"),
+            ],
+            progress_callback=progress,
+        )
+    )
+
+    assert set(assessments) == {
+        "protonvpn-united-states-new-york",
+        "protonvpn-united-states-boston",
+    }
+    assert completed == [
+        "protonvpn-united-states-boston",
+        "protonvpn-united-states-new-york",
+    ]
