@@ -300,6 +300,12 @@ def add(
     """Add a VPN service entry to the compose file."""
 
     manager = ComposeManager.from_ctx(ctx)
+    resolved_name: str
+    resolved_profile: str
+    resolved_port: int
+    resolved_control_port: int
+    resolved_location: str
+    resolved_force: bool
     if interactive:
         if name is not None or profile is not None:
             abort("Do not specify NAME or --profile when using --interactive")
@@ -560,6 +566,7 @@ def start(
             console.print(format_bulk_success_message("Started", svc_name))
         return
 
+    assert name is not None
     svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 
@@ -606,6 +613,7 @@ def stop(
             console.print(format_bulk_success_message("Stopped and removed", svc_name))
         return
 
+    assert name is not None
     validate_service_exists(manager, name)
 
     from proxy2vpn.adapters.docker_ops import (
@@ -658,6 +666,7 @@ def restart(
                 typer.echo(str(exc), err=True)
         return
 
+    assert name is not None
     svc = validate_service_exists(manager, name)
     from proxy2vpn.adapters.docker_ops import restart_container
 
@@ -697,6 +706,7 @@ def update(
             console.print(format_bulk_success_message("Updated", svc_name))
         return
 
+    assert name is not None
     svc = validate_service_exists(manager, name)
     _validate_service_locations([svc], force)
 

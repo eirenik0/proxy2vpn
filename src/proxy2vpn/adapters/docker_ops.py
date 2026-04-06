@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import time
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from proxy2vpn.core.models import Profile, VPNService
@@ -53,6 +53,13 @@ def _retry(
             attempt += 1
             if attempt > retries:
                 raise
+
+
+def _container_attrs(container: Container) -> dict[str, Any]:
+    """Return container attrs as a dict, tolerating partially mocked containers."""
+
+    attrs = getattr(container, "attrs", None)
+    return attrs if isinstance(attrs, dict) else {}
 
 
 def create_container(
@@ -228,9 +235,9 @@ def _should_cleanup_failed_start(container: Container, exc: DockerException) -> 
     except DockerException:
         pass
 
-    state = {}
+    state: dict[str, Any] = {}
     try:
-        state = container.attrs.get("State", {})
+        state = _container_attrs(container).get("State", {})
     except Exception:
         state = {}
 
@@ -399,7 +406,7 @@ def container_logs(name: str, lines: int = 100, follow: bool = False) -> Iterato
                     return
 
                 container.reload()
-                state = container.attrs.get("State", {})
+                state = _container_attrs(container).get("State", {})
                 status = state.get("Status") or getattr(container, "status", "")
                 if status not in {"created", "running", "restarting"}:
                     return
@@ -462,7 +469,7 @@ def get_problematic_containers(all: bool = False) -> list[Container]:
     for container in containers:
         try:
             container.reload()
-            state = container.attrs.get("State", {})
+            state = _container_attrs(container).get("State", {})
             if (
                 container.status != "running"
                 or state.get("ExitCode", 0) != 0
@@ -582,12 +589,12 @@ def get_network_interconnection_diagnostics(
     }
 
 
-def get_container_diagnostics(container: Container) -> dict:
+def get_container_diagnostics(container: Container) -> dict[str, Any]:
     """Return diagnostic information for a container."""
 
     try:
         container.reload()
-        state = container.attrs.get("State", {})
+        state = _container_attrs(container).get("State", {})
         return {
             "name": container.name,
             "status": container.status,
@@ -620,7 +627,7 @@ def analyze_container_logs(
         port = int(port_label) if port_label and port_label.isdigit() else None
 
         # Extract HTTP proxy credentials from container environment
-        env_vars = container.attrs.get("Config", {}).get("Env", [])
+        env_vars = _container_attrs(container).get("Config", {}).get("Env", [])
         proxy_user, proxy_password = extract_proxy_credentials_from_env(env_vars)
 
         return analyzer.analyze(
@@ -769,7 +776,7 @@ async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str,
 
     for container in containers:
         # Extract environment variables simply
-        env_vars = container.attrs.get("Config", {}).get("Env", [])
+        env_vars = _container_attrs(container).get("Config", {}).get("Env", [])
         proxy_user, proxy_password = extract_proxy_credentials_from_env(env_vars)
 
         status = "active" if container.status == "running" else "stopped"

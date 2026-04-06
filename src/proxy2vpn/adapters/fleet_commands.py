@@ -1,6 +1,7 @@
 """Fleet management CLI commands."""
 
 import asyncio
+from collections.abc import Mapping
 import json
 from pathlib import Path
 
@@ -412,7 +413,7 @@ def _display_allocation_table(allocation_status: dict[str, dict]):
     console.print(table)
 
 
-def _display_health_results(health_results: dict[str, object]):
+def _display_health_results(health_results: Mapping[str, object]) -> None:
     """Display health check results"""
     if not health_results:
         console.print("Health: 0/0 services healthy")

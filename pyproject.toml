@@ -73,6 +73,9 @@ exclude = [
     "venv/"
 ]
 
+[tool.ty.src]
+include = ["src"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.1",

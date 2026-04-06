@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -126,17 +126,7 @@ class RotationChange:
     attempted_targets: List[RotationTarget] = field(default_factory=list)
 
 
-class RotationProgressCallback(Protocol):
-    """Structured progress sink for long-running single-service rotations."""
-
-    def __call__(
-        self,
-        service_name: str,
-        step: str,
-        detail: str | None = None,
-        *,
-        current_live_service_name: str | None = None,
-    ) -> Any: ...
+RotationProgressCallback = Callable[..., Any]
 
 
 @dataclass
@@ -1230,13 +1220,15 @@ class FleetStateManager:
 
         # Execute all rotations in parallel
         tasks = [rotate_single_service(rp) for rp in plan]
-        rotation_results = await asyncio.gather(*tasks, return_exceptions=True)
+        rotation_results: list[
+            tuple[str, bool, RotationChange | None, str] | BaseException
+        ] = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Process results
         errors = []
         for i, result in enumerate(rotation_results):
             rotation_plan = plan[i]
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 failed_rotations.append(rotation_plan.service_name)
                 errors.append(f"{rotation_plan.service_name}: {result}")
             else:

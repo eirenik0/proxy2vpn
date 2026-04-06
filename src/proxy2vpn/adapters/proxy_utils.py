@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Iterable, Mapping
+from typing import Any, cast
 import re
 from urllib.parse import urlsplit, urlunsplit
 
@@ -14,11 +14,14 @@ _PROXY_AUTH_RE = re.compile(
 
 
 def extract_proxy_credentials_from_env(
-    env_vars: Iterable[str] | dict[str, str],
+    env_vars: Iterable[str] | Mapping[str, str],
 ) -> tuple[str | None, str | None]:
     """Extract ``HTTPPROXY_USER`` and ``HTTPPROXY_PASSWORD`` from env entries."""
-    if isinstance(env_vars, dict):
-        return env_vars.get("HTTPPROXY_USER"), env_vars.get("HTTPPROXY_PASSWORD")
+    if isinstance(env_vars, Mapping):
+        mapping = cast(Mapping[str, str], env_vars)
+        username = mapping.get("HTTPPROXY_USER")
+        password = mapping.get("HTTPPROXY_PASSWORD")
+        return username, password
 
     username = None
     password = None

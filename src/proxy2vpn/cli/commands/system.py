@@ -249,9 +249,22 @@ def diagnose(
 
         assert container.name is not None  # Type narrowing after null check
         results = analyze_container_logs(container.name, lines=lines, analyzer=analyzer)
-        ports = container.attrs.get("NetworkSettings", {}).get("Ports", {})
-        port_info = ports.get("8000/tcp")
-        if port_info and port_info[0].get("HostPort"):
+        attrs = getattr(container, "attrs", None)
+        network_settings = (
+            attrs.get("NetworkSettings", {}) if isinstance(attrs, dict) else {}
+        )
+        ports = (
+            network_settings.get("Ports", {})
+            if isinstance(network_settings, dict)
+            else {}
+        )
+        port_info = ports.get("8000/tcp") if isinstance(ports, dict) else None
+        if (
+            isinstance(port_info, list)
+            and port_info
+            and isinstance(port_info[0], dict)
+            and port_info[0].get("HostPort")
+        ):
             control_port = port_info[0].get("HostPort")
             base_url = f"http://localhost:{control_port}/v1"
             results.extend(analyzer.control_api_checks(base_url))
@@ -288,7 +301,8 @@ def diagnose(
                 connected = entry.get("connected", [])
                 missing = entry.get("missing", [])
                 connected_count = len(connected) if isinstance(connected, list) else 0
-                expected_count = len(entry.get("expected", []))
+                expected = entry.get("expected", [])
+                expected_count = len(expected) if isinstance(expected, list) else 0
                 status_line = (
                     f"{network_name}: status={entry['status']} "
                     f"health={entry['health']} "
@@ -297,7 +311,9 @@ def diagnose(
                 if expected_count:
                     status_line += f"/{expected_count}"
                 if isinstance(missing, list) and missing:
-                    status_line += f" missing={', '.join(missing)}"
+                    status_line += (
+                        f" missing={', '.join(str(item) for item in missing)}"
+                    )
                 typer.echo(status_line)
             else:
                 typer.echo(

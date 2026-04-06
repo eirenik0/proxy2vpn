@@ -3,7 +3,7 @@ import shutil
 import typer
 
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
 from filelock import FileLock
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
@@ -37,7 +37,7 @@ class ComposeManager:
         self.data: CommentedMap = self._load()
 
     @classmethod
-    def from_ctx(cls, ctx: typer.Context) -> Self:
+    def from_ctx(cls, ctx: typer.Context) -> "ComposeManager":
         compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
         return cls(compose_path=compose_file)
 

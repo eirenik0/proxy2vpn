@@ -86,21 +86,29 @@ def _spawn_daemon_process(
         str(interval),
         "--daemon-child",
     ]
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "cwd": str(Path.cwd()),
-        "env": os.environ.copy(),
-    }
     if os.name == "nt":
-        kwargs["creationflags"] = getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        ) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+            subprocess, "DETACHED_PROCESS", 0
+        )
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(Path.cwd()),
+            env=os.environ.copy(),
+            creationflags=creationflags,
+        )
     else:
-        kwargs["start_new_session"] = True
-
-    process = subprocess.Popen(command, **kwargs)
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(Path.cwd()),
+            env=os.environ.copy(),
+            start_new_session=True,
+        )
     time.sleep(0.2)
     if process.poll() is not None:
         abort(

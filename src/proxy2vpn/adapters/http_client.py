@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import Any, Self
+from typing import Any, TypeVar
 from urllib.parse import urlparse
 
 import aiohttp
@@ -18,6 +18,8 @@ from .http_client_config import GluetunControlSettings
 from .logging_utils import get_logger
 
 logger = get_logger(__name__)
+
+HTTPClientT = TypeVar("HTTPClientT", bound="HTTPClient")
 
 
 class HTTPClientError(RuntimeError):
@@ -73,7 +75,7 @@ class HTTPClient:
         self._config = config
         self._session: aiohttp.ClientSession | None = None
 
-    async def __aenter__(self) -> Self:
+    async def __aenter__(self: HTTPClientT) -> HTTPClientT:
         await self._ensure_session()
         return self
 

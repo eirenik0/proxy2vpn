@@ -5,6 +5,7 @@ import asyncio
 import functools
 from typing import Any, Callable, Coroutine, TypeVar
 
+import click
 from click.exceptions import UsageError
 from rich.console import Console
 from rich.panel import Panel
@@ -156,7 +157,7 @@ class HelpfulTyper(typer.Typer):
 
         # Create a nice panel with available commands
         command_path = exc.ctx.command_path
-        available_commands = exc.ctx.command.list_commands(exc.ctx) if exc.ctx else []
+        available_commands = self._list_commands(exc.ctx)
 
         # Create a table of commands with their help text
         table = Table(
@@ -195,7 +196,7 @@ class HelpfulTyper(typer.Typer):
 
         match = re.search(r"'([^']+)'", exc.message)
         bad_cmd = match.group(1) if match else exc.message
-        possibilities = exc.ctx.command.list_commands(exc.ctx) if exc.ctx else []
+        possibilities = self._list_commands(exc.ctx)
 
         # Get close matches using different strategies
         matches: list[str] = []
@@ -240,14 +241,15 @@ class HelpfulTyper(typer.Typer):
                 self.console.print(f"  • [cyan]{match}[/cyan]")
 
         # Show available commands
-        if possibilities:
+        if possibilities and exc.ctx is not None:
             self.console.print("\n[yellow]Available commands:[/yellow]")
             table = Table(show_header=False, box=None, padding=(0, 2))
             table.add_column("Command", style="cyan")
             table.add_column("Description")
 
+            parent_command = exc.ctx.command
             for cmd_name in possibilities:
-                cmd_obj = self._get_command_object(exc.ctx.command, cmd_name)
+                cmd_obj = self._get_command_object(parent_command, cmd_name)
                 description = self._get_command_help(cmd_obj) if cmd_obj else ""
                 table.add_row(cmd_name, description)
 
@@ -272,9 +274,18 @@ class HelpfulTyper(typer.Typer):
             if doc_link:
                 self.console.print(f"[dim]Documentation: [link]{doc_link}[/link][/dim]")
 
-    def _get_command_object(self, parent_command, cmd_name: str):
+    def _list_commands(self, ctx: click.Context | None) -> list[str]:
+        """Return subcommand names when the current context is a command group."""
+
+        if ctx is None or not isinstance(ctx.command, click.Group):
+            return []
+        return ctx.command.list_commands(ctx)
+
+    def _get_command_object(
+        self, parent_command: click.Command | None, cmd_name: str
+    ) -> click.Command | None:
         """Get the command object for a given command name."""
-        if hasattr(parent_command, "commands"):
+        if isinstance(parent_command, click.Group):
             return parent_command.commands.get(cmd_name)
         return None
 
@@ -391,7 +402,8 @@ class HelpfulTyper(typer.Typer):
             for grp in app.registered_groups:
                 full = f"{prefix}{grp.name}".strip()
                 items.append(full)
-                items.extend(walk(grp.typer_instance, f"{full} "))
+                if grp.typer_instance is not None:
+                    items.extend(walk(grp.typer_instance, f"{full} "))
             return items
 
         return walk(self)

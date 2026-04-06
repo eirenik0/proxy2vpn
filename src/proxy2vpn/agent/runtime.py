@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 from uuid import uuid4
 
 from proxy2vpn.agent.config import AgentSettings
@@ -19,6 +19,7 @@ from proxy2vpn.agent.llm import (
 from proxy2vpn.agent.models import (
     ActionRecord,
     AgentIncident,
+    IncidentSeverity,
     IncidentInvestigation,
     AgentState,
     AgentStatus,
@@ -32,7 +33,9 @@ from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.fleet_state_manager import (
     FleetStateManager,
     OperationConfig,
+    OperationResult,
     RotationCriteria,
+    RotationProgressCallback,
 )
 from proxy2vpn.adapters.http_client import GluetunControlClient
 from proxy2vpn.adapters.logging_utils import get_logger
@@ -44,6 +47,12 @@ from proxy2vpn.core.services.health_assessment import (
 )
 
 logger = get_logger(__name__)
+
+
+class HealthEvaluation(TypedDict):
+    container_status: str
+    health_score: int
+    results: list[DiagnosticResult]
 
 
 def utc_now() -> datetime:
@@ -830,7 +839,7 @@ class AgentWatchdog:
         manager: ComposeManager,
         service: VPNService,
         state: AgentState,
-    ) -> tuple[str, dict[str, object]]:
+    ) -> tuple[str, HealthEvaluation]:
         try:
             self._persist_cycle_progress(
                 state,
@@ -897,7 +906,7 @@ class AgentWatchdog:
                 "results": [],
             }
 
-    async def _evaluate_health(self, service: VPNService) -> dict[str, object]:
+    async def _evaluate_health(self, service: VPNService) -> HealthEvaluation:
         assessment = await self._health_assessor.assess_service(service)
         return {
             "container_status": assessment.container_status,
@@ -1299,7 +1308,7 @@ class AgentWatchdog:
         incidents: list[AgentIncident],
         service: VPNService,
         assessment: HealthAssessment,
-    ) -> tuple[str, dict[str, object]] | None:
+    ) -> tuple[str, HealthEvaluation] | None:
         if not assessment.control_api_reachable:
             return None
         if self._find_active_incident(incidents, service.name, "auth_config_failure"):
@@ -1353,7 +1362,7 @@ class AgentWatchdog:
         incidents: list[AgentIncident],
         service: VPNService,
         incident_type: str,
-        severity: str,
+        severity: IncidentSeverity,
         summary: str,
         human_explanation: str | None,
         recommended_action: str,
@@ -1605,7 +1614,7 @@ class AgentWatchdog:
         service_name: str,
         *,
         state: AgentState | None = None,
-    ) -> Any:
+    ) -> OperationResult:
         fallback_countries: list[str] = []
         try:
             service = ComposeManager(self.compose_file).get_service(service_name)
@@ -1618,23 +1627,28 @@ class AgentWatchdog:
             )
         fleet_manager = FleetStateManager(self.compose_file)
         try:
-            progress_callback = None
+            progress_callback: RotationProgressCallback | None = None
             if state is not None:
+                watchdog = self
 
-                def progress_callback(
-                    requested_service_name: str,
-                    step: str,
-                    detail: str | None = None,
-                    *,
-                    current_live_service_name: str | None = None,
-                ) -> None:
-                    self._persist_cycle_progress(
-                        state,
-                        service_name=requested_service_name,
-                        step=f"rotate:{step}",
-                        detail=detail,
-                        current_live_service_name=current_live_service_name,
-                    )
+                class _ProgressCallback:
+                    def __call__(
+                        self,
+                        requested_service_name: str,
+                        step: str,
+                        detail: str | None = None,
+                        *,
+                        current_live_service_name: str | None = None,
+                    ) -> None:
+                        watchdog._persist_cycle_progress(
+                            state,
+                            service_name=requested_service_name,
+                            step=f"rotate:{step}",
+                            detail=detail,
+                            current_live_service_name=current_live_service_name,
+                        )
+
+                progress_callback = _ProgressCallback()
 
             result = await fleet_manager.rotate_service(
                 service_name,
@@ -2087,7 +2101,7 @@ class AgentWatchdog:
                 evidence["healthy"].append(candidate.name)
                 continue
 
-            peer_results = peer_health.get("results", [])
+            peer_results = peer_health["results"]
             has_auth_or_config_issue = any(
                 isinstance(result, DiagnosticResult)
                 and not result.passed
@@ -2429,7 +2443,7 @@ class AgentWatchdog:
         incidents: list[AgentIncident],
         service_name: str,
         incident_type: str,
-        severity: str,
+        severity: IncidentSeverity,
         summary: str,
         human_explanation: str | None,
         recommended_action: str,

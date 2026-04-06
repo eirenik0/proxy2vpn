@@ -37,6 +37,8 @@ async def _fetch_ip(client: HTTPClient, url: str, proxy: str | None) -> str:
     """Fetch IP address from a single service."""
     try:
         text = await client.get_text(url, proxy=proxy)
+        if text is None:
+            return ""
         ip = _parse_ip(text)
         if ip:
             return ip

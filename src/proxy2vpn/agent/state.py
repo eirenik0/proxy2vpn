@@ -6,7 +6,7 @@ import json
 from contextlib import suppress
 from pathlib import Path
 
-from filelock import FileLock
+from filelock import BaseFileLock, FileLock
 import psutil
 
 from proxy2vpn.agent.config import AgentSettings
@@ -33,7 +33,7 @@ class AgentStateStore:
     def ensure_dir(self) -> None:
         self.agent_dir.mkdir(parents=True, exist_ok=True)
 
-    def runtime_lock(self) -> FileLock:
+    def runtime_lock(self) -> BaseFileLock:
         self.ensure_dir()
         return FileLock(str(self.runtime_lock_path))
 
