@@ -34,6 +34,7 @@ class ProfileSlot:
         return f"{self.utilization_ratio * 100:.1f}%"
 
 
+# @lat: [[lat.md/fleet#Profile Allocation]]
 class ProfileAllocator:
     """Manages automatic profile allocation with slot tracking"""
 

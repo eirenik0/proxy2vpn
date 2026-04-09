@@ -92,6 +92,7 @@ class RotationResult(BaseModel):
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
+# @lat: [[lat.md/health#Provider-Scoped Rotation Memory]]
 class ServerMonitor:
     """Monitors server availability and manages rotation"""
 
@@ -101,10 +102,15 @@ class ServerMonitor:
             HTTPClientConfig(base_url="http://localhost")
         )
         self.assessor = HealthAssessmentService()
-        self.availability_cache: dict[str, ServerAvailability] = {}
+        self.availability_cache: dict[tuple[str, str], ServerAvailability] = {}
         self.rotation_history: list[RotationRecord] = []
-        self.failed_servers: dict[str, list[datetime]] = {}  # Track failure history
+        self.failed_servers: dict[tuple[str, str], list[datetime]] = {}
         self.last_assessments: dict[str, HealthAssessment] = {}
+
+    def _server_key(self, provider: str, location: str) -> tuple[str, str]:
+        """Return a stable provider/location key for cached server state."""
+
+        return (provider.strip().lower(), location.strip().lower())
 
     async def check_service_health(
         self, service: VPNService, timeout: int = 30
@@ -113,7 +119,9 @@ class ServerMonitor:
         try:
             assessment = await self.assessor.assess_service(service, timeout=timeout)
             self.last_assessments[service.name] = assessment
-            self.availability_cache[service.location] = ServerAvailability(
+            self.availability_cache[
+                self._server_key(service.provider, service.location)
+            ] = ServerAvailability(
                 location=service.location,
                 provider=service.provider,
                 is_available=assessment.health_score >= self.assessor.threshold,
@@ -130,36 +138,40 @@ class ServerMonitor:
         except asyncio.TimeoutError:
             logger.warning(f"Timeout testing service {service.name}")
             console.print(f"[yellow]⏱️ Timeout testing service:[/yellow] {service.name}")
-            self._record_failure(service.location)
+            self._record_failure(service.provider, service.location)
             return False
         except Exception as e:
             logger.error(f"Error checking service {service.name}: {e}")
             return False
 
-    def _record_failure(self, location: str):
-        """Record server failure for tracking"""
-        if location not in self.failed_servers:
-            self.failed_servers[location] = []
+    def _record_failure(self, provider: str, location: str):
+        """Record a provider-scoped server failure for tracking."""
 
-        self.failed_servers[location].append(datetime.now())
+        key = self._server_key(provider, location)
+        if key not in self.failed_servers:
+            self.failed_servers[key] = []
+
+        self.failed_servers[key].append(datetime.now())
 
         # Keep only recent failures (last 24 hours)
         cutoff = datetime.now() - timedelta(hours=24)
-        self.failed_servers[location] = [
+        self.failed_servers[key] = [
             failure_time
-            for failure_time in self.failed_servers[location]
+            for failure_time in self.failed_servers[key]
             if failure_time > cutoff
         ]
 
-    def _is_recently_failed(self, location: str, hours: int = 2) -> bool:
-        """Check if server failed recently"""
-        if location not in self.failed_servers:
+    def _is_recently_failed(self, provider: str, location: str, hours: int = 2) -> bool:
+        """Check if a provider/location pair failed recently."""
+
+        key = self._server_key(provider, location)
+        if key not in self.failed_servers:
             return False
 
         cutoff = datetime.now() - timedelta(hours=hours)
         recent_failures = [
             failure_time
-            for failure_time in self.failed_servers[location]
+            for failure_time in self.failed_servers[key]
             if failure_time > cutoff
         ]
 
@@ -236,7 +248,8 @@ class ServerMonitor:
                 alternative_cities = [
                     city
                     for city in available_cities
-                    if city != service.location and not self._is_recently_failed(city)
+                    if city != service.location
+                    and not self._is_recently_failed(service.provider, city)
                 ]
 
                 if not alternative_cities:
@@ -398,13 +411,15 @@ class ServerMonitor:
         return [record for record in self.rotation_history if record.timestamp > cutoff]
 
     def get_server_failure_stats(self) -> dict[str, int]:
-        """Get failure statistics by server location"""
+        """Get failure statistics by provider-qualified server location."""
+
         stats = {}
-        for location, failures in self.failed_servers.items():
+        for (provider, location), failures in self.failed_servers.items():
             # Count failures in last 24 hours
             recent_failures = [
                 f for f in failures if f > datetime.now() - timedelta(hours=24)
             ]
-            stats[location] = len(recent_failures)
+            label = f"{provider}:{location}" if provider else location
+            stats[label] = len(recent_failures)
 
         return stats

@@ -61,6 +61,7 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# @lat: [[lat.md/agent#Watchdog Cycle]]
 class AgentWatchdog:
     """Watch one compose root and apply limited remediation policies."""
 

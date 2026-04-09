@@ -12,3 +12,6 @@ compose.yml
 compose.yml.bak
 control-server-auth.toml
 tmp_test_cli_create/
+.pi
+.codex
+lat.md/.cache

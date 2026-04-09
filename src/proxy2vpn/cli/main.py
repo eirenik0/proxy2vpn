@@ -20,6 +20,7 @@ app.add_typer(fleet.app, name="fleet")
 app.add_typer(agent.app, name="agent")
 
 
+# @lat: [[lat.md/architecture#CLI Surface]]
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,

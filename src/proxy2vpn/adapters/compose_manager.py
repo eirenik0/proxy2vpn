@@ -27,6 +27,7 @@ networks:
 """
 
 
+# @lat: [[lat.md/architecture#Compose Root Model]]
 class ComposeManager:
     """Manage docker-compose files for VPN services."""
 

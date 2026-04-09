@@ -153,6 +153,7 @@ class DeploymentResult(BaseModel):
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
+# @lat: [[lat.md/fleet#Deployment Planning]]
 class FleetManager:
     """Manages bulk VPN deployments across cities and profiles"""
 

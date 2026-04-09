@@ -139,3 +139,60 @@ def test_assess_services_reports_progress_as_services_complete(monkeypatch):
         "protonvpn-united-states-boston",
         "protonvpn-united-states-new-york",
     ]
+
+
+def test_assess_service_uses_shared_profile_peer_evidence(monkeypatch):
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", DummyControlClient)
+    monkeypatch.setattr(
+        health_assessment.docker_ops,
+        "get_container_by_service_name",
+        lambda name: DummyContainer(),
+    )
+    monkeypatch.setattr(
+        health_assessment.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: [
+            DiagnosticResult(
+                check="logs",
+                passed=True,
+                message="No critical log errors",
+                recommendation="",
+            )
+        ],
+    )
+
+    assessor = health_assessment.HealthAssessmentService()
+    peer_assessments = {
+        "protonvpn-united-states-boston": health_assessment.HealthAssessment(
+            service_name="protonvpn-united-states-boston",
+            profile_name="test",
+            assessed_at=health_assessment.datetime.now(health_assessment.timezone.utc),
+            container_status="running",
+            health_score=100,
+            health_class="healthy",
+            results=[],
+            control_api_reachable=True,
+        ),
+        "nordvpn-united-states-boston": health_assessment.HealthAssessment(
+            service_name="nordvpn-united-states-boston",
+            profile_name="other",
+            assessed_at=health_assessment.datetime.now(health_assessment.timezone.utc),
+            container_status="running",
+            health_score=100,
+            health_class="healthy",
+            results=[],
+            control_api_reachable=True,
+        ),
+    }
+
+    assessment = asyncio.run(
+        assessor.assess_service(
+            _service("protonvpn-united-states-new-york"),
+            peer_assessments=peer_assessments,
+        )
+    )
+
+    assert assessment.profile_name == "test"
+    assert assessment.peer_evidence.healthy == ["protonvpn-united-states-boston"]
+    assert assessment.peer_evidence.auth_config == []
+    assert assessment.peer_evidence.other_unhealthy == []

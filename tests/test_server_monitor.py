@@ -86,6 +86,51 @@ def test_check_service_health_records_failed_assessment(monkeypatch):
     assert monitor.last_assessments["vpn-test"].health_class == "auth_config"
 
 
+def test_check_service_health_caches_same_location_per_provider(monkeypatch):
+    service_a = models.VPNService.create(
+        name="protonvpn-toronto",
+        port=8080,
+        control_port=30000,
+        provider="protonvpn",
+        profile="p1",
+        location="Toronto",
+        environment={},
+        labels={},
+    )
+    service_b = models.VPNService.create(
+        name="nordvpn-toronto",
+        port=8081,
+        control_port=30001,
+        provider="nordvpn",
+        profile="p2",
+        location="Toronto",
+        environment={},
+        labels={},
+    )
+
+    monitor = server_monitor.ServerMonitor(fleet_manager=None, http_client=None)
+
+    async def fake_assess_service(
+        service_obj, timeout=30, peer_assessments=None, lines=20
+    ):
+        return _assessment(service_obj.name, 100, "healthy")
+
+    monkeypatch.setattr(monitor.assessor, "assess_service", fake_assess_service)
+
+    assert asyncio.run(monitor.check_service_health(service_a))
+    assert asyncio.run(monitor.check_service_health(service_b))
+    assert len(monitor.availability_cache) == 2
+
+
+def test_recent_failure_tracking_is_provider_scoped():
+    monitor = server_monitor.ServerMonitor(fleet_manager=None, http_client=None)
+
+    monitor._record_failure("protonvpn", "Toronto")
+
+    assert monitor._is_recently_failed("protonvpn", "Toronto") is True
+    assert monitor._is_recently_failed("nordvpn", "Toronto") is False
+
+
 def test_execute_service_rotation_updates_service_location(monkeypatch):
     service = models.VPNService.create(
         name="protonvpn-canada-toronto",

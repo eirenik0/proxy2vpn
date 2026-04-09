@@ -34,6 +34,7 @@ class HealthAssessment(BaseModel):
     """Shared assessment result for a VPN service."""
 
     service_name: str
+    profile_name: str | None = None
     assessed_at: datetime
     container_status: str
     health_score: int
@@ -48,6 +49,7 @@ class HealthAssessment(BaseModel):
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
 
+# @lat: [[lat.md/health#Health Assessment]]
 class HealthAssessmentService:
     """Assess VPN service health using the shared diagnostic stack."""
 
@@ -80,6 +82,7 @@ class HealthAssessmentService:
         if container is None:
             return HealthAssessment(
                 service_name=service.name,
+                profile_name=service.profile,
                 assessed_at=assessed_at,
                 container_status="missing",
                 health_score=0,
@@ -102,6 +105,7 @@ class HealthAssessmentService:
         if container_status != "running":
             return HealthAssessment(
                 service_name=service.name,
+                profile_name=service.profile,
                 assessed_at=assessed_at,
                 container_status=container_status,
                 health_score=0,
@@ -137,6 +141,7 @@ class HealthAssessmentService:
 
         return HealthAssessment(
             service_name=service.name,
+            profile_name=service.profile,
             assessed_at=assessed_at,
             container_status=container_status,
             health_score=health_score,
@@ -189,6 +194,7 @@ class HealthAssessmentService:
                 )
                 assessments[service.name] = HealthAssessment(
                     service_name=service.name,
+                    profile_name=service.profile,
                     assessed_at=datetime.now(timezone.utc),
                     container_status="unknown",
                     health_score=0,
@@ -257,7 +263,36 @@ class HealthAssessmentService:
     ) -> PeerEvidence:
         if not peer_assessments:
             return PeerEvidence()
-        return self._peer_evidence_from_map([service], peer_assessments, service.name)
+
+        evidence = PeerEvidence()
+        for candidate_name, assessment in peer_assessments.items():
+            if candidate_name == service.name:
+                continue
+            if assessment.profile_name != service.profile:
+                continue
+            is_healthy = (
+                assessment.container_status == "running"
+                and assessment.health_score >= self.threshold
+            )
+            if is_healthy:
+                evidence.healthy.append(candidate_name)
+                continue
+            if any(
+                result.check in {"auth_failure", "config_error"} and not result.passed
+                for result in assessment.results
+            ):
+                evidence.auth_config.append(candidate_name)
+            else:
+                evidence.other_unhealthy.append(candidate_name)
+
+        for names in (
+            evidence.healthy,
+            evidence.auth_config,
+            evidence.other_unhealthy,
+            evidence.probe_failed,
+        ):
+            names.sort()
+        return evidence
 
     def _peer_evidence_from_map(
         self,

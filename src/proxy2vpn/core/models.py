@@ -57,6 +57,7 @@ class VPNConfig(BaseModel):
     labels: dict[str, str]
 
 
+# @lat: [[lat.md/architecture#Profile And Service Models]]
 class VPNService(BaseModel):
     """Complete VPN service combining container and configuration."""
 
