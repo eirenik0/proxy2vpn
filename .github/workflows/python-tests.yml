@@ -5,14 +5,20 @@ on:
     branches: [ main ]
     paths:
       - '**/*.py'
+      - '.github/workflows/*.yml'
+      - 'Makefile'
+      - 'news/**'
       - 'pyproject.toml'
-      - '.github/workflows/python-tests.yml'
+      - 'uv.lock'
   pull_request:
     branches: [ main ]
     paths:
       - '**/*.py'
+      - '.github/workflows/*.yml'
+      - 'Makefile'
+      - 'news/**'
       - 'pyproject.toml'
-      - '.github/workflows/python-tests.yml'
+      - 'uv.lock'
   workflow_dispatch:
 
 jobs:

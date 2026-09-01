@@ -49,10 +49,19 @@ jobs:
           import os
           import re
           import sys
+          import tomllib
+          from pathlib import Path
 
           version = os.environ["VERSION"]
           if not re.fullmatch(r"\d+\.\d+\.\d+(?:[A-Za-z0-9.-]+)?", version):
               sys.exit("VERSION must look like 1.2.3 or 1.2.3rc1")
+
+          current = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          if version == current:
+              sys.exit(
+                  f"VERSION is already {current}. Choose the next version; "
+                  "never recreate an existing release."
+              )
           print(f"Preparing release {version}")
           PY
 
@@ -82,12 +91,13 @@ jobs:
 
       - name: Build release commit
         run: |
-          uv run --with towncrier python scripts/bump_version.py "${VERSION}"
-          uv run --with towncrier towncrier build --yes --version "${VERSION}"
+          uv run --locked python scripts/bump_version.py "${VERSION}"
+          uv lock
+          uv run --locked towncrier build --yes --version "${VERSION}"
 
       - name: Ensure release files changed
         run: |
-          if git diff --quiet -- pyproject.toml CHANGELOG.md news; then
+          if git diff --quiet -- pyproject.toml uv.lock CHANGELOG.md news; then
             echo "Release preparation produced no changes."
             exit 1
           fi
@@ -96,7 +106,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A pyproject.toml CHANGELOG.md news
+          git add -A pyproject.toml uv.lock CHANGELOG.md news
           git commit -m "Release ${VERSION}"
           git tag -a "v${VERSION}" -m "Release ${VERSION}"
 

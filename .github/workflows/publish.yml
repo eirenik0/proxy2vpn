@@ -4,12 +4,10 @@ on:
   release:
     types:
       - published
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing git tag to publish (for example v0.15.0)
-        required: true
-        type: string
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -21,31 +19,42 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Resolve release tag
-        id: release_tag
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          if [ "$EVENT_NAME" = "release" ]; then
-            tag="$RELEASE_TAG"
-          else
-            tag="$INPUT_TAG"
-          fi
-
-          case "$tag" in
-            v*) ;;
-            *) tag="v$tag" ;;
-          esac
-
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - name: Checkout release tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.release_tag.outputs.tag }}
+          ref: ${{ github.event.release.tag_name }}
           fetch-depth: 0
+
+      - name: Validate release provenance
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          case "$RELEASE_TAG" in
+            v*) version="${RELEASE_TAG#v}" ;;
+            *) echo "Release tag must start with v: ${RELEASE_TAG}"; exit 1 ;;
+          esac
+
+          git fetch origin "$DEFAULT_BRANCH"
+          git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH" || {
+            echo "Release tag ${RELEASE_TAG} is not contained in ${DEFAULT_BRANCH}."
+            exit 1
+          }
+
+          python - "$version" <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          version = sys.argv[1]
+          metadata = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          if metadata["project"]["version"] != version:
+              raise SystemExit("Release tag and pyproject.toml version do not match")
+
+          changelog = pathlib.Path("CHANGELOG.md").read_text()
+          if f"## [{version}]" not in changelog:
+              raise SystemExit(f"CHANGELOG.md has no {version} release entry")
+          PY
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -62,3 +71,5 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

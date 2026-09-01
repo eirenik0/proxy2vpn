@@ -1,4 +1,4 @@
-.PHONY: help test changelog-check changelog changelog-draft release lint fmt fmt-check clean all
+.PHONY: help test changelog-check changelog changelog-draft lint fmt fmt-check clean all
 
 UV_PATH = PATH="$$PATH:$(HOME)/.local/bin"
 
@@ -8,7 +8,6 @@ help: ## Show available targets
 		@echo "  changelog-check   Validate Towncrier news fragments"
 		@echo "  changelog         Build changelog for a release (requires VERSION)"
 		@echo "  changelog-draft   Preview next changelog"
-		@echo "  release           Bump version, build changelog and tag"
 		@echo "  lint              Run Python linting (ruff + ty)"
 		@echo "  fmt               Format Python code with ruff"
 		@echo "  fmt-check         Check Python formatting without modifying files"
@@ -16,34 +15,27 @@ help: ## Show available targets
 		@echo "  all               Run all checks (format check, lint, test)"
 
 test:
-	$(UV_PATH) uv run pytest -n auto
+	$(UV_PATH) uv run --locked pytest -n auto
 
 changelog-check:
-	$(UV_PATH) uv run towncrier check
+	$(UV_PATH) uv run --locked towncrier check
 
 changelog:
 	@[ -n "$(VERSION)" ] || (echo "VERSION is required" && exit 1)
-	$(UV_PATH) uv run towncrier build --yes --version $(VERSION)
+	$(UV_PATH) uv run --locked towncrier build --yes --version $(VERSION)
 
 changelog-draft:
-	$(UV_PATH) uv run towncrier build --draft
-
-release:
-	@[ -n "$(VERSION)" ] || (echo "VERSION is required" && exit 1)
-	$(UV_PATH) uv run python scripts/bump_version.py $(VERSION)
-	$(UV_PATH) uv run towncrier build --yes --version $(VERSION)
-	git commit -am "Release $(VERSION)"
-	git tag v$(VERSION)
+	$(UV_PATH) uv run --locked towncrier build --draft
 
 lint: ## Run Python linting (ruff + ty)
-	$(UV_PATH) uv run ruff check src/ tests/
+	$(UV_PATH) uv run --locked ruff check src/ tests/
 	$(UV_PATH) uvx ty check
 
 fmt: ## Format Python code with ruff
-	$(UV_PATH) uv run ruff format src/ tests/
+	$(UV_PATH) uv run --locked ruff format src/ tests/
 
 fmt-check: ## Check Python formatting without modifying files
-	$(UV_PATH) uv run ruff format --check src/ tests/
+	$(UV_PATH) uv run --locked ruff format --check src/ tests/
 
 clean: ## Clean up temporary files and caches
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
