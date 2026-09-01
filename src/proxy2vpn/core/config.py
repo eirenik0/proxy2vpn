@@ -33,10 +33,10 @@ DEFAULT_PORT_START = 20000
 # Control ports are bound to localhost and kept separate from proxy ports.
 DEFAULT_CONTROL_PORT_START = 30000
 
-# URL of the gluetun server list JSON file.  This file is fetched and
-# cached by :class:`ServerManager` to provide location validation and
-# listing of available servers.
-SERVER_LIST_URL = "https://raw.githubusercontent.com/qdm12/gluetun/master/internal/storage/servers.json"
+# URL of the Gluetun server catalog manifest. Provider data is stored in
+# sibling JSON files and assembled by :class:`ServerManager` into the cache
+# shape consumed by proxy2vpn.
+SERVER_LIST_URL = "https://raw.githubusercontent.com/qdm12/gluetun-servers/main/pkg/servers/manifest.json"
 
 # Default timeout (seconds) for HTTP requests to the control API.
 DEFAULT_TIMEOUT = 10

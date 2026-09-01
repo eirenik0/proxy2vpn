@@ -4,7 +4,8 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from pathlib import PurePosixPath
+from urllib.parse import quote, urlparse
 
 from proxy2vpn.common import abort
 from proxy2vpn.core import config
@@ -51,6 +52,7 @@ class ServerManager:
             return None
         return time.time() - self.cache_file.stat().st_mtime
 
+    # @lat: [[lat.md/architecture#Server Catalog]]
     async def _download_servers(self, verify: bool) -> dict[str, dict]:
         parsed = urlparse(config.SERVER_LIST_URL)
         cfg = HTTPClientConfig(
@@ -60,7 +62,39 @@ class ServerManager:
             retry=RetryPolicy(attempts=config.MAX_RETRIES),
         )
         async with HTTPClient(cfg) as client:
-            return await client.get(parsed.path)
+            manifest = await client.get(parsed.path)
+            if not isinstance(manifest, dict):
+                raise HTTPClientError("server manifest is not a JSON object")
+
+            catalog: dict[str, dict] = {}
+            manifest_version = manifest.get("version")
+            if manifest_version is not None:
+                catalog["version"] = manifest_version
+
+            manifest_dir = str(PurePosixPath(parsed.path).parent)
+            for provider, entry in manifest.items():
+                if provider == "version":
+                    continue
+                if not isinstance(entry, dict) or not isinstance(
+                    entry.get("filepath"), str
+                ):
+                    raise HTTPClientError(
+                        f"server manifest entry for {provider!r} has no filepath"
+                    )
+
+                filename = PurePosixPath(entry["filepath"]).name
+                if not filename.endswith(".json"):
+                    raise HTTPClientError(
+                        f"server manifest entry for {provider!r} is not JSON"
+                    )
+                payload = await client.get(f"{manifest_dir}/{quote(filename)}")
+                if not isinstance(payload, dict):
+                    raise HTTPClientError(
+                        f"server data for {provider!r} is not a JSON object"
+                    )
+                catalog[provider] = payload
+
+            return catalog
 
     async def _fetch_and_cache(self, verify: bool) -> None:
         data = await self._download_servers(verify)
