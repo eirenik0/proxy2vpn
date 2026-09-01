@@ -14,6 +14,16 @@ Ruff enforces its established error and Pyflakes baseline through an explicit ru
 
 `uv.lock` records the tested runtime and development dependency graph. Make targets run tools from that locked project environment, while package metadata keeps compatible major-version ranges for downstream installations.
 
+## Release Automation
+
+Releases follow one provenance chain from a CI-created version commit through its tag and reviewed GitHub Release to PyPI.
+
+The `Prepare GitHub Release` workflow is the only supported entry point. It verifies the locked project, consumes news fragments, updates package and lockfile versions, creates the release commit and tag, and opens a draft GitHub Release for review.
+
+Publishing that draft is the only PyPI trigger. The publish workflow checks that the tag belongs to the default branch and that its version matches both package metadata and the changelog; direct manual package dispatch is intentionally unavailable.
+
+Repository tests pin these workflow invariants so later CI edits cannot quietly restore a direct package-publish or local tag-creation path.
+
 # Compose Root Model
 
 The compose file is the source of truth for reusable profiles, concrete VPN services, and generated support files that travel with one workspace.

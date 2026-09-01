@@ -476,11 +476,15 @@ make changelog VERSION=x.y.z
 ### Maintainer Releases
 Maintainers can cut a release entirely from GitHub:
 
+The `Prepare GitHub Release` workflow is the only supported release entry point. Do not create tags or GitHub Releases manually, and do not publish directly to PyPI.
+
 1. Run the `Prepare GitHub Release` workflow from the Actions tab on `main`.
 2. Enter the target version without the leading `v` (for example `0.16.0`).
-3. The workflow runs checks, bumps `pyproject.toml`, builds `CHANGELOG.md`, pushes the release commit and tag, and creates a draft GitHub Release with the matching notes.
+3. The workflow runs checks, bumps `pyproject.toml` and `uv.lock`, builds `CHANGELOG.md`, pushes the release commit and tag, and creates a draft GitHub Release with the matching notes.
 4. Review the draft in GitHub Releases and click `Publish release`.
 5. Publishing the GitHub Release triggers the PyPI publish workflow.
+
+PyPI publishing accepts only a published GitHub Release, validates that its tag version matches both `pyproject.toml` and `CHANGELOG.md`, and builds from that exact tag. Repeated delivery is idempotent, but a package cannot be published ahead of its GitHub Release.
 
 Recent highlights (see CHANGELOG.md for details):
 - `vpn add` is the single compose-only service-definition command.
