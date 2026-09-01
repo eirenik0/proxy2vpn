@@ -6,6 +6,12 @@ The CLI accepts one active compose root per invocation and routes commands throu
 
 CLI libraries imported directly at runtime are declared as direct package dependencies. In particular, Click is not left implicit through Typer, so isolated `uvx` installations contain every module needed during CLI startup.
 
+# Development Verification
+
+Local and CI verification share explicit tool contracts so dependency upgrades cannot silently expand the enforced rule set.
+
+Ruff enforces its established error and Pyflakes baseline through an explicit rule selection in `pyproject.toml`. Tool releases may improve diagnostics, but adopting additional rule families remains a deliberate repository change instead of an implicit upgrade side effect.
+
 # Compose Root Model
 
 The compose file is the source of truth for reusable profiles, concrete VPN services, and generated support files that travel with one workspace.
