@@ -17,8 +17,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "click",
-    "typer",
+    "click>=8.5,<9",
+    "typer>=0.27.2,<1",
     "ruamel.yaml==0.18.14",
     "docker",
     "requests",
@@ -82,7 +82,8 @@ select = ["E4", "E7", "E9", "F"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.4.1",
+    "pytest>=9.1.1,<10",
     "towncrier",
-    "pytest-xdist"
+    "pytest-xdist>=3.8,<4",
+    "ruff>=0.16.5,<0.17",
 ]

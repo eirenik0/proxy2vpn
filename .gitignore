@@ -6,6 +6,7 @@ __pycache__/
 .idea/
 cache/
 *.lock
+!uv.lock
 dist/
 .envrc
 compose.yml

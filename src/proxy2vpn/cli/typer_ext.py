@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 import typer
+from typer.exceptions import TyperException
 
 
 T = TypeVar("T")
@@ -51,7 +52,7 @@ class HelpfulTyper(typer.Typer):
         kwargs.setdefault("standalone_mode", False)
         try:
             return super().__call__(*args, **kwargs)
-        except UsageError as exc:
+        except (UsageError, TyperException) as exc:
             self._handle_usage_error(exc)
             raise SystemExit(2)
         except FileNotFoundError as exc:
@@ -62,7 +63,7 @@ class HelpfulTyper(typer.Typer):
             # Let Typer/Click propagate the original exception so users see the real cause.
             raise
 
-    def _handle_usage_error(self, exc: UsageError) -> None:
+    def _handle_usage_error(self, exc: Any) -> None:
         """Handle usage errors with helpful messages."""
         # Handle "Missing command" error for subcommand groups
         if "Missing command" in exc.message:

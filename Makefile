@@ -16,34 +16,34 @@ help: ## Show available targets
 		@echo "  all               Run all checks (format check, lint, test)"
 
 test:
-	$(UV_PATH) uv run --with pytest,pytest-xdist pytest -n auto
+	$(UV_PATH) uv run pytest -n auto
 
 changelog-check:
-	$(UV_PATH) uv run --with towncrier towncrier check
+	$(UV_PATH) uv run towncrier check
 
 changelog:
 	@[ -n "$(VERSION)" ] || (echo "VERSION is required" && exit 1)
-	$(UV_PATH) uv run --with towncrier towncrier build --yes --version $(VERSION)
+	$(UV_PATH) uv run towncrier build --yes --version $(VERSION)
 
 changelog-draft:
-	$(UV_PATH) uv run --with towncrier towncrier build --draft
+	$(UV_PATH) uv run towncrier build --draft
 
 release:
 	@[ -n "$(VERSION)" ] || (echo "VERSION is required" && exit 1)
-	$(UV_PATH) uv run --with towncrier python scripts/bump_version.py $(VERSION)
-	$(UV_PATH) uv run --with towncrier towncrier build --yes --version $(VERSION)
+	$(UV_PATH) uv run python scripts/bump_version.py $(VERSION)
+	$(UV_PATH) uv run towncrier build --yes --version $(VERSION)
 	git commit -am "Release $(VERSION)"
 	git tag v$(VERSION)
 
 lint: ## Run Python linting (ruff + ty)
-	$(UV_PATH) uv run --with ruff ruff check src/ tests/
+	$(UV_PATH) uv run ruff check src/ tests/
 	$(UV_PATH) uvx ty check
 
 fmt: ## Format Python code with ruff
-	$(UV_PATH) uv run --with ruff ruff format src/ tests/
+	$(UV_PATH) uv run ruff format src/ tests/
 
 fmt-check: ## Check Python formatting without modifying files
-	$(UV_PATH) uv run --with ruff ruff format --check src/ tests/
+	$(UV_PATH) uv run ruff format --check src/ tests/
 
 clean: ## Clean up temporary files and caches
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

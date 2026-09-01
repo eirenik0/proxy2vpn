@@ -4,7 +4,6 @@ import pathlib
 from contextlib import contextmanager
 import pytest
 import typer
-from click.exceptions import Exit
 from typer.testing import CliRunner
 
 from proxy2vpn.adapters.compose_manager import ComposeManager
@@ -65,7 +64,7 @@ def test_profile_create_with_valid_env_file(tmp_path):
         try:
             profile_add(ctx, "test-profile", env_file)
             # Should not raise any exception
-        except Exit:
+        except typer.Exit:
             pytest.fail("Profile creation should not fail with valid env file")
 
 
@@ -100,7 +99,7 @@ def test_profile_create_fails_with_missing_vpn_service_provider(tmp_path):
 
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
-        with pytest.raises(Exit):
+        with pytest.raises(typer.Exit):
             profile_add(ctx, "test-profile", env_file)
 
 
@@ -114,7 +113,7 @@ def test_profile_create_fails_with_missing_openvpn_credentials(tmp_path):
 
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
-        with pytest.raises(Exit):
+        with pytest.raises(typer.Exit):
             profile_add(ctx, "test-profile", env_file)
 
 
@@ -134,7 +133,7 @@ def test_profile_create_fails_with_httpproxy_enabled_missing_credentials(tmp_pat
 
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
-        with pytest.raises(Exit):
+        with pytest.raises(typer.Exit):
             profile_add(ctx, "test-profile", env_file)
 
 
@@ -154,7 +153,7 @@ def test_profile_create_succeeds_without_httpproxy(tmp_path):
         try:
             profile_add(ctx, "minimal-profile", env_file)
             # Should not raise any exception
-        except Exit:
+        except typer.Exit:
             pytest.fail("Profile creation should not fail with minimal valid env file")
 
 
@@ -177,7 +176,7 @@ def test_profile_create_with_httpproxy_disabled_succeeds(tmp_path):
         try:
             profile_add(ctx, "no-proxy-profile", env_file)
             # Should not raise any exception
-        except Exit:
+        except typer.Exit:
             pytest.fail("Profile creation should not fail when HTTPPROXY=off")
 
 
@@ -190,7 +189,7 @@ def test_profile_create_fails_with_nonexistent_env_file(tmp_path):
 
     # Test profile creation should fail
     with _cli_ctx(compose_path) as ctx:
-        with pytest.raises(Exit):
+        with pytest.raises(typer.Exit):
             profile_add(ctx, "test-profile", env_file)
 
 
@@ -204,7 +203,7 @@ def test_profile_create_wireguard_without_openvpn_credentials(tmp_path):
     with _cli_ctx(compose_path) as ctx:
         try:
             profile_add(ctx, "wireguard-profile", env_file)
-        except Exit:
+        except typer.Exit:
             pytest.fail("Wireguard profile should not require OPENVPN credentials")
 
 
@@ -216,7 +215,7 @@ def test_profile_create_fails_with_invalid_vpn_type(tmp_path):
     env_file.write_text("VPN_SERVICE_PROVIDER=expressvpn\nVPN_TYPE=bad\n")
 
     with _cli_ctx(compose_path) as ctx:
-        with pytest.raises(Exit):
+        with pytest.raises(typer.Exit):
             profile_add(ctx, "bad-profile", env_file)
 
 

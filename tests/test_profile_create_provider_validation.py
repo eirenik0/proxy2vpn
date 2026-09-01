@@ -25,14 +25,14 @@ def test_profile_create_rejects_unknown_provider(tmp_path, monkeypatch):
         profile.server_manager, "ServerManager", lambda: DummyServerManager()
     )
 
-    with runner.isolated_filesystem():
-        result = runner.invoke(
-            app,
-            ["--compose-file", str(compose_path), "profile", "create", "test"],
-            input="bad\n",
-        )
-        assert result.exit_code != 0
-        assert not (compose_path.parent / "profiles" / "test.env").exists()
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["--compose-file", str(compose_path), "profile", "create", "test"],
+        input="bad\n",
+    )
+    assert result.exit_code != 0
+    assert not (compose_path.parent / "profiles" / "test.env").exists()
 
 
 def test_profile_create_accepts_supported_provider(tmp_path, monkeypatch):
@@ -47,17 +47,17 @@ def test_profile_create_accepts_supported_provider(tmp_path, monkeypatch):
         profile.server_manager, "ServerManager", lambda: DummyServerManager()
     )
 
-    with runner.isolated_filesystem():
-        result = runner.invoke(
-            app,
-            ["--compose-file", str(compose_path), "profile", "create", "test"],
-            input="prov\n\nuser\npass\nn\nn\n",
-        )
-        assert result.exit_code == 0
-        env_file = compose_path.parent / "profiles" / "test.env"
-        assert env_file.exists()
-        content = env_file.read_text()
-        assert "VPN_TYPE=openvpn" in content
-        assert "VPN_SERVICE_PROVIDER=prov" in content
-        assert "OPENVPN_USER=user" in content
-        assert "OPENVPN_PASSWORD=pass" in content
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["--compose-file", str(compose_path), "profile", "create", "test"],
+        input="prov\n\nuser\npass\nn\nn\n",
+    )
+    assert result.exit_code == 0
+    env_file = compose_path.parent / "profiles" / "test.env"
+    assert env_file.exists()
+    content = env_file.read_text()
+    assert "VPN_TYPE=openvpn" in content
+    assert "VPN_SERVICE_PROVIDER=prov" in content
+    assert "OPENVPN_USER=user" in content
+    assert "OPENVPN_PASSWORD=pass" in content
