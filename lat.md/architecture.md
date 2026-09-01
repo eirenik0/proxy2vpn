@@ -17,3 +17,9 @@ The compose root also owns generated support artifacts such as the control-serve
 Profiles define reusable container defaults, while VPN services add the per-container ports, location metadata, and effective environment overrides.
 
 [[src/proxy2vpn/core/models.py#Profile]] models the profile anchor stored in compose. [[src/proxy2vpn/core/models.py#VPNService]] models the concrete service that is materialized into compose, Docker labels, and container environment variables. The service model is responsible for derived mutations such as renaming, updating location metadata, and projecting the effective state back to compose-compatible structures.
+
+# Server Catalog
+
+The location catalog preserves one provider-keyed cache while adapting Gluetun's upstream manifest and per-provider files.
+
+[[src/proxy2vpn/adapters/server_manager.py#ServerManager#_download_servers]] downloads the official `gluetun-servers` manifest, fetches each declared sibling JSON file, and assembles the provider map used by validation, planning, and CLI listing commands.
