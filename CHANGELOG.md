@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 <!-- towncrier release notes start -->
+## [0.18.1]
+
+### Bug fixes
+
+- Declare Click as a direct runtime dependency so fresh isolated `uvx` installations can start the CLI reliably. (#1005)
+- Restore `servers update` by loading Gluetun's current manifest and assembling its per-provider server files into the existing proxy2vpn cache format. (#1006)
+- Upgrade Typer, Click, pytest, and related dependencies; adapt CLI error handling and tests to their current APIs; and track the verified `uv.lock` environment used by CI. (#1008)
+
+### Miscellaneous
+
+- Add `uvx ty check` to `make lint` and align source annotations so the new type-check step passes. (#1004)
+- Stabilize Ruff lint checks with an explicit rule selection so CI and local runs remain consistent across Ruff upgrades. (#1007)
+- Make the CI release workflow the single supported path from version commit and tag through GitHub Release to PyPI, with locked checks and release provenance validation. (#1009)
+
+
 ## [0.18.0]
 
 ### Bug fixes
