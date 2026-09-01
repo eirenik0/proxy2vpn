@@ -4,6 +4,8 @@ The CLI accepts one active compose root per invocation and routes commands throu
 
 [[src/proxy2vpn/cli/main.py#main]] stores the resolved compose file on `typer.Context`, configures logging, and mounts the `profile`, `vpn`, `servers`, `system`, `fleet`, and `agent` command groups. Command modules treat the compose file as the root for all relative state instead of depending on the shell working directory.
 
+CLI libraries imported directly at runtime are declared as direct package dependencies. In particular, Click is not left implicit through Typer, so isolated `uvx` installations contain every module needed during CLI startup.
+
 # Compose Root Model
 
 The compose file is the source of truth for reusable profiles, concrete VPN services, and generated support files that travel with one workspace.
