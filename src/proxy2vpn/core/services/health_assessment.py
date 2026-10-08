@@ -9,8 +9,7 @@ from typing import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from proxy2vpn.adapters import docker_ops, ip_utils
-from proxy2vpn.adapters.http_client import GluetunControlClient
+from proxy2vpn.adapters.gluetun_runtime import GluetunRuntime, GluetunRuntimeInterface
 from proxy2vpn.adapters.logging_utils import get_event_logger, logging_context
 from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
@@ -60,11 +59,21 @@ class HealthAssessmentService:
         probe_timeout: int = 5,
         control_api_timeout: float = 5.0,
         control_api_retry_attempts: int = 0,
+        runtime: GluetunRuntimeInterface | None = None,
     ) -> None:
         self.threshold = threshold
         self.probe_timeout = probe_timeout
         self.control_api_timeout = control_api_timeout
         self.control_api_retry_attempts = control_api_retry_attempts
+        self.runtime = (
+            runtime
+            if runtime is not None
+            else GluetunRuntime(
+                probe_timeout=probe_timeout,
+                control_api_timeout=control_api_timeout,
+                control_api_retry_attempts=control_api_retry_attempts,
+            )
+        )
 
     async def assess_service(
         self,
@@ -102,81 +111,34 @@ class HealthAssessmentService:
     ) -> HealthAssessment:
         """Collect diagnostics inside the service's logging context."""
 
-        effective_timeout = timeout or self.probe_timeout
-        container = docker_ops.get_container_by_service_name(service.name)
         assessed_at = datetime.now(timezone.utc)
-        if container is None:
-            return HealthAssessment(
-                service_name=service.name,
-                profile_name=service.profile,
-                assessed_at=assessed_at,
-                container_status="missing",
-                health_score=0,
-                health_class="missing",
-                failing_checks=["container_missing"],
-                control_api_reachable=False,
-                peer_evidence=self._peer_evidence(service, peer_assessments),
-            )
-
-        try:
-            container.reload()
-        except Exception:
-            pass
-
-        container_status = getattr(container, "status", "unknown") or "unknown"
-        container_labels = getattr(container, "labels", {}) or {}
-        has_proxy_port = isinstance(container_labels, dict) and bool(
-            container_labels.get("vpn.port")
-        )
-        if container_status != "running":
-            return HealthAssessment(
-                service_name=service.name,
-                profile_name=service.profile,
-                assessed_at=assessed_at,
-                container_status=container_status,
-                health_score=0,
-                health_class="container_stopped",
-                failing_checks=["container_not_running"],
-                control_api_reachable=False,
-                peer_evidence=self._peer_evidence(service, peer_assessments),
-            )
-
-        analyzer = DiagnosticAnalyzer()
-        direct_ip = await self._direct_ip(effective_timeout) if has_proxy_port else None
-        results = await asyncio.to_thread(
-            docker_ops.analyze_container_logs,
-            service.name,
-            lines,
-            analyzer,
-            effective_timeout,
-            direct_ip,
-        )
-        health_score = analyzer.health_score(results)
-        failing_checks = [result.check for result in results if not result.passed]
-        control_api_reachable = await self._control_api_reachable(service)
-        current_egress_ip = None
-        if has_proxy_port:
-            try:
-                current_egress_ip = await docker_ops.get_container_ip_async(
-                    container, timeout=effective_timeout
-                )
-            except Exception:
-                current_egress_ip = None
-        if current_egress_ip == "N/A":
-            current_egress_ip = None
-
+        observation = await self.runtime.inspect(service, lines=lines, timeout=timeout)
+        if observation.failure is not None:
+            raise RuntimeError(observation.failure)
+        container_status = observation.container_status
+        results = observation.results
+        if container_status == "missing":
+            health_score, health_class = 0, "missing"
+            failing_checks = ["container_missing"]
+        elif container_status != "running":
+            health_score, health_class = 0, "container_stopped"
+            failing_checks = ["container_not_running"]
+        else:
+            health_score = DiagnosticAnalyzer().health_score(results)
+            health_class = self._classify(container_status, health_score, results)
+            failing_checks = [result.check for result in results if not result.passed]
         return HealthAssessment(
             service_name=service.name,
             profile_name=service.profile,
             assessed_at=assessed_at,
             container_status=container_status,
             health_score=health_score,
-            health_class=self._classify(container_status, health_score, results),
+            health_class=health_class,
             failing_checks=failing_checks,
             results=results,
-            control_api_reachable=control_api_reachable,
-            current_egress_ip=current_egress_ip,
-            direct_ip=direct_ip,
+            control_api_reachable=observation.control_api_reachable,
+            current_egress_ip=observation.current_egress_ip,
+            direct_ip=observation.direct_ip,
             peer_evidence=self._peer_evidence(service, peer_assessments),
         )
 
@@ -260,25 +222,6 @@ class HealthAssessmentService:
         if container_status not in {"running", "unknown"}:
             return "container_stopped"
         return "degraded"
-
-    async def _direct_ip(self, timeout: int) -> str | None:
-        try:
-            return await asyncio.to_thread(ip_utils.fetch_ip, timeout=timeout)
-        except Exception:
-            return None
-
-    async def _control_api_reachable(self, service: VPNService) -> bool:
-        base_url = f"http://localhost:{service.control_port}/v1"
-        try:
-            async with GluetunControlClient(
-                base_url,
-                timeout=self.control_api_timeout,
-                retry_attempts=self.control_api_retry_attempts,
-            ) as client:
-                await client.status()
-            return True
-        except Exception:
-            return False
 
     def _peer_evidence(
         self,

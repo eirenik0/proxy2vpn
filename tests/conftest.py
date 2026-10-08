@@ -1,10 +1,33 @@
 import re
 import logging
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import structlog
 from proxy2vpn import compose_validator, docker_ops
 from proxy2vpn.adapters.logging_utils import configure_logging
+from proxy2vpn.adapters.gluetun_runtime import (
+    RuntimeActionResult,
+    RuntimeCleanupResult,
+    RuntimeEvidence,
+    RuntimeInspection,
+)
+
+
+@pytest.fixture
+def fake_gluetun_runtime():
+    """Replace the entire runtime interface without any Docker monkeypatches."""
+    return SimpleNamespace(
+        inspect=AsyncMock(return_value=RuntimeInspection("missing")),
+        collect_evidence=AsyncMock(return_value=RuntimeEvidence(None)),
+        control_status=AsyncMock(
+            return_value=RuntimeActionResult(False, "unreachable")
+        ),
+        restart_tunnel=AsyncMock(return_value=RuntimeActionResult(True)),
+        restore=AsyncMock(return_value=RuntimeActionResult(True)),
+        cleanup_orphans=AsyncMock(return_value=RuntimeCleanupResult()),
+    )
 
 
 @pytest.fixture

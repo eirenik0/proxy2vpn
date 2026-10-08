@@ -1,3 +1,4 @@
+import proxy2vpn.adapters.gluetun_runtime as gluetun_runtime
 import asyncio
 
 import proxy2vpn.core.services.health_assessment as health_assessment
@@ -42,9 +43,9 @@ def _service(name: str) -> VPNService:
 
 
 def test_assess_services_isolates_per_service_failures(monkeypatch):
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", DummyControlClient)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", DummyControlClient)
     monkeypatch.setattr(
-        health_assessment.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
         lambda name: DummyContainer(),
     )
@@ -62,7 +63,7 @@ def test_assess_services_isolates_per_service_failures(monkeypatch):
         ]
 
     monkeypatch.setattr(
-        health_assessment.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         fake_analyze,
     )
@@ -142,14 +143,14 @@ def test_assess_services_reports_progress_as_services_complete(monkeypatch):
 
 
 def test_assess_service_uses_shared_profile_peer_evidence(monkeypatch):
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", DummyControlClient)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", DummyControlClient)
     monkeypatch.setattr(
-        health_assessment.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
         lambda name: DummyContainer(),
     )
     monkeypatch.setattr(
-        health_assessment.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -284,3 +285,54 @@ def test_concurrent_checks_keep_service_context_in_tasks_and_threads(
     assert completed_contexts == [{"cycle_id": "shared-cycle"}] * 2
     assert "service_name" not in records[-1]
     assert "provider" not in records[-1]
+
+
+# @lat: [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests#Shared Assessment Runtime Results]]
+def test_assessment_accepts_runtime_results_without_docker_patches(
+    fake_gluetun_runtime,
+):
+    runtime = fake_gluetun_runtime
+    observations = {
+        "healthy": gluetun_runtime.RuntimeInspection(
+            "running",
+            results=[
+                DiagnosticResult(
+                    check="logs", passed=True, message="healthy", recommendation=""
+                )
+            ],
+            current_egress_ip="198.51.100.1",
+            direct_ip="203.0.113.1",
+            errors={"control": "unavailable"},
+        ),
+        "missing": gluetun_runtime.RuntimeInspection("missing"),
+        "stopped": gluetun_runtime.RuntimeInspection("exited"),
+        "failed": gluetun_runtime.RuntimeInspection(
+            "unknown", errors={"inspection": "Docker unavailable"}
+        ),
+    }
+
+    async def inspect(service, **kwargs):
+        return observations[service.name]
+
+    runtime.inspect.side_effect = inspect
+    assessor = health_assessment.HealthAssessmentService(runtime=runtime)
+    assessed = asyncio.run(
+        assessor.assess_services(
+            [_service(name) for name in observations], lines=11, timeout=2
+        )
+    )
+    assert assessed["healthy"].health_class == "healthy"
+    assert assessed["healthy"].health_score == 100
+    assert assessed["healthy"].current_egress_ip == "198.51.100.1"
+    assert assessed["healthy"].direct_ip == "203.0.113.1"
+    assert not assessed["healthy"].control_api_reachable
+    assert assessed["missing"].failing_checks == ["container_missing"]
+    assert assessed["stopped"].failing_checks == ["container_not_running"]
+    assert assessed["failed"].health_class == "assessment_failed"
+    assert assessed["failed"].health_score == 0
+    assert runtime.inspect.await_count == 4
+    assert all(
+        call.kwargs == {"lines": 11, "timeout": 2}
+        for call in runtime.inspect.call_args_list
+    )
+    runtime.control_status.assert_not_awaited()

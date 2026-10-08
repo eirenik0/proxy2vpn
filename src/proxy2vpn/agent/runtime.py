@@ -28,7 +28,7 @@ from proxy2vpn.agent.models import (
     ServiceSnapshot,
 )
 from proxy2vpn.agent.state import AgentStateStore
-from proxy2vpn.adapters import docker_ops
+from proxy2vpn.adapters.docker_ops import _load_env_file
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.fleet_state_manager import (
     FleetStateManager,
@@ -37,7 +37,7 @@ from proxy2vpn.adapters.fleet_state_manager import (
     RotationCriteria,
     RotationProgressCallback,
 )
-from proxy2vpn.adapters.http_client import GluetunControlClient
+from proxy2vpn.adapters.gluetun_runtime import GluetunRuntime, GluetunRuntimeInterface
 from proxy2vpn.adapters.logging_utils import (
     get_event_logger,
     get_logger,
@@ -77,6 +77,7 @@ class AgentWatchdog:
         llm_mode: str | None = None,
         store: AgentStateStore | None = None,
         settings: AgentSettings | None = None,
+        runtime: GluetunRuntimeInterface | None = None,
     ) -> None:
         self.compose_file = compose_file.expanduser().resolve()
         self.settings = settings or (
@@ -89,11 +90,21 @@ class AgentWatchdog:
         )
         self.llm_mode = (llm_mode or self.settings.llm_mode).strip() or "disabled"
         self.store = store or AgentStateStore(self.compose_file, settings=self.settings)
+        self._runtime = (
+            runtime
+            if runtime is not None
+            else GluetunRuntime(
+                probe_timeout=self.settings.probe_timeout_seconds,
+                control_api_timeout=self.settings.control_api_timeout_seconds,
+                control_api_retry_attempts=self.settings.control_api_retry_attempts,
+            )
+        )
         self._health_assessor = HealthAssessmentService(
             self.settings.health_threshold,
             probe_timeout=self.settings.probe_timeout_seconds,
             control_api_timeout=self.settings.control_api_timeout_seconds,
             control_api_retry_attempts=self.settings.control_api_retry_attempts,
+            runtime=self._runtime,
         )
         self._incident_enricher = self._build_incident_enricher()
         self._incident_investigator = self._build_incident_investigator()
@@ -161,9 +172,10 @@ class AgentWatchdog:
         updated_snapshots: list[ServiceSnapshot] = list(state.services)
         cycle_error: Exception | None = None
         try:
-            orphaned = await asyncio.to_thread(
-                docker_ops.cleanup_orphaned_containers, manager
-            )
+            cleanup = await self._runtime.cleanup_orphans(manager)
+            if cleanup.error is not None:
+                raise RuntimeError(cleanup.error)
+            orphaned = cleanup.removed
             if orphaned:
                 logger.warning(
                     "agent_orphaned_containers_removed",
@@ -797,17 +809,7 @@ class AgentWatchdog:
         return snapshot
 
     async def _control_api_reachable(self, service: VPNService) -> bool:
-        base_url = f"http://localhost:{service.control_port}/v1"
-        try:
-            async with GluetunControlClient(
-                base_url,
-                timeout=self.settings.control_api_timeout_seconds,
-                retry_attempts=self.settings.control_api_retry_attempts,
-            ) as client:
-                await client.status()
-            return True
-        except Exception:
-            return False
+        return (await self._runtime.control_status(service)).success
 
     async def _restart_tunnel(
         self,
@@ -815,7 +817,6 @@ class AgentWatchdog:
         state: AgentState,
         trigger: str = "first_unhealthy_cycle",
     ) -> str:
-        base_url = f"http://localhost:{service.control_port}/v1"
         self._persist_cycle_progress(
             state,
             service_name=service.name,
@@ -823,12 +824,9 @@ class AgentWatchdog:
             detail="contacting control API for tunnel restart",
         )
         try:
-            async with GluetunControlClient(
-                base_url,
-                timeout=self.settings.control_api_timeout_seconds,
-                retry_attempts=self.settings.control_api_retry_attempts,
-            ) as client:
-                await client.restart_tunnel()
+            restart = await self._runtime.restart_tunnel(service)
+            if not restart.success:
+                raise RuntimeError(restart.error or "Tunnel restart failed")
             self._append_action(
                 state,
                 service_name=service.name,
@@ -875,9 +873,9 @@ class AgentWatchdog:
                 detail="recreating VPN service",
             )
             profile = manager.get_profile(service.profile)
-            await asyncio.to_thread(
-                docker_ops.start_vpn_service, service, profile, True
-            )
+            restore = await self._runtime.restore(service, profile)
+            if not restore.success:
+                raise RuntimeError(restore.error or "Service recreation failed")
             self._persist_cycle_progress(
                 state,
                 service_name=service.name,
@@ -940,41 +938,6 @@ class AgentWatchdog:
             "health_score": assessment.health_score,
             "results": assessment.results,
         }
-
-    async def _analyze_service_logs(
-        self,
-        service_name: str,
-        analyzer: DiagnosticAnalyzer,
-        lines: int = 20,
-        timeout: int = 5,
-    ) -> list[DiagnosticResult]:
-        # Keep synchronous diagnostics off the watchdog event loop because
-        # connectivity checks use sync IP helpers that manage their own loop.
-        return await asyncio.to_thread(
-            docker_ops.analyze_container_logs,
-            service_name,
-            lines,
-            analyzer,
-            timeout,
-        )
-
-    async def _collect_recent_log_lines(
-        self,
-        service_name: str,
-        lines: int = 20,
-    ) -> list[str]:
-        def _read_logs() -> list[str]:
-            return [
-                str(line).strip()
-                for line in docker_ops.container_logs(
-                    service_name, lines=lines, follow=False
-                )
-            ]
-
-        try:
-            return await asyncio.to_thread(_read_logs)
-        except Exception:
-            return []
 
     def _select_log_evidence(
         self,
@@ -1923,32 +1886,13 @@ class AgentWatchdog:
         except Exception:
             service = None
 
-        container = docker_ops.get_container_by_service_name(incident.service_name)
-        container_status = (
+        evidence = await self._runtime.collect_evidence(incident.service_name)
+        container_status = evidence.container_status or (
             snapshot.container_status if snapshot is not None else "missing"
         )
-        if container is not None:
-            try:
-                container.reload()
-            except Exception:
-                pass
-            container_status = (
-                getattr(container, "status", container_status) or "unknown"
-            )
-
-        results: list[DiagnosticResult] = []
-        log_lines: list[str] = []
-        log_evidence: list[str] = []
+        results = evidence.results
+        log_evidence = self._select_log_evidence(evidence.log_lines, issues=results)
         analyzer = DiagnosticAnalyzer()
-        if container_status == "running":
-            log_lines = await self._collect_recent_log_lines(incident.service_name)
-            try:
-                results = await self._analyze_service_logs(
-                    incident.service_name, analyzer
-                )
-            except Exception:
-                results = []
-            log_evidence = self._select_log_evidence(log_lines, issues=results)
 
         health_score = (
             analyzer.health_score(results)
@@ -2033,7 +1977,7 @@ class AgentWatchdog:
         service: VPNService | None,
     ) -> list[str]:
         env_path = profile._resolve_env_path()
-        env_vars = docker_ops._load_env_file(str(env_path))
+        env_vars = _load_env_file(str(env_path))
         errors: list[str] = []
 
         if not env_path.is_file():

@@ -10,6 +10,8 @@ Health assessment wraps diagnostics with container state, control API reachabili
 
 [[src/proxy2vpn/core/services/health_assessment.py#HealthAssessmentService]] turns one [[src/proxy2vpn/core/models.py#VPNService]] into a [[src/proxy2vpn/core/services/health_assessment.py#HealthAssessment]] by checking container presence, log diagnostics, control API status, and current egress IP. Batch assessment enriches each result with same-profile peer evidence so the watchdog can distinguish isolated auth failures from broader provider issues.
 
+The assessment receives observed inputs from [[lat.md/gluetun-runtime#Gluetun Runtime]] and owns scoring, classification, and peer evidence. Injecting runtime results lets assessment tests run without Docker objects or control clients.
+
 # Provider-Scoped Rotation Memory
 
 Rotation memory is scoped by provider and location so one provider's failures do not poison candidate selection for another provider in the same city.

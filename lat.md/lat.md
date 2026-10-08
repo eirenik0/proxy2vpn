@@ -12,3 +12,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[agent]]: Watchdog cycle behavior and compose-root incident state.
 - [[logging]]: Shared event schema, secret redaction, and task-local operational context.
 - [[logging-tests]]: Regression specifications for logging compatibility, redaction, and CLI output.
+- [[gluetun-runtime]]: Gluetun runtime operations, dependency injection, and observed-state results.
+- [[gluetun-runtime-tests]]: Runtime-interface and orchestration regression specifications.
