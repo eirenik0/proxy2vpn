@@ -34,6 +34,6 @@ The runtime module reads observed state and executes requested operations; compo
 
 [[lat.md/architecture#Compose Root Model]] remains the source of desired state. Restoration receives the exact profile resolved by ComposeManager, preserving its compose-root base directory, relative env-file path, and control-auth mount. It reuses the existing forced start/recreation helper and discards the SDK return value. Existing CLI Docker helpers remain compatible.
 
-[[lat.md/agent#Watchdog Cycle]] still owns remediation timing, cooldowns, recovery rechecks, snapshots, incidents, and actions. [[lat.md/health#Health Assessment]] still owns health scores, classifications, and peer evidence. Fleet planning, compose mutations, and rotation remain outside the runtime module. Profile validation continues to use the existing env-file parser; it does not perform runtime I/O.
+[[lat.md/agent#Watchdog Cycle]] still owns runtime execution, remediation timing, recovery rechecks, snapshots, incidents, and actions; [[recovery-policy#Recovery Policy]] owns deterministic recovery choices and limits. [[lat.md/health#Health Assessment]] still owns health scores, classifications, and peer evidence. Fleet planning, compose mutations, and rotation remain outside the runtime module. Profile validation continues to use the existing env-file parser; it does not perform runtime I/O.
 
 Tests are specified in [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests]].

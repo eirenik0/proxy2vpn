@@ -2755,3 +2755,459 @@ def test_watchdog_persists_runtime_cleanup_failure(
     assert state.status.last_error == "cleanup unavailable"
     assert state.status.active_cycle_started_at is None
     runtime.inspect.assert_not_awaited()
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Runtime Actions]]
+@pytest.mark.parametrize("operation", ["restart_tunnel", "restore", "restore_recheck"])
+def test_cancelled_recovery_preserves_incident_and_failed_attempt(
+    agent_compose_file, fake_gluetun_runtime, monkeypatch, operation
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.return_value = gluetun_runtime.RuntimeInspection(
+        "running",
+        results=unhealthy_results(),
+        control_api_reachable=operation == "restart_tunnel",
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    incident = AgentIncident(
+        id="cancelled-action",
+        service_name=service.name,
+        type="rotation_required",
+        severity="medium",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        summary="Connectivity is broken",
+        recommended_action="rotate",
+    )
+    watchdog.store.append_incident(incident)
+    if operation == "restore_recheck":
+
+        async def cancel_recheck(_service):
+            raise asyncio.CancelledError()
+
+        monkeypatch.setattr(watchdog, "_evaluate_health", cancel_recheck)
+    else:
+        getattr(runtime, operation).side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(watchdog.run_once())
+    persisted = watchdog.store.read_state()
+    assert persisted.status.active_cycle_phase is None
+    assert persisted.status.active_cycle_service_name is None
+    assert persisted.status.last_error == "Cycle cancelled"
+    assert persisted.services[0].health_score < watchdog.settings.health_threshold
+    assert persisted.services[0].consecutive_failures == 1
+    assert persisted.actions[-1].result == "failed"
+    assert persisted.actions[-1].details["cancelled"] == "true"
+    assert watchdog.store.load_incidents()[0].status == "open"
+    if operation != "restart_tunnel":
+        assert not watchdog._recovery_policy.can_restore(
+            service.name, persisted.actions, utc_now()
+        )
+        assert persisted.services[0].last_action_result == "failed"
+    runtime.restart_tunnel.assert_not_awaited() if operation != "restart_tunnel" else runtime.restore.assert_not_awaited()
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Rotation Outcomes And Identity]]
+@pytest.mark.parametrize(
+    "outcome", ["success", "failure", "failure_no_metadata", "cancelled", "exception"]
+)
+def test_automatic_rotation_preserves_identity_and_does_not_invent_recovery(
+    agent_compose_file, fake_gluetun_runtime, monkeypatch, outcome
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.return_value = gluetun_runtime.RuntimeInspection(
+        "running", results=persistent_route_results()
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    final_name = "protonvpn-united-states-boston"
+    now = utc_now()
+    state = watchdog.empty_state()
+    state.services = [
+        ServiceSnapshot(
+            service_name=service.name,
+            container_status="running",
+            health_score=0,
+            consecutive_failures=2,
+            degraded_since=now - timedelta(minutes=10),
+            last_check_at=now,
+        )
+    ]
+    state.actions = [
+        ActionRecord(
+            ts=now - timedelta(minutes=1),
+            service_name=service.name,
+            action="restore",
+            trigger="automatic_remediation",
+            result="failed",
+        )
+    ]
+    watchdog.store.write_state(state)
+    watchdog.store.append_incident(
+        AgentIncident(
+            id="renamed-incident",
+            service_name=service.name,
+            type="rotation_required",
+            severity="medium",
+            created_at=now,
+            updated_at=now,
+            summary="Needs rotation",
+            recommended_action="rotate",
+        )
+    )
+
+    async def rotate(requested_name, *, state=None):
+        watchdog._persist_cycle_progress(
+            state,
+            service_name=requested_name,
+            current_live_service_name=final_name,
+            step="candidate_applied",
+        )
+        if outcome == "cancelled":
+            raise asyncio.CancelledError()
+        if outcome == "exception":
+            raise RuntimeError("rotation interrupted")
+        return SimpleNamespace(
+            success=outcome == "success",
+            errors=[] if outcome == "success" else ["candidate failed"],
+            rotation_changes=[]
+            if outcome == "failure_no_metadata"
+            else [
+                RotationChange(
+                    requested_service_name=requested_name,
+                    final_service_name=final_name,
+                    old_location="New York",
+                    new_location="Boston",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(watchdog, "_rotate_service_via_fleet", rotate)
+    if outcome in {"cancelled", "exception"}:
+        with pytest.raises(
+            asyncio.CancelledError if outcome == "cancelled" else RuntimeError
+        ):
+            asyncio.run(watchdog.run_once())
+    else:
+        asyncio.run(watchdog.run_once())
+    persisted = watchdog.store.read_state()
+    assert persisted.services[0].service_name == final_name
+    assert persisted.status.active_cycle_phase is None
+    assert persisted.status.active_cycle_service_name is None
+    recorded = persisted.actions[-1]
+    assert recorded.service_name == final_name
+    assert recorded.details["requested_service_name"] == service.name
+    assert recorded.result == ("success" if outcome == "success" else "failed")
+    existing = next(
+        i for i in watchdog.store.load_incidents() if i.id == "renamed-incident"
+    )
+    assert existing.service_name == final_name
+    assert recorded.details["final_service_name"] == final_name
+    assert existing.status == ("resolved" if outcome == "success" else "open")
+    if outcome == "success":
+        assert persisted.services[0].consecutive_failures == 0
+        assert recorded.details["exit_ip_changed"] == "unknown"
+    else:
+        assert persisted.services[0].health_score < watchdog.settings.health_threshold
+        assert persisted.services[0].consecutive_failures == 3
+    runtime.restore.assert_not_awaited()
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Manual Approval]]
+def test_manual_rotation_cancellation_retains_open_incident_and_action_identity(
+    agent_compose_file, monkeypatch
+):
+    watchdog = AgentWatchdog(agent_compose_file)
+    old_name = "protonvpn-united-states-new-york"
+    final_name = "protonvpn-united-states-boston"
+    now = utc_now()
+    state = watchdog.empty_state()
+    state.services = [
+        ServiceSnapshot(
+            service_name=old_name,
+            container_status="running",
+            health_score=0,
+            consecutive_failures=2,
+            last_check_at=now,
+        )
+    ]
+    watchdog.store.write_state(state)
+    watchdog.store.append_incident(
+        AgentIncident(
+            id="manual-cancel",
+            service_name=old_name,
+            type="rotation_exhausted",
+            severity="medium",
+            created_at=now,
+            updated_at=now,
+            summary="Needs rotation",
+            recommended_action="rotate",
+            approval_required=True,
+        )
+    )
+
+    async def rotate(service_name, *, state=None):
+        watchdog._persist_cycle_progress(
+            state, service_name=service_name, current_live_service_name=final_name
+        )
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(watchdog, "_rotate_service_via_fleet", rotate)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(watchdog.approve_incident("manual-cancel"))
+    persisted = watchdog.store.read_state()
+    assert persisted.actions[-1].trigger == "manual_approval"
+    assert persisted.actions[-1].result == "failed"
+    assert persisted.actions[-1].details["requested_service_name"] == old_name
+    assert persisted.actions[-1].details["final_service_name"] == final_name
+    assert persisted.services[0].service_name == final_name
+    incident = watchdog.store.load_incidents()[0]
+    assert incident.status == "open" and incident.service_name == final_name
+    assert incident.approval_required is True
+    assert persisted.status.active_cycle_service_name is None
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Followup Investigation Execution]]
+@pytest.mark.parametrize("first_action", ["restart_tunnel", "restore"])
+@pytest.mark.parametrize("failure", ["auth_failure", "config_error"])
+def test_followup_auth_config_evidence_creates_incident_without_more_actions(
+    agent_compose_file, fake_gluetun_runtime, first_action, failure
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.side_effect = [
+        gluetun_runtime.RuntimeInspection(
+            "running",
+            results=unhealthy_results(),
+            control_api_reachable=first_action == "restart_tunnel",
+        ),
+        gluetun_runtime.RuntimeInspection(
+            "running",
+            results=[
+                DiagnosticResult(
+                    check=failure,
+                    passed=False,
+                    persistent=True,
+                    message="Credentials or configuration failed",
+                    recommendation="Investigate",
+                )
+            ],
+        ),
+    ]
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    state = asyncio.run(watchdog.run_once())
+    incidents = watchdog.store.load_incidents()
+    assert len(state.actions) == 1
+    assert state.actions[0].action == first_action
+    assert incidents[0].type == "auth_config_failure"
+    assert incidents[0].severity == "high"
+    assert incidents[0].recommended_action == "investigate"
+    if first_action == "restart_tunnel":
+        runtime.restore.assert_not_awaited()
+    else:
+        runtime.restart_tunnel.assert_not_awaited()
+    assert state.services[0].health_score < watchdog.settings.health_threshold
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Failed Manual Rotation Live Identity]]
+@pytest.mark.parametrize("rollback_completed", [False, True])
+def test_failed_manual_rotation_without_metadata_retains_last_live_name(
+    agent_compose_file, monkeypatch, rollback_completed
+):
+    watchdog = AgentWatchdog(agent_compose_file)
+    old_name = "protonvpn-united-states-new-york"
+    candidate_name = "protonvpn-united-states-boston"
+    expected_name = old_name if rollback_completed else candidate_name
+    now = utc_now()
+    state = watchdog.empty_state()
+    state.services = [
+        ServiceSnapshot(
+            service_name=old_name,
+            container_status="running",
+            health_score=0,
+            consecutive_failures=2,
+            last_check_at=now,
+        )
+    ]
+    watchdog.store.write_state(state)
+    for incident_id in ["manual-failure", "other-open"]:
+        watchdog.store.append_incident(
+            AgentIncident(
+                id=incident_id,
+                service_name=old_name,
+                type="rotation_exhausted",
+                severity="medium",
+                created_at=now,
+                updated_at=now,
+                summary="Needs rotation",
+                recommended_action="rotate",
+            )
+        )
+
+    class FailedFleetManager:
+        def __init__(self, compose_file):
+            pass
+
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
+            progress_callback(
+                service_name,
+                "candidate_applied",
+                current_live_service_name=candidate_name,
+            )
+            if rollback_completed:
+                progress_callback(
+                    service_name,
+                    "rollback_completed",
+                    current_live_service_name=old_name,
+                )
+            return SimpleNamespace(
+                success=False,
+                errors=[
+                    "Candidates exhausted",
+                    "Rollback completed" if rollback_completed else "Rollback failed",
+                ],
+                rotation_changes=[],
+            )
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", FailedFleetManager)
+    terminal = asyncio.run(watchdog.approve_incident("manual-failure"))
+    persisted = watchdog.store.read_state()
+    action = persisted.actions[-1]
+    assert action.result == "failed"
+    assert action.trigger == "manual_approval"
+    assert action.service_name == expected_name
+    assert action.details["requested_service_name"] == old_name
+    assert action.details["final_service_name"] == expected_name
+    assert persisted.services[0].service_name == expected_name
+    assert persisted.services[0].health_score == 0
+    assert persisted.services[0].consecutive_failures == 2
+    assert persisted.status.active_cycle_service_name is None
+    assert terminal.status == "failed" and terminal.service_name == old_name
+    incidents = watchdog.store.load_incidents()
+    other = next(i for i in incidents if i.id == "other-open")
+    assert other.status == "open" and other.service_name == expected_name
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Restart Observation]]
+@pytest.mark.parametrize("request_succeeded", [True, False])
+@pytest.mark.parametrize("failure_phase", ["sleep", "cancelled_probe", "failed_probe"])
+def test_restart_recheck_failure_preserves_request_and_failed_outcome(
+    agent_compose_file,
+    fake_gluetun_runtime,
+    monkeypatch,
+    request_succeeded,
+    failure_phase,
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.return_value = gluetun_runtime.RuntimeInspection(
+        "running", results=unhealthy_results(), control_api_reachable=True
+    )
+    runtime.restart_tunnel.return_value = gluetun_runtime.RuntimeActionResult(
+        request_succeeded, None if request_succeeded else "control request failed"
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    now = utc_now()
+    watchdog.store.append_incident(
+        AgentIncident(
+            id="restart-recheck",
+            service_name=service.name,
+            type="rotation_required",
+            severity="medium",
+            created_at=now,
+            updated_at=now,
+            summary="Still unhealthy",
+            recommended_action="rotate",
+        )
+    )
+
+    async def cancelled_sleep(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    async def failed_probe(_service):
+        if failure_phase == "cancelled_probe":
+            raise asyncio.CancelledError()
+        raise RuntimeError("probe failed")
+
+    if failure_phase == "sleep":
+        monkeypatch.setattr(agent_runtime.asyncio, "sleep", cancelled_sleep)
+    else:
+        monkeypatch.setattr(watchdog, "_evaluate_health", failed_probe)
+    expected_exception = (
+        RuntimeError if failure_phase == "failed_probe" else asyncio.CancelledError
+    )
+    with pytest.raises(expected_exception):
+        asyncio.run(watchdog.run_once())
+    persisted = watchdog.store.read_state()
+    assert len(persisted.actions) == 1
+    recorded = persisted.actions[0]
+    assert recorded.action == "restart_tunnel" and recorded.result == "failed"
+    assert recorded.details["runtime_request_result"] == (
+        "success" if request_succeeded else "failed"
+    )
+    if failure_phase == "failed_probe":
+        assert recorded.details["observation"] == "failed"
+        assert recorded.details["observation_error"] == "probe failed"
+    else:
+        assert recorded.details["cancelled"] == "true"
+        assert recorded.details["observation"] == "interrupted"
+    if not request_succeeded:
+        assert recorded.details["error"] == "control request failed"
+    snapshot = persisted.services[0]
+    assert (
+        snapshot.last_action == "restart_tunnel"
+        and snapshot.last_action_result == "failed"
+    )
+    assert snapshot.health_score < watchdog.settings.health_threshold
+    assert snapshot.consecutive_failures == 1
+    assert persisted.status.active_cycle_phase is None
+    assert persisted.status.active_cycle_service_name is None
+    assert watchdog.store.load_incidents()[0].status == "open"
+    runtime.restore.assert_not_awaited()
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Isolated Auth Limit]]
+def test_cancelled_isolated_auth_recheck_preserves_one_attempt_limit(
+    shared_profile_agent_compose_file, fake_gluetun_runtime, monkeypatch
+):
+    runtime = fake_gluetun_runtime
+
+    async def inspect(service, **kwargs):
+        if service.name.endswith("boston"):
+            return gluetun_runtime.RuntimeInspection(
+                "running", results=healthy_results()
+            )
+        return gluetun_runtime.RuntimeInspection(
+            "running",
+            results=[
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    persistent=True,
+                    message="Authentication failed",
+                    recommendation="Investigate",
+                )
+            ],
+            control_api_reachable=True,
+        )
+
+    async def cancelled_probe(_service):
+        raise asyncio.CancelledError()
+
+    runtime.inspect.side_effect = inspect
+    watchdog = AgentWatchdog(shared_profile_agent_compose_file, runtime=runtime)
+    monkeypatch.setattr(watchdog, "_evaluate_health", cancelled_probe)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(watchdog.run_once())
+    incident = watchdog.store.load_incidents()[0]
+    assert incident.type == "auth_config_failure" and incident.status == "open"
+    state = asyncio.run(watchdog.run_once())
+    runtime.restart_tunnel.assert_awaited_once()
+    assert len(state.actions) == 1 and state.actions[0].result == "failed"
+    assert state.actions[0].trigger == "isolated_auth_failure"
+    runtime.restore.assert_not_awaited()

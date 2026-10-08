@@ -14,3 +14,6 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[logging-tests]]: Regression specifications for logging compatibility, redaction, and CLI output.
 - [[gluetun-runtime]]: Gluetun runtime operations, dependency injection, and observed-state results.
 - [[gluetun-runtime-tests]]: Runtime-interface and orchestration regression specifications.
+
+- [[recovery-policy]]: Pure recovery decisions, observation requirements, limits, and orchestration ownership.
+- [[recovery-policy-tests]]: Deterministic policy and interrupted-execution specifications.

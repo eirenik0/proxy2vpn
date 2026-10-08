@@ -41,3 +41,5 @@ Sensitive field names are case-insensitive and normalize punctuation, covering p
 Text matching covers scheme-based URLs with userinfo (including HTTP and SOCKS proxy credentials), sensitive key assignments with `:` or `=`, quoted values, query parameters, and Bearer or Basic authorization values. It preserves useful non-secret fields such as provider, port, and health classifications. Arbitrary unlabelled secrets cannot be inferred; callers should use sensitive structured fields for credentials and avoid logging raw payloads. This log processor does not redact CLI result data, persisted agent state, or LLM request payloads; those boundaries require their own policies.
 
 See [[lat.md/logging-tests#Logging Tests]] for contract and regression coverage.
+
+Interrupted or failed restart rechecks emit `agent_recovery_observation_failed` with the service, action, terminal result, and runtime request outcome so request acceptance is distinguishable from observed recovery.
