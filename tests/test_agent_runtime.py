@@ -1,3 +1,4 @@
+import proxy2vpn.adapters.gluetun_runtime as gluetun_runtime
 import asyncio
 from asyncio import threads as asyncio_threads
 from datetime import timedelta
@@ -236,15 +237,14 @@ def test_agent_run_once_healthy_updates_snapshots_only(
     agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, calls = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
             [
@@ -261,7 +261,7 @@ def test_agent_run_once_healthy_updates_snapshots_only(
         ),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: healthy_results(),
     )
@@ -282,7 +282,7 @@ def test_agent_run_cycle_persists_active_cycle_progress(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "cleanup_orphaned_containers",
         lambda manager: [],
     )
@@ -345,20 +345,19 @@ def test_agent_run_cycle_persists_inflight_service_progress(
     dummy_client, _calls = control_client_factory
     service = ComposeManager(agent_compose_file).list_services()[0]
 
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "cleanup_orphaned_containers",
         lambda manager: [],
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: unhealthy_results(),
     )
@@ -416,13 +415,13 @@ def test_agent_run_cycle_clears_active_cycle_state_on_setup_failure(
 
     if failure_stage == "cleanup":
         monkeypatch.setattr(
-            agent_runtime.docker_ops,
+            gluetun_runtime.docker_ops,
             "cleanup_orphaned_containers",
             fail_cleanup,
         )
     else:
         monkeypatch.setattr(
-            agent_runtime.docker_ops,
+            gluetun_runtime.docker_ops,
             "cleanup_orphaned_containers",
             lambda manager: [],
         )
@@ -443,15 +442,14 @@ def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
     agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, calls = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
             [
@@ -468,7 +466,7 @@ def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
         ),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -503,9 +501,9 @@ def test_agent_run_once_executes_sync_diagnostics_off_event_loop(
 ):
     monkeypatch.setattr(agent_runtime.asyncio, "to_thread", asyncio_threads.to_thread)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
 
     def fake_analyze_container_logs(*args, **kwargs):
@@ -514,7 +512,7 @@ def test_agent_run_once_executes_sync_diagnostics_off_event_loop(
         return healthy_results()
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         fake_analyze_container_logs,
     )
@@ -550,15 +548,14 @@ def test_agent_first_unhealthy_cycle_restarts_tunnel(
     agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, calls = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: unhealthy_results(),
     )
@@ -587,15 +584,14 @@ def test_agent_unhealthy_after_restart_triggers_restore(
     agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, calls = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: unhealthy_results(),
     )
@@ -624,7 +620,7 @@ def test_agent_unhealthy_after_restart_triggers_restore(
     async def fake_evaluate(service):
         return next(evaluations)
 
-    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    monkeypatch.setattr(gluetun_runtime.docker_ops, "start_vpn_service", fake_start)
     watchdog = AgentWatchdog(agent_compose_file)
     monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
 
@@ -641,9 +637,9 @@ def test_agent_unhealthy_after_restart_triggers_restore(
 
 def test_agent_missing_container_triggers_restore(agent_compose_file, monkeypatch):
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: None,
+        lambda name, *, strict=False: None,
     )
 
     started = {"count": 0}
@@ -659,7 +655,7 @@ def test_agent_missing_container_triggers_restore(agent_compose_file, monkeypatc
             "results": healthy_results(),
         }
 
-    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    monkeypatch.setattr(gluetun_runtime.docker_ops, "start_vpn_service", fake_start)
     watchdog = AgentWatchdog(agent_compose_file)
     monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
 
@@ -700,7 +696,7 @@ def test_agent_run_cycle_cleans_orphaned_containers(agent_compose_file, monkeypa
         )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "cleanup_orphaned_containers",
         fake_cleanup,
     )
@@ -724,15 +720,14 @@ def test_agent_persistent_auth_failure_creates_high_severity_incident(
     agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, _ = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -751,7 +746,7 @@ def test_agent_persistent_auth_failure_creates_high_severity_incident(
         start_calls["count"] += 1
         return None
 
-    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    monkeypatch.setattr(gluetun_runtime.docker_ops, "start_vpn_service", fake_start)
     watchdog = AgentWatchdog(agent_compose_file)
 
     state = asyncio.run(watchdog.run_once())
@@ -768,15 +763,14 @@ def test_agent_persistent_auth_failure_with_healthy_shared_profile_restarts_tunn
     shared_profile_agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, calls = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
             [
@@ -814,7 +808,13 @@ def test_agent_persistent_auth_failure_with_healthy_shared_profile_restarts_tunn
         }
 
     watchdog = AgentWatchdog(shared_profile_agent_compose_file)
-    monkeypatch.setattr(watchdog, "_analyze_service_logs", fake_analyze)
+
+    async def fake_evidence(service_name, **kwargs):
+        return gluetun_runtime.RuntimeEvidence(
+            "running", results=await fake_analyze(service_name, None, **kwargs)
+        )
+
+    monkeypatch.setattr(watchdog._runtime, "collect_evidence", fake_evidence)
     monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
 
     state = asyncio.run(watchdog.run_once())
@@ -833,15 +833,14 @@ def test_agent_open_auth_incident_blocks_repeated_isolated_auth_restart(
     shared_profile_agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, calls = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda service_name, analyzer, lines=20, timeout=5, direct_ip=None: (
             [
@@ -915,7 +914,13 @@ def test_agent_open_auth_incident_blocks_repeated_isolated_auth_restart(
         return healthy_results()
 
     watchdog = AgentWatchdog(shared_profile_agent_compose_file, store=store)
-    monkeypatch.setattr(watchdog, "_analyze_service_logs", fake_analyze)
+
+    async def fake_evidence(service_name, **kwargs):
+        return gluetun_runtime.RuntimeEvidence(
+            "running", results=await fake_analyze(service_name, None, **kwargs)
+        )
+
+    monkeypatch.setattr(watchdog._runtime, "collect_evidence", fake_evidence)
 
     state = asyncio.run(watchdog.run_once())
     incidents = watchdog.store.load_incidents()
@@ -929,15 +934,14 @@ def test_agent_openai_enrichment_populates_human_explanation(
     agent_compose_file, monkeypatch, control_client_factory
 ):
     dummy_client, _ = control_client_factory
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", dummy_client)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", dummy_client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", dummy_client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -987,12 +991,12 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
     )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -1011,7 +1015,7 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
         ],
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "container_logs",
         lambda *args, **kwargs: iter(
             [
@@ -1095,12 +1099,12 @@ def test_investigate_incident_uses_route_logs_to_shape_generic_action_plan(
     )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -1119,7 +1123,7 @@ def test_investigate_incident_uses_route_logs_to_shape_generic_action_plan(
         ],
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "container_logs",
         lambda *args, **kwargs: iter(
             [
@@ -1242,12 +1246,12 @@ def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeyp
     )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -1336,12 +1340,12 @@ def test_investigate_incident_deprioritizes_accountwide_issue_when_shared_profil
     )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -1434,12 +1438,12 @@ def test_investigate_incident_keeps_accountwide_suspicion_when_shared_profile_pe
     )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -1508,12 +1512,12 @@ def test_investigate_incident_handles_shared_profile_peer_probe_failure(
     )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -1608,12 +1612,12 @@ def test_investigate_incident_does_not_infer_accountwide_auth_issue_from_generic
     )
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: [
             DiagnosticResult(
@@ -1668,12 +1672,12 @@ def test_agent_restore_failure_tracks_degradation_before_rotation_incident(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: unhealthy_results(),
     )
@@ -1684,7 +1688,7 @@ def test_agent_restore_failure_tracks_degradation_before_rotation_incident(
     async def fake_control_api(service):
         return False
 
-    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    monkeypatch.setattr(gluetun_runtime.docker_ops, "start_vpn_service", fake_start)
     watchdog = AgentWatchdog(agent_compose_file)
     monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
 
@@ -1722,12 +1726,12 @@ def test_agent_restore_failure_creates_rotation_incident_after_grace_period(
         )
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: unhealthy_results(),
     )
@@ -1738,7 +1742,7 @@ def test_agent_restore_failure_creates_rotation_incident_after_grace_period(
     async def fake_control_api(service):
         return False
 
-    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    monkeypatch.setattr(gluetun_runtime.docker_ops, "start_vpn_service", fake_start)
     watchdog = AgentWatchdog(agent_compose_file, store=store)
     monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
 
@@ -1757,7 +1761,7 @@ def test_agent_tls_failure_after_restart_rotates_immediately(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "cleanup_orphaned_containers",
         lambda manager: [],
     )
@@ -1825,12 +1829,12 @@ def test_agent_persistent_route_failure_rotates_on_next_cycle_after_one_restore(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "cleanup_orphaned_containers",
         lambda manager: [],
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops, "start_vpn_service", lambda *args: None
+        gluetun_runtime.docker_ops, "start_vpn_service", lambda *args: None
     )
     service = ComposeManager(agent_compose_file).list_services()[0]
     assessment = health_assessment.HealthAssessment(
@@ -2062,7 +2066,7 @@ def test_agent_rotation_failure_clears_active_cycle_state_after_inflight_rename(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "cleanup_orphaned_containers",
         lambda manager: [],
     )
@@ -2364,12 +2368,12 @@ def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkey
     store.append_incident(failed_incident)
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: unhealthy_results(),
     )
@@ -2380,7 +2384,7 @@ def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkey
     async def fake_control_api(service):
         return False
 
-    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    monkeypatch.setattr(gluetun_runtime.docker_ops, "start_vpn_service", fake_start)
     watchdog = AgentWatchdog(agent_compose_file, store=store)
     monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
 
@@ -2451,9 +2455,9 @@ def test_investigation_context_keeps_rotation_history_after_service_rename(
     store.append_incident(incident)
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: None,
+        lambda name, *, strict=False: None,
     )
 
     watchdog = AgentWatchdog(agent_compose_file, store=store)
@@ -2478,12 +2482,12 @@ def test_degraded_since_persists_across_watchdog_restarts(
     agent_compose_file, monkeypatch
 ):
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: unhealthy_results(),
     )
@@ -2494,7 +2498,7 @@ def test_degraded_since_persists_across_watchdog_restarts(
     async def fake_control_api(service):
         return False
 
-    monkeypatch.setattr(agent_runtime.docker_ops, "start_vpn_service", fake_start)
+    monkeypatch.setattr(gluetun_runtime.docker_ops, "start_vpn_service", fake_start)
     watchdog = AgentWatchdog(agent_compose_file)
     monkeypatch.setattr(watchdog, "_control_api_reachable", fake_control_api)
 
@@ -2532,17 +2536,17 @@ def test_watchdog_logs_cycle_and_incident_context(
     log_file = tmp_path / "agent.log"
     configure_logging(log_file=log_file)
     client, _ = control_client_factory
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", client)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", client)
     monkeypatch.setattr(
-        agent_runtime.docker_ops, "cleanup_orphaned_containers", lambda _: []
+        gluetun_runtime.docker_ops, "cleanup_orphaned_containers", lambda _: []
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda _: DummyContainer(),
+        lambda _, *, strict=False: DummyContainer(),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: healthy_results(),
     )
@@ -2621,7 +2625,7 @@ def test_failed_watchdog_cycle_logs_exception_and_clears_context(
         raise RuntimeError("password=cycle-secret")
 
     monkeypatch.setattr(
-        agent_runtime.docker_ops, "cleanup_orphaned_containers", fail_cleanup
+        gluetun_runtime.docker_ops, "cleanup_orphaned_containers", fail_cleanup
     )
     with pytest.raises(RuntimeError):
         asyncio.run(watchdog.run_once())
@@ -2634,3 +2638,120 @@ def test_failed_watchdog_cycle_logs_exception_and_clears_context(
     assert records[0]["cycle_id"] == records[1]["cycle_id"]
     assert "RuntimeError" in records[1]["exception"]
     assert "cycle-secret" not in log_file.read_text()
+
+
+# @lat: [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests#Watchdog Restore Policy]]
+@pytest.mark.parametrize("initial_status", ["missing", "exited"])
+@pytest.mark.parametrize(
+    "recreation,healthy", [(True, True), (True, False), (False, False)]
+)
+def test_watchdog_restore_policy_with_runtime_results(
+    agent_compose_file, fake_gluetun_runtime, initial_status, recreation, healthy
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.side_effect = [
+        gluetun_runtime.RuntimeInspection(initial_status),
+        gluetun_runtime.RuntimeInspection(
+            "running", results=healthy_results() if healthy else unhealthy_results()
+        ),
+    ]
+    runtime.restore.return_value = gluetun_runtime.RuntimeActionResult(
+        recreation, None if recreation else "recreation failed"
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    state = asyncio.run(watchdog.run_once())
+    assert state.status.unhealthy_count == (0 if healthy else 1)
+    assert state.actions[0].action == "restore"
+    assert state.actions[0].result == ("success" if healthy else "failed")
+    if not recreation:
+        assert state.actions[0].details["error"] == "recreation failed"
+        assert runtime.inspect.await_count == 1
+    assert watchdog._health_assessor.runtime is runtime
+    runtime.restore.assert_awaited_once()
+    requested_service, profile = runtime.restore.call_args.args
+    assert requested_service.name == state.services[0].service_name
+    assert profile._base_dir == agent_compose_file.parent
+    assert profile._resolve_env_path() == agent_compose_file.parent / "env.test"
+    manager = runtime.cleanup_orphans.call_args.args[0]
+    assert manager.compose_path == agent_compose_file
+    assert watchdog.store.read_state().model_dump() == state.model_dump()
+
+
+# @lat: [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests#Watchdog Restart Policy]]
+@pytest.mark.parametrize("restart_succeeds", [True, False])
+def test_watchdog_restart_and_restore_policy_with_runtime_results(
+    agent_compose_file, fake_gluetun_runtime, restart_succeeds
+):
+    runtime = fake_gluetun_runtime
+    degraded = gluetun_runtime.RuntimeInspection(
+        "running", results=unhealthy_results(), control_api_reachable=True
+    )
+    recovered = gluetun_runtime.RuntimeInspection("running", results=healthy_results())
+    runtime.inspect.side_effect = (
+        [degraded, recovered] if restart_succeeds else [degraded, degraded, recovered]
+    )
+    runtime.restart_tunnel.return_value = gluetun_runtime.RuntimeActionResult(
+        restart_succeeds, None if restart_succeeds else "control restart failed"
+    )
+    state = asyncio.run(AgentWatchdog(agent_compose_file, runtime=runtime).run_once())
+    assert state.status.unhealthy_count == 0
+    assert state.actions[0].action == "restart_tunnel"
+    assert state.actions[0].result == ("success" if restart_succeeds else "failed")
+    runtime.restart_tunnel.assert_awaited_once()
+    if restart_succeeds:
+        runtime.restore.assert_not_awaited()
+    else:
+        assert state.actions[0].details["error"] == "control restart failed"
+        assert state.actions[1].action == "restore"
+        assert state.actions[1].result == "success"
+        runtime.restore.assert_awaited_once()
+
+
+# @lat: [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests#Investigation Runtime Evidence]]
+def test_investigation_uses_runtime_evidence_without_docker_patches(
+    agent_compose_file, fake_gluetun_runtime
+):
+    runtime = fake_gluetun_runtime
+    runtime.collect_evidence.return_value = gluetun_runtime.RuntimeEvidence(
+        "running",
+        log_lines=["ERROR TLS handshake failed"],
+        results=tls_unhealthy_results(),
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    incident = AgentIncident(
+        id="runtime-evidence",
+        service_name="protonvpn-united-states-new-york",
+        type="rotation_exhausted",
+        severity="medium",
+        status="open",
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        failure_count=2,
+        summary="Needs recovery",
+        recommended_action="investigate",
+        approval_required=False,
+    )
+    context = asyncio.run(watchdog._build_investigation_context(incident))
+    assert context.container_status == "running"
+    assert context.log_evidence == ["ERROR TLS handshake failed"]
+    assert context.issues[0]["check"] == "tls_error"
+    assert context.control_api_reachable is False
+    runtime.collect_evidence.assert_awaited_once_with(incident.service_name)
+    runtime.control_status.assert_awaited_once()
+
+
+# @lat: [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests#Watchdog Cleanup Failure]]
+def test_watchdog_persists_runtime_cleanup_failure(
+    agent_compose_file, fake_gluetun_runtime
+):
+    runtime = fake_gluetun_runtime
+    runtime.cleanup_orphans.return_value = gluetun_runtime.RuntimeCleanupResult(
+        error="cleanup unavailable"
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    with pytest.raises(RuntimeError, match="cleanup unavailable"):
+        asyncio.run(watchdog.run_once())
+    state = watchdog.store.read_state()
+    assert state.status.last_error == "cleanup unavailable"
+    assert state.status.active_cycle_started_at is None
+    runtime.inspect.assert_not_awaited()

@@ -6,6 +6,8 @@ The watchdog runs one remediation policy loop per compose root and persists prog
 
 Cycle, service, action, and incident events follow [[lat.md/logging#Operational Logging]]. Each cycle has a unique ID, concurrent checks isolate service/provider context, and incident events bind their IDs without contaminating later services.
 
+Runtime inspection, incident evidence, control requests, restoration, and orphan cleanup use [[lat.md/gluetun-runtime#Gluetun Runtime]]. The watchdog retains recovery rechecks, timing, action history, and rotation policy; its shared assessor receives the same injected runtime instance.
+
 # Incidents And State
 
 Agent state is stored next to the compose file so watchdog status, daemon metadata, and incident history move with the workspace.

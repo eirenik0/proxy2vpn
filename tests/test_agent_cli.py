@@ -1,3 +1,4 @@
+import proxy2vpn.adapters.gluetun_runtime as gluetun_runtime
 import json
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -18,7 +19,6 @@ from proxy2vpn.agent.state import AgentStateStore
 from proxy2vpn.cli.main import app
 from proxy2vpn.core import config
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
-import proxy2vpn.core.services.health_assessment as health_assessment
 import proxy2vpn.cli.commands.agent as agent_commands
 import proxy2vpn.agent.runtime as agent_runtime
 
@@ -105,15 +105,14 @@ def test_agent_run_once_cli_creates_state(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agent_runtime.asyncio, "sleep", _sleep)
     monkeypatch.setattr(agent_runtime.asyncio, "to_thread", _to_thread)
-    monkeypatch.setattr(agent_runtime, "GluetunControlClient", DummyControlClient)
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", DummyControlClient)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", DummyControlClient)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "analyze_container_logs",
         lambda *args, **kwargs: healthy_results(),
     )
@@ -174,11 +173,11 @@ def test_agent_status_and_incidents_json_are_machine_readable(
         async def status(self):
             return {"status": "running"}
 
-    monkeypatch.setattr(health_assessment, "GluetunControlClient", DummyControlClient)
+    monkeypatch.setattr(gluetun_runtime, "GluetunControlClient", DummyControlClient)
     monkeypatch.setattr(
-        agent_runtime.docker_ops,
+        gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: None,
+        lambda name, *, strict=False: None,
     )
     store.append_incident(
         AgentIncident(
