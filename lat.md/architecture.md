@@ -6,6 +6,8 @@ The CLI accepts one active compose root per invocation and routes commands throu
 
 CLI libraries imported directly at runtime are declared as direct package dependencies. In particular, Click is not left implicit through Typer, so isolated `uvx` installations contain every module needed during CLI startup.
 
+[[lat.md/logging#Operational Logging]] defines the shared file-log contract. Command result output remains separate from logs, including JSON commands and detached watchdog children.
+
 # Development Verification
 
 Local and CI verification share explicit tool contracts so dependency upgrades cannot silently expand the enforced rule set.

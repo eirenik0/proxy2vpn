@@ -1,7 +1,26 @@
 import re
+import logging
 
 import pytest
+import structlog
 from proxy2vpn import compose_validator, docker_ops
+from proxy2vpn.adapters.logging_utils import configure_logging
+
+
+@pytest.fixture
+def isolated_logging():
+    """Restore the host test runner's logging configuration after file-log tests."""
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    configuration = structlog.get_config()
+    context = structlog.contextvars.get_contextvars()
+    yield
+    configure_logging()
+    root.handlers[:] = handlers
+    root.setLevel(level)
+    structlog.configure(**configuration)
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(**context)
 
 
 class _AlwaysValidServerManager:

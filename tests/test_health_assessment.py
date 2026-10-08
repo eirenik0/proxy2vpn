@@ -196,3 +196,91 @@ def test_assess_service_uses_shared_profile_peer_evidence(monkeypatch):
     assert assessment.peer_evidence.healthy == ["protonvpn-united-states-boston"]
     assert assessment.peer_evidence.auth_config == []
     assert assessment.peer_evidence.other_unhealthy == []
+
+
+# @lat: [[lat.md/logging-tests#Logging Tests#Concurrent Service Context]]
+def test_concurrent_checks_keep_service_context_in_tasks_and_threads(
+    tmp_path, monkeypatch, isolated_logging
+):
+    import json
+    import structlog
+    from proxy2vpn.adapters.logging_utils import (
+        configure_logging,
+        get_event_logger,
+        get_logger,
+        logging_context,
+    )
+
+    log_file = tmp_path / "checks.log"
+    configure_logging(log_file=log_file)
+    assessor = health_assessment.HealthAssessmentService()
+    services = [_service("service-a"), _service("service-b")]
+    services[1].config.provider = "nordvpn"
+    completed_contexts = []
+
+    async def run_checks():
+        started = 0
+        both_started = asyncio.Event()
+
+        async def fake_assessment(service, **kwargs):
+            nonlocal started
+            started += 1
+            if started == 2:
+                both_started.set()
+            await both_started.wait()
+            get_event_logger("probe").info("async_probe")
+            await asyncio.to_thread(get_logger("thread").info, "thread_probe")
+            if service.name == "service-b":
+                raise RuntimeError("token=probe-secret")
+            return health_assessment.HealthAssessment(
+                service_name=service.name,
+                assessed_at=health_assessment.datetime.now(
+                    health_assessment.timezone.utc
+                ),
+                container_status="running",
+                health_score=100,
+                health_class="healthy",
+            )
+
+        monkeypatch.setattr(assessor, "_assess_service", fake_assessment)
+        with logging_context(cycle_id="shared-cycle"):
+            results = await assessor.assess_services(
+                services,
+                progress_callback=lambda _: completed_contexts.append(
+                    structlog.contextvars.get_contextvars()
+                ),
+            )
+            assert structlog.contextvars.get_contextvars() == {
+                "cycle_id": "shared-cycle"
+            }
+            get_logger("parent").info("batch_finished")
+        assert structlog.contextvars.get_contextvars() == {}
+        return results
+
+    assessments = asyncio.run(run_checks())
+    assert assessments["service-a"].health_class == "healthy"
+    assert assessments["service-b"].health_class == "assessment_failed"
+    records = [json.loads(line) for line in log_file.read_text().splitlines()]
+    probes = [
+        record
+        for record in records
+        if record["event"] in {"async_probe", "thread_probe"}
+    ]
+    assert len(probes) == 4
+    for record in records:
+        assert record["cycle_id"] == "shared-cycle"
+        if record["event"] != "batch_finished":
+            assert (
+                record["provider"]
+                == {"service-a": "protonvpn", "service-b": "nordvpn"}[
+                    record["service_name"]
+                ]
+            )
+    failure = next(
+        record for record in records if record["event"] == "health_assessment_failed"
+    )
+    assert failure["service_name"] == "service-b"
+    assert "probe-secret" not in log_file.read_text()
+    assert completed_contexts == [{"cycle_id": "shared-cycle"}] * 2
+    assert "service_name" not in records[-1]
+    assert "provider" not in records[-1]

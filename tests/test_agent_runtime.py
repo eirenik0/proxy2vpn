@@ -2519,3 +2519,118 @@ def test_runtime_lock_prevents_duplicate_watchdogs(agent_compose_file):
             second.acquire(timeout=0)
     finally:
         first.release()
+
+
+# @lat: [[lat.md/logging-tests#Logging Tests#Watchdog Lifecycle Context]]
+def test_watchdog_logs_cycle_and_incident_context(
+    agent_compose_file, tmp_path, monkeypatch, control_client_factory, isolated_logging
+):
+    import json
+    import structlog
+    from proxy2vpn.adapters.logging_utils import configure_logging, logging_context
+
+    log_file = tmp_path / "agent.log"
+    configure_logging(log_file=log_file)
+    client, _ = control_client_factory
+    monkeypatch.setattr(health_assessment, "GluetunControlClient", client)
+    monkeypatch.setattr(
+        agent_runtime.docker_ops, "cleanup_orphaned_containers", lambda _: []
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "get_container_by_service_name",
+        lambda _: DummyContainer(),
+    )
+    monkeypatch.setattr(
+        agent_runtime.docker_ops,
+        "analyze_container_logs",
+        lambda *args, **kwargs: healthy_results(),
+    )
+    watchdog = AgentWatchdog(agent_compose_file)
+    service_name = "protonvpn-united-states-new-york"
+    incidents = []
+    with logging_context(service_name=service_name, provider="protonvpn"):
+        arguments = dict(
+            incidents=incidents,
+            service_name=service_name,
+            incident_type="rotation_exhausted",
+            severity="medium",
+            summary="Needs recovery",
+            human_explanation=None,
+            recommended_action="rotate",
+            failure_count=2,
+        )
+        incident = watchdog._upsert_incident(**arguments)
+        assert incident is not None
+        watchdog._upsert_incident(**arguments)
+        watchdog._append_action(
+            watchdog.empty_state(),
+            service_name,
+            "restore",
+            "automatic_remediation",
+            "success",
+        )
+    asyncio.run(watchdog.run_once())
+    asyncio.run(watchdog.run_once())
+    assert structlog.contextvars.get_contextvars() == {}
+    records = [json.loads(line) for line in log_file.read_text().splitlines()]
+    lifecycle = [
+        record for record in records if record["event"].startswith("agent_incident_")
+    ]
+    assert [record["event"] for record in lifecycle] == [
+        "agent_incident_opened",
+        "agent_incident_updated",
+        "agent_incident_resolved",
+    ]
+    for record in lifecycle:
+        assert record["incident_id"] == incident.id
+        assert record["service_name"] == service_name
+        assert record["provider"] == "protonvpn"
+    cycles = [record for record in records if record["event"] == "agent_cycle_started"]
+    assert len(cycles) == 2
+    assert cycles[0]["cycle_id"] != cycles[1]["cycle_id"]
+    for record in records:
+        if "cycle_id" in record:
+            assert record["compose_path"] == str(agent_compose_file)
+        if record["event"] in {"agent_cycle_started", "agent_cycle_completed"}:
+            assert "service_name" not in record
+            assert "provider" not in record
+            assert "incident_id" not in record
+    resolved = lifecycle[-1]
+    assert resolved["cycle_id"] == cycles[0]["cycle_id"]
+    action = next(
+        record for record in records if record["event"] == "agent_action_completed"
+    )
+    assert action["action"] == "restore"
+    assert action["result"] == "success"
+
+
+# @lat: [[lat.md/logging-tests#Logging Tests#Failed Cycle Cleanup]]
+def test_failed_watchdog_cycle_logs_exception_and_clears_context(
+    agent_compose_file, tmp_path, monkeypatch, isolated_logging
+):
+    import json
+    import structlog
+    from proxy2vpn.adapters.logging_utils import configure_logging
+
+    log_file = tmp_path / "failure.log"
+    configure_logging(log_file=log_file)
+    watchdog = AgentWatchdog(agent_compose_file)
+
+    def fail_cleanup(_manager):
+        raise RuntimeError("password=cycle-secret")
+
+    monkeypatch.setattr(
+        agent_runtime.docker_ops, "cleanup_orphaned_containers", fail_cleanup
+    )
+    with pytest.raises(RuntimeError):
+        asyncio.run(watchdog.run_once())
+    assert structlog.contextvars.get_contextvars() == {}
+    records = [json.loads(line) for line in log_file.read_text().splitlines()]
+    assert [record["event"] for record in records] == [
+        "agent_cycle_started",
+        "agent_cycle_failed",
+    ]
+    assert records[0]["cycle_id"] == records[1]["cycle_id"]
+    assert "RuntimeError" in records[1]["exception"]
+    assert "cycle-secret" not in log_file.read_text()

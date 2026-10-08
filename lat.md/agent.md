@@ -4,6 +4,8 @@ The watchdog runs one remediation policy loop per compose root and persists prog
 
 [[src/proxy2vpn/agent/runtime.py#AgentWatchdog#run_cycle]] loads the compose-root state, removes orphaned containers, batch-assesses services, updates per-service snapshots, and then applies bounded remediation such as tunnel restart, service restore, or fleet rotation. The cycle uses the shared health-assessment layer from [[lat.md/health#Health Assessment]] rather than duplicating probe logic.
 
+Cycle, service, action, and incident events follow [[lat.md/logging#Operational Logging]]. Each cycle has a unique ID, concurrent checks isolate service/provider context, and incident events bind their IDs without contaminating later services.
+
 # Incidents And State
 
 Agent state is stored next to the compose file so watchdog status, daemon metadata, and incident history move with the workspace.

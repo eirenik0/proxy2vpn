@@ -38,7 +38,11 @@ from proxy2vpn.adapters.fleet_state_manager import (
     RotationProgressCallback,
 )
 from proxy2vpn.adapters.http_client import GluetunControlClient
-from proxy2vpn.adapters.logging_utils import get_logger
+from proxy2vpn.adapters.logging_utils import (
+    get_event_logger,
+    get_logger,
+    logging_context,
+)
 from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from proxy2vpn.core.services.health_assessment import (
@@ -47,6 +51,7 @@ from proxy2vpn.core.services.health_assessment import (
 )
 
 logger = get_logger(__name__)
+events = get_event_logger(__name__)
 
 
 class HealthEvaluation(TypedDict):
@@ -123,6 +128,25 @@ class AgentWatchdog:
     async def run_cycle(self, state: AgentState) -> AgentState:
         """Execute one monitoring and remediation cycle."""
 
+        with logging_context(
+            clear=True, cycle_id=uuid4().hex, compose_path=str(self.compose_file)
+        ):
+            events.info("agent_cycle_started")
+            try:
+                result = await self._run_cycle(state)
+            except Exception as exc:
+                events.exception("agent_cycle_failed", error=str(exc))
+                raise
+            events.info(
+                "agent_cycle_completed",
+                service_count=result.status.service_count,
+                unhealthy_count=result.status.unhealthy_count,
+            )
+            return result
+
+    async def _run_cycle(self, state: AgentState) -> AgentState:
+        """Perform a cycle inside the operation's logging context."""
+
         manager = ComposeManager(self.compose_file)
         progress_at = utc_now()
         state.status.compose_path = str(self.compose_file)
@@ -169,16 +193,19 @@ class AgentWatchdog:
             state.status.last_progress_at = utc_now()
             self.store.write_state(state)
             for service in services:
-                self._persist_cycle_progress(state, service_name=service.name)
-                snapshot = await self._process_service(
-                    manager=manager,
-                    service=service,
-                    previous=snapshots_by_name.get(service.name),
-                    state=state,
-                    incidents=incidents,
-                    assessment=assessments.get(service.name),
-                    assessment_map=assessments,
-                )
+                with logging_context(
+                    service_name=service.name, provider=service.provider
+                ):
+                    self._persist_cycle_progress(state, service_name=service.name)
+                    snapshot = await self._process_service(
+                        manager=manager,
+                        service=service,
+                        previous=snapshots_by_name.get(service.name),
+                        state=state,
+                        incidents=incidents,
+                        assessment=assessments.get(service.name),
+                        assessment_map=assessments,
+                    )
                 updated_snapshots.append(snapshot)
                 self._merge_persisted_snapshot(
                     state=state,
@@ -194,7 +221,6 @@ class AgentWatchdog:
                 self.store.write_state(state)
         except Exception as exc:
             state.status.last_error = str(exc)
-            logger.error("agent_cycle_failed", extra={"error": str(exc)})
             cycle_error = exc
         finally:
             final_progress_at = utc_now()
@@ -1066,6 +1092,14 @@ class AgentWatchdog:
         state.actions = state.actions[-self.settings.action_history_limit :]
         state.status.last_progress_at = utc_now()
         self.store.write_state(state)
+        events.info(
+            "agent_action_completed",
+            service_name=service_name,
+            action=action,
+            trigger=trigger,
+            result=result,
+            details=details or {},
+        )
 
     def _merge_persisted_snapshot(
         self,
@@ -1411,6 +1445,9 @@ class AgentWatchdog:
             self.store.append_incident(updated)
             incidents[:] = [item for item in incidents if item.id != updated.id]
             incidents.insert(0, updated)
+            events.bind(incident_id=updated.id, service_name=service.name).info(
+                "agent_incident_updated", incident_type=incident_type
+            )
             return updated
 
         return self._upsert_incident(
@@ -2470,6 +2507,9 @@ class AgentWatchdog:
             self.store.append_incident(updated)
             incidents[:] = [item for item in incidents if item.id != updated.id]
             incidents.insert(0, updated)
+            events.bind(incident_id=updated.id, service_name=service_name).info(
+                "agent_incident_updated", incident_type=incident_type
+            )
             return updated
 
         incident = AgentIncident(
@@ -2488,6 +2528,9 @@ class AgentWatchdog:
         )
         self.store.append_incident(incident)
         incidents.insert(0, incident)
+        events.bind(incident_id=incident.id, service_name=service_name).warning(
+            "agent_incident_opened", incident_type=incident_type, severity=severity
+        )
         return incident
 
     def _resolve_active_incidents(
@@ -2505,6 +2548,9 @@ class AgentWatchdog:
             self.store.append_incident(resolved)
             incidents.remove(incident)
             incidents.insert(0, resolved)
+            events.bind(incident_id=incident.id, service_name=service_name).info(
+                "agent_incident_resolved", incident_type=incident.type
+            )
 
     def _migrate_active_incidents(
         self,
