@@ -431,3 +431,40 @@ def test_cleared_auth_does_not_override_current_connectivity_evidence():
     assert restore.action == "restore"
     current = replace(current, progress=restore.next_progress)
     assert POLICY.decide(current, NOW).action == "rotate"
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Auth Attempt Memory]]
+@pytest.mark.parametrize(
+    "details",
+    [{"cancelled": "true"}, {"observation": "interrupted"}, {"observation": "failed"}],
+)
+@pytest.mark.parametrize("dismissed", [False, True])
+def test_interrupted_auth_attempt_is_bounded_even_when_incident_is_dismissed(
+    details, dismissed
+):
+    observation = assessment(
+        results=[check("auth_failure", persistent=True)],
+        control=True,
+        health_class="auth_config",
+        peers=PeerEvidence(healthy=["peer"]),
+    )
+    previous_attempt = action(
+        "restart_tunnel",
+        trigger="isolated_auth_failure",
+        result="failed",
+        details=details,
+    )
+    ctx = context(
+        observation=observation,
+        actions=[previous_attempt],
+        incidents=[incident(status="dismissed")] if dismissed else [],
+    )
+    decision = POLICY.decide(ctx, NOW)
+    assert (
+        decision.action == "incident"
+        and decision.incident_type == "auth_config_failure"
+    )
+    assert decision.suppressed is dismissed
+    # A later degradation episode may recover with a fresh isolated restart.
+    ctx.snapshot.degraded_since = NOW
+    assert POLICY.decide(ctx, NOW).trigger == "isolated_auth_failure"

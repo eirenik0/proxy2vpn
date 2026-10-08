@@ -3091,3 +3091,123 @@ def test_failed_manual_rotation_without_metadata_retains_last_live_name(
     incidents = watchdog.store.load_incidents()
     other = next(i for i in incidents if i.id == "other-open")
     assert other.status == "open" and other.service_name == expected_name
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Restart Observation]]
+@pytest.mark.parametrize("request_succeeded", [True, False])
+@pytest.mark.parametrize("failure_phase", ["sleep", "cancelled_probe", "failed_probe"])
+def test_restart_recheck_failure_preserves_request_and_failed_outcome(
+    agent_compose_file,
+    fake_gluetun_runtime,
+    monkeypatch,
+    request_succeeded,
+    failure_phase,
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.return_value = gluetun_runtime.RuntimeInspection(
+        "running", results=unhealthy_results(), control_api_reachable=True
+    )
+    runtime.restart_tunnel.return_value = gluetun_runtime.RuntimeActionResult(
+        request_succeeded, None if request_succeeded else "control request failed"
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    service = ComposeManager(agent_compose_file).list_services()[0]
+    now = utc_now()
+    watchdog.store.append_incident(
+        AgentIncident(
+            id="restart-recheck",
+            service_name=service.name,
+            type="rotation_required",
+            severity="medium",
+            created_at=now,
+            updated_at=now,
+            summary="Still unhealthy",
+            recommended_action="rotate",
+        )
+    )
+
+    async def cancelled_sleep(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    async def failed_probe(_service):
+        if failure_phase == "cancelled_probe":
+            raise asyncio.CancelledError()
+        raise RuntimeError("probe failed")
+
+    if failure_phase == "sleep":
+        monkeypatch.setattr(agent_runtime.asyncio, "sleep", cancelled_sleep)
+    else:
+        monkeypatch.setattr(watchdog, "_evaluate_health", failed_probe)
+    expected_exception = (
+        RuntimeError if failure_phase == "failed_probe" else asyncio.CancelledError
+    )
+    with pytest.raises(expected_exception):
+        asyncio.run(watchdog.run_once())
+    persisted = watchdog.store.read_state()
+    assert len(persisted.actions) == 1
+    recorded = persisted.actions[0]
+    assert recorded.action == "restart_tunnel" and recorded.result == "failed"
+    assert recorded.details["runtime_request_result"] == (
+        "success" if request_succeeded else "failed"
+    )
+    if failure_phase == "failed_probe":
+        assert recorded.details["observation"] == "failed"
+        assert recorded.details["observation_error"] == "probe failed"
+    else:
+        assert recorded.details["cancelled"] == "true"
+        assert recorded.details["observation"] == "interrupted"
+    if not request_succeeded:
+        assert recorded.details["error"] == "control request failed"
+    snapshot = persisted.services[0]
+    assert (
+        snapshot.last_action == "restart_tunnel"
+        and snapshot.last_action_result == "failed"
+    )
+    assert snapshot.health_score < watchdog.settings.health_threshold
+    assert snapshot.consecutive_failures == 1
+    assert persisted.status.active_cycle_phase is None
+    assert persisted.status.active_cycle_service_name is None
+    assert watchdog.store.load_incidents()[0].status == "open"
+    runtime.restore.assert_not_awaited()
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Isolated Auth Limit]]
+def test_cancelled_isolated_auth_recheck_preserves_one_attempt_limit(
+    shared_profile_agent_compose_file, fake_gluetun_runtime, monkeypatch
+):
+    runtime = fake_gluetun_runtime
+
+    async def inspect(service, **kwargs):
+        if service.name.endswith("boston"):
+            return gluetun_runtime.RuntimeInspection(
+                "running", results=healthy_results()
+            )
+        return gluetun_runtime.RuntimeInspection(
+            "running",
+            results=[
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    persistent=True,
+                    message="Authentication failed",
+                    recommendation="Investigate",
+                )
+            ],
+            control_api_reachable=True,
+        )
+
+    async def cancelled_probe(_service):
+        raise asyncio.CancelledError()
+
+    runtime.inspect.side_effect = inspect
+    watchdog = AgentWatchdog(shared_profile_agent_compose_file, runtime=runtime)
+    monkeypatch.setattr(watchdog, "_evaluate_health", cancelled_probe)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(watchdog.run_once())
+    incident = watchdog.store.load_incidents()[0]
+    assert incident.type == "auth_config_failure" and incident.status == "open"
+    state = asyncio.run(watchdog.run_once())
+    runtime.restart_tunnel.assert_awaited_once()
+    assert len(state.actions) == 1 and state.actions[0].result == "failed"
+    assert state.actions[0].trigger == "isolated_auth_failure"
+    runtime.restore.assert_not_awaited()

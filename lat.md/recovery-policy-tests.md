@@ -61,3 +61,15 @@ Restart and restore rechecks reporting persistent auth/config failure persist a 
 ## Failed Manual Rotation Live Identity
 
 Failed approved rotations with omitted metadata use the last live progress name for snapshots, actions, and other open incidents; a successful rollback restores the requested identity.
+
+## Interrupted Restart Observation
+
+Cancellation during post-restart delay/probing or a probe error records one failed action with the runtime request outcome, preserves unhealthy snapshots and open incidents, and clears progress without further remediation.
+
+## Interrupted Isolated Auth Limit
+
+An interrupted isolated-auth recheck persists the investigation required by the last known auth evidence, so restarting the watchdog cannot repeat the isolated restart without observing recovery.
+
+## Interrupted Auth Attempt Memory
+
+Cancelled runtime requests and interrupted/failed rechecks consume the isolated-auth attempt for the current degradation episode, even while dismissal suppresses incidents; a later episode permits a fresh attempt.

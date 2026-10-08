@@ -386,6 +386,20 @@ class RecoveryPolicy:
 
     def _isolated_auth_restart(self, context: RecoveryContext) -> bool:
         assessment = context.assessment
+        # An interrupted attempt still consumes the single isolated restart for
+        # this degradation episode, even if dismissal suppresses its incident.
+        if context.snapshot.degraded_since is not None and any(
+            action.action == "restart_tunnel"
+            and action.trigger == "isolated_auth_failure"
+            and action_matches_service(action, context.service.name)
+            and action.ts >= context.snapshot.degraded_since
+            and (
+                action.details.get("cancelled") == "true"
+                or action.details.get("observation") in {"interrupted", "failed"}
+            )
+            for action in context.actions
+        ):
+            return False
         return bool(
             assessment.control_api_reachable
             and not any(

@@ -601,8 +601,14 @@ class AgentWatchdog:
                 detail=f"starting {decision.action}: {decision.reason}",
             )
             if decision.action == "restart_tunnel":
+                previous_action = state.actions[-1] if state.actions else None
                 result = await self._restart_tunnel(
                     service, state, trigger=decision.trigger
+                )
+                request_action = (
+                    state.actions[-1]
+                    if state.actions and state.actions[-1] is not previous_action
+                    else None
                 )
                 snapshot.last_action = "restart_tunnel"
                 snapshot.last_action_result = result
@@ -613,8 +619,43 @@ class AgentWatchdog:
                     detail="waiting before post-restart health check",
                 )
                 assert decision.observation is not None
-                await asyncio.sleep(decision.observation.delay_seconds)
-                health = await self._evaluate_health(service)
+                try:
+                    await asyncio.sleep(decision.observation.delay_seconds)
+                    health = await self._evaluate_health(service)
+                except (asyncio.CancelledError, Exception) as exc:
+                    self._record_restart_recheck_failure(
+                        state,
+                        service,
+                        decision.trigger,
+                        result,
+                        request_action,
+                        exc,
+                    )
+                    # Persist any investigation required by the last known evidence.
+                    # This also prevents another isolated-auth restart after interruption.
+                    interrupted = self._recovery_policy.decide(
+                        replace(
+                            context,
+                            actions=state.actions,
+                            progress=decision.next_progress,
+                        ),
+                        utc_now(),
+                    )
+                    if (
+                        interrupted.incident_type == "auth_config_failure"
+                        and not interrupted.suppressed
+                    ):
+                        self._upsert_incident(
+                            incidents,
+                            service.name,
+                            interrupted.incident_type or "auth_config_failure",
+                            "high",
+                            interrupted.reason,
+                            None,
+                            "investigate",
+                            snapshot.consecutive_failures,
+                        )
+                    raise
                 self._persist_cycle_progress(
                     state,
                     service_name=service.name,
@@ -643,6 +684,42 @@ class AgentWatchdog:
                 context, results=health["results"], progress=decision.next_progress
             )
         raise RuntimeError("Recovery policy exceeded the bounded action sequence")
+
+    def _record_restart_recheck_failure(
+        self,
+        state: AgentState,
+        service: VPNService,
+        trigger: str,
+        request_result: str,
+        request_action: ActionRecord | None,
+        error: BaseException,
+    ) -> None:
+        cancelled = isinstance(error, asyncio.CancelledError)
+        details = {
+            "runtime_request_result": request_result,
+            "observation": "interrupted" if cancelled else "failed",
+        }
+        if cancelled:
+            details["cancelled"] = "true"
+        else:
+            details["observation_error"] = str(error)
+        self._update_snapshot_action(state, service.name, "restart_tunnel", "failed")
+        if request_action is not None:
+            request_action.result = "failed"
+            request_action.details.update(details)
+            state.status.last_progress_at = utc_now()
+            self.store.write_state(state)
+        else:
+            self._append_action(
+                state, service.name, "restart_tunnel", trigger, "failed", details
+            )
+        events.warning(
+            "agent_recovery_observation_failed",
+            service_name=service.name,
+            action="restart_tunnel",
+            result="failed",
+            details=details,
+        )
 
     def _record_recovery_incident(
         self,
