@@ -18,6 +18,10 @@ Runtime inspection forwards log limits, probe timeouts, direct-IP evidence, cont
 
 Inspection and diagnostic failures remain distinguishable from missing containers, including exceptions with empty messages that must still mark an incomplete assessment.
 
+## Strict Docker Enumeration
+
+The actual Docker lookup path distinguishes failed enumeration from an absent container, yields failed assessments during daemon outages, and preserves tolerant lookup for existing CLI callers.
+
 ## Partial Probe Failures
 
 Direct-IP, control, and egress failures expose error text while retaining successful diagnostics so optional probes do not erase useful health evidence.

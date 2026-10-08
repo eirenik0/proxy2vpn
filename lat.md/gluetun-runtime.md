@@ -10,6 +10,8 @@ Six operations provide runtime health inputs, incident evidence, control reachab
 
 `inspect(service, lines, timeout)` returns [[src/proxy2vpn/adapters/gluetun_runtime.py#RuntimeInspection]] with container status, diagnostic results, control reachability, direct IP, egress IP, and errors keyed by operation. Missing and stopped containers skip runtime probes. Inspection or diagnostic failure makes the result incomplete; health assessment retains the existing failed-assessment behavior. Optional direct-IP, control, refresh, and egress failures preserve other available evidence.
 
+Runtime lookup uses the strict option of [[src/proxy2vpn/adapters/docker_ops.py#get_container_by_service_name]] so Docker enumeration failures produce an incomplete observation and `assessment_failed`, rather than masquerading as `container_missing`. Existing CLI/helper callers retain tolerant lookup by default.
+
 `collect_evidence(service_name, lines, timeout)` returns [[src/proxy2vpn/adapters/gluetun_runtime.py#RuntimeEvidence]] with observed status, stripped recent log lines, diagnostic results, and independent errors. An absent live container has a `None` evidence status so investigations retain their persisted snapshot fallback. Log failure does not discard successful diagnostics, and diagnostic failure does not discard readable logs.
 
 `control_status(service)`, `restart_tunnel(service)`, and `restore(service, profile)` return [[src/proxy2vpn/adapters/gluetun_runtime.py#RuntimeActionResult]] with `success` and optional error text. Success means the runtime request completed; it does not claim that service health has recovered. The watchdog still performs delayed rechecks and decides the persisted action outcome.

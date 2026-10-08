@@ -109,7 +109,7 @@ def test_agent_run_once_cli_creates_state(tmp_path, monkeypatch):
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -177,7 +177,7 @@ def test_agent_status_and_incidents_json_are_machine_readable(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: None,
+        lambda name, *, strict=False: None,
     )
     store.append_incident(
         AgentIncident(

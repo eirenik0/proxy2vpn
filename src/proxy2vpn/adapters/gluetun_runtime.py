@@ -102,7 +102,9 @@ class GluetunRuntime:
         self._direct_ip_fetcher = direct_ip_fetcher
 
     def _container(self, service_name: str) -> tuple[Any, str, dict[str, str]]:
-        container = self._docker.get_container_by_service_name(service_name)
+        container = self._docker.get_container_by_service_name(
+            service_name, strict=True
+        )
         if container is None:
             return None, "missing", {}
         errors: dict[str, str] = {}

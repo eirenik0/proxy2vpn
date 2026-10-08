@@ -241,7 +241,7 @@ def test_agent_run_once_healthy_updates_snapshots_only(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -354,7 +354,7 @@ def test_agent_run_cycle_persists_inflight_service_progress(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -446,7 +446,7 @@ def test_agent_treats_confirmed_connectivity_as_healthy_despite_stale_auth_logs(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -503,7 +503,7 @@ def test_agent_run_once_executes_sync_diagnostics_off_event_loop(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
 
     def fake_analyze_container_logs(*args, **kwargs):
@@ -552,7 +552,7 @@ def test_agent_first_unhealthy_cycle_restarts_tunnel(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -588,7 +588,7 @@ def test_agent_unhealthy_after_restart_triggers_restore(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -639,7 +639,7 @@ def test_agent_missing_container_triggers_restore(agent_compose_file, monkeypatc
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: None,
+        lambda name, *, strict=False: None,
     )
 
     started = {"count": 0}
@@ -724,7 +724,7 @@ def test_agent_persistent_auth_failure_creates_high_severity_incident(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -767,7 +767,7 @@ def test_agent_persistent_auth_failure_with_healthy_shared_profile_restarts_tunn
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -837,7 +837,7 @@ def test_agent_open_auth_incident_blocks_repeated_isolated_auth_restart(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -938,7 +938,7 @@ def test_agent_openai_enrichment_populates_human_explanation(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -993,7 +993,7 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1101,7 +1101,7 @@ def test_investigate_incident_uses_route_logs_to_shape_generic_action_plan(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1248,7 +1248,7 @@ def test_openai_investigation_replaces_fallback_plan(agent_compose_file, monkeyp
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1342,7 +1342,7 @@ def test_investigate_incident_deprioritizes_accountwide_issue_when_shared_profil
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1440,7 +1440,7 @@ def test_investigate_incident_keeps_accountwide_suspicion_when_shared_profile_pe
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1514,7 +1514,7 @@ def test_investigate_incident_handles_shared_profile_peer_probe_failure(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1614,7 +1614,7 @@ def test_investigate_incident_does_not_infer_accountwide_auth_issue_from_generic
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1674,7 +1674,7 @@ def test_agent_restore_failure_tracks_degradation_before_rotation_incident(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -1728,7 +1728,7 @@ def test_agent_restore_failure_creates_rotation_incident_after_grace_period(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -2370,7 +2370,7 @@ def test_failed_incident_allows_new_rotation_incident(agent_compose_file, monkey
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -2457,7 +2457,7 @@ def test_investigation_context_keeps_rotation_history_after_service_rename(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: None,
+        lambda name, *, strict=False: None,
     )
 
     watchdog = AgentWatchdog(agent_compose_file, store=store)
@@ -2484,7 +2484,7 @@ def test_degraded_since_persists_across_watchdog_restarts(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer("running"),
+        lambda name, *, strict=False: DummyContainer("running"),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
@@ -2543,7 +2543,7 @@ def test_watchdog_logs_cycle_and_incident_context(
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda _: DummyContainer(),
+        lambda _, *, strict=False: DummyContainer(),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,

@@ -51,7 +51,8 @@ class Backend:
         if operation in self.failures:
             raise RuntimeError(self.failures[operation])
 
-    def get_container_by_service_name(self, name):
+    def get_container_by_service_name(self, name, *, strict=False):
+        assert strict is True
         self.record("inspection", name)
         return self.container
 
@@ -329,3 +330,34 @@ def test_cancellation_is_propagated_and_control_clients_close(monkeypatch, opera
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(getattr(adapter, operation)(*arguments))
     assert all(client.closed for client in clients)
+
+
+# @lat: [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests#Strict Docker Enumeration]]
+@pytest.mark.parametrize("outage", [False, True])
+def test_actual_lookup_distinguishes_docker_outage_from_absence(monkeypatch, outage):
+    from proxy2vpn.adapters import docker_ops
+    from proxy2vpn.core.services.health_assessment import HealthAssessmentService
+
+    def enumerate_containers(all=False):
+        assert all is True
+        if outage:
+            raise RuntimeError("Docker daemon unavailable")
+        return []
+
+    monkeypatch.setattr(docker_ops, "get_vpn_containers", enumerate_containers)
+    adapter = GluetunRuntime()
+    observation = asyncio.run(adapter.inspect(service()))
+    assert observation.container_status == ("unknown" if outage else "missing")
+    assert observation.failure == ("Docker daemon unavailable" if outage else None)
+    assessment = asyncio.run(
+        HealthAssessmentService(runtime=adapter).assess_services([service()])
+    )["vpn"]
+    assert assessment.health_class == ("assessment_failed" if outage else "missing")
+    assert assessment.failing_checks == (
+        ["assessment_error"] if outage else ["container_missing"]
+    )
+    # Keep the historical tolerant behavior for existing CLI/helper callers.
+    assert docker_ops.get_container_by_service_name("vpn") is None
+    if outage:
+        with pytest.raises(RuntimeError, match="Docker daemon unavailable"):
+            docker_ops.get_container_by_service_name("vpn", strict=True)

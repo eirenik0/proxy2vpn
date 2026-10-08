@@ -435,8 +435,10 @@ def get_vpn_containers(all: bool = False) -> list[Container]:
         raise RuntimeError(f"Failed to list VPN containers: {exc}") from exc
 
 
-def get_container_by_service_name(service_name: str) -> Container | None:
-    """Get container by service name"""
+def get_container_by_service_name(
+    service_name: str, *, strict: bool = False
+) -> Container | None:
+    """Find a container; optionally distinguish enumeration failure from absence."""
     try:
         containers = get_vpn_containers(all=True)
         for container in containers:
@@ -444,6 +446,8 @@ def get_container_by_service_name(service_name: str) -> Container | None:
                 return container
         return None
     except RuntimeError:
+        if strict:
+            raise
         return None
 
 

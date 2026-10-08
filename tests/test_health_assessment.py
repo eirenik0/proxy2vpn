@@ -47,7 +47,7 @@ def test_assess_services_isolates_per_service_failures(monkeypatch):
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer(),
+        lambda name, *, strict=False: DummyContainer(),
     )
 
     def fake_analyze(name, lines=20, analyzer=None, timeout=5, direct_ip=None):
@@ -147,7 +147,7 @@ def test_assess_service_uses_shared_profile_peer_evidence(monkeypatch):
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
         "get_container_by_service_name",
-        lambda name: DummyContainer(),
+        lambda name, *, strict=False: DummyContainer(),
     )
     monkeypatch.setattr(
         gluetun_runtime.docker_ops,
