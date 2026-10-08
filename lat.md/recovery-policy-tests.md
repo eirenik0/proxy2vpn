@@ -57,3 +57,7 @@ New persistent auth/config failures after restart or restore request investigati
 ## Followup Investigation Execution
 
 Restart and restore rechecks reporting persistent auth/config failure persist a high-severity investigation incident without executing another recovery action.
+
+## Failed Manual Rotation Live Identity
+
+Failed approved rotations with omitted metadata use the last live progress name for snapshots, actions, and other open incidents; a successful rollback restores the requested identity.

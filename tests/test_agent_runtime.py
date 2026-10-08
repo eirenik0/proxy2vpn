@@ -2809,7 +2809,9 @@ def test_cancelled_recovery_preserves_incident_and_failed_attempt(
 
 
 # @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Rotation Outcomes And Identity]]
-@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled", "exception"])
+@pytest.mark.parametrize(
+    "outcome", ["success", "failure", "failure_no_metadata", "cancelled", "exception"]
+)
 def test_automatic_rotation_preserves_identity_and_does_not_invent_recovery(
     agent_compose_file, fake_gluetun_runtime, monkeypatch, outcome
 ):
@@ -2869,7 +2871,9 @@ def test_automatic_rotation_preserves_identity_and_does_not_invent_recovery(
         return SimpleNamespace(
             success=outcome == "success",
             errors=[] if outcome == "success" else ["candidate failed"],
-            rotation_changes=[
+            rotation_changes=[]
+            if outcome == "failure_no_metadata"
+            else [
                 RotationChange(
                     requested_service_name=requested_name,
                     final_service_name=final_name,
@@ -3003,3 +3007,87 @@ def test_followup_auth_config_evidence_creates_incident_without_more_actions(
     else:
         runtime.restart_tunnel.assert_not_awaited()
     assert state.services[0].health_score < watchdog.settings.health_threshold
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Failed Manual Rotation Live Identity]]
+@pytest.mark.parametrize("rollback_completed", [False, True])
+def test_failed_manual_rotation_without_metadata_retains_last_live_name(
+    agent_compose_file, monkeypatch, rollback_completed
+):
+    watchdog = AgentWatchdog(agent_compose_file)
+    old_name = "protonvpn-united-states-new-york"
+    candidate_name = "protonvpn-united-states-boston"
+    expected_name = old_name if rollback_completed else candidate_name
+    now = utc_now()
+    state = watchdog.empty_state()
+    state.services = [
+        ServiceSnapshot(
+            service_name=old_name,
+            container_status="running",
+            health_score=0,
+            consecutive_failures=2,
+            last_check_at=now,
+        )
+    ]
+    watchdog.store.write_state(state)
+    for incident_id in ["manual-failure", "other-open"]:
+        watchdog.store.append_incident(
+            AgentIncident(
+                id=incident_id,
+                service_name=old_name,
+                type="rotation_exhausted",
+                severity="medium",
+                created_at=now,
+                updated_at=now,
+                summary="Needs rotation",
+                recommended_action="rotate",
+            )
+        )
+
+    class FailedFleetManager:
+        def __init__(self, compose_file):
+            pass
+
+        async def rotate_service(
+            self, service_name, config_obj, progress_callback=None
+        ):
+            progress_callback(
+                service_name,
+                "candidate_applied",
+                current_live_service_name=candidate_name,
+            )
+            if rollback_completed:
+                progress_callback(
+                    service_name,
+                    "rollback_completed",
+                    current_live_service_name=old_name,
+                )
+            return SimpleNamespace(
+                success=False,
+                errors=[
+                    "Candidates exhausted",
+                    "Rollback completed" if rollback_completed else "Rollback failed",
+                ],
+                rotation_changes=[],
+            )
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(agent_runtime, "FleetStateManager", FailedFleetManager)
+    terminal = asyncio.run(watchdog.approve_incident("manual-failure"))
+    persisted = watchdog.store.read_state()
+    action = persisted.actions[-1]
+    assert action.result == "failed"
+    assert action.trigger == "manual_approval"
+    assert action.service_name == expected_name
+    assert action.details["requested_service_name"] == old_name
+    assert action.details["final_service_name"] == expected_name
+    assert persisted.services[0].service_name == expected_name
+    assert persisted.services[0].health_score == 0
+    assert persisted.services[0].consecutive_failures == 2
+    assert persisted.status.active_cycle_service_name is None
+    assert terminal.status == "failed" and terminal.service_name == old_name
+    incidents = watchdog.store.load_incidents()
+    other = next(i for i in incidents if i.id == "other-open")
+    assert other.status == "open" and other.service_name == expected_name

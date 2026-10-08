@@ -342,6 +342,7 @@ class AgentWatchdog:
             raise KeyError(f"Incident '{incident_id}' not found")
         decision = self._recovery_policy.manual_rotation(incident, approved=True)
         state = self.store.read_state() or self.empty_state()
+        self._inflight_service_names.pop(incident.service_name, None)
         try:
             result = await self._rotate_service_via_fleet(
                 incident.service_name, state=state
@@ -387,7 +388,7 @@ class AgentWatchdog:
         )
         self.store.write_state(state)
         final_service_name = action_details.get("final_service_name")
-        if result.success and final_service_name not in {None, incident.service_name}:
+        if final_service_name not in {None, incident.service_name}:
             self._migrate_active_incidents(
                 old_service_name=incident.service_name,
                 new_service_name=final_service_name,
@@ -744,25 +745,22 @@ class AgentWatchdog:
             result="success" if rotate_result.success else "failed",
             details=action_details,
         )
-        if rotate_result.rotation_changes:
-            change = rotate_result.rotation_changes[0]
-            snapshot.service_name = change.final_service_name
-            if rotate_result.success:
-                snapshot.container_status = "running"
-                snapshot.health_score = self.settings.health_threshold
-                snapshot.consecutive_failures = 0
-                snapshot.degraded_since = None
-            self._migrate_active_incidents(
-                old_service_name=service.name,
-                new_service_name=change.final_service_name,
-            )
+        final_service_name = action_details.get("final_service_name", service.name)
+        snapshot.service_name = final_service_name
+        if rotate_result.rotation_changes and rotate_result.success:
+            snapshot.container_status = "running"
+            snapshot.health_score = self.settings.health_threshold
+            snapshot.consecutive_failures = 0
+            snapshot.degraded_since = None
+        if final_service_name != service.name:
+            self._migrate_active_incidents(service.name, final_service_name)
             for incident in incidents:
                 if incident.service_name == service.name and incident.status not in {
                     "resolved",
                     "dismissed",
                     "failed",
                 }:
-                    incident.service_name = change.final_service_name
+                    incident.service_name = final_service_name
         if rotate_result.success:
             self._resolve_active_incidents(snapshot.service_name, incidents)
             return snapshot
@@ -1155,39 +1153,10 @@ class AgentWatchdog:
         requested_service_name: str,
         result: Any,
     ) -> dict[str, str]:
-        details = {
-            "incident_id": incident_id,
-            "requested_service_name": requested_service_name,
-            "purpose": "repair_connectivity",
-            "exit_ip_changed": "unknown",
-        }
-        errors = [
-            error.strip()
-            for error in getattr(result, "errors", [])
-            if isinstance(error, str) and error.strip()
-        ]
-        if errors:
-            details["errors"] = " | ".join(errors)
-
-        rotation_changes = getattr(result, "rotation_changes", []) or []
-        if not rotation_changes:
-            return details
-
-        change = rotation_changes[0]
-        details["final_service_name"] = getattr(
-            change,
-            "final_service_name",
-            requested_service_name,
+        details = self._build_rotation_action_details_from_result(
+            requested_service_name, result
         )
-        details["old_location"] = getattr(change, "old_location", "")
-        details["new_location"] = getattr(change, "new_location", "")
-
-        candidate_locations = getattr(change, "candidate_locations", []) or []
-        attempted_locations = getattr(change, "attempted_locations", []) or []
-        if candidate_locations:
-            details["candidate_locations"] = ", ".join(candidate_locations)
-        if attempted_locations:
-            details["attempted_locations"] = ", ".join(attempted_locations)
+        details["incident_id"] = incident_id
         return details
 
     def _build_rotation_action_details_from_result(
@@ -1208,6 +1177,9 @@ class AgentWatchdog:
 
         rotation_changes = getattr(result, "rotation_changes", []) or []
         if not rotation_changes:
+            details["final_service_name"] = self._inflight_service_names.get(
+                requested_service_name, requested_service_name
+            )
             return details
 
         change = rotation_changes[0]
