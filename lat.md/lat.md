@@ -10,3 +10,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[health]]: Diagnostics, normalized health assessment, and provider-scoped rotation memory.
 - [[fleet]]: Deployment planning, slot allocation, and rotation execution.
 - [[agent]]: Watchdog cycle behavior and compose-root incident state.
+- [[logging]]: Shared event schema, secret redaction, and task-local operational context.
+- [[logging-tests]]: Regression specifications for logging compatibility, redaction, and CLI output.

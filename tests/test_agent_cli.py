@@ -2,6 +2,7 @@ import json
 from contextlib import AbstractContextManager
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from proxy2vpn.agent.config import AgentSettings
@@ -127,7 +128,11 @@ def test_agent_run_once_cli_creates_state(tmp_path, monkeypatch):
     assert AgentStateStore(compose_file).state_file.exists()
 
 
-def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypatch):
+# @lat: [[lat.md/logging-tests#Logging Tests#Machine Readable CLI Output]]
+@pytest.mark.parametrize("file_logging", [False, True])
+def test_agent_status_and_incidents_json_are_machine_readable(
+    tmp_path, monkeypatch, file_logging, isolated_logging
+):
     compose_file = _write_agent_compose(tmp_path)
     store = AgentStateStore(compose_file)
     state = AgentState(
@@ -192,12 +197,16 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypa
     )
 
     runner = CliRunner()
+    log_file = tmp_path / "commands.log"
+    global_options = ["--compose-file", str(compose_file)]
+    if file_logging:
+        global_options.extend(["--log-file", str(log_file)])
     status_result = runner.invoke(
         app,
-        ["--compose-file", str(compose_file), "agent", "status", "--json", "--live"],
+        [*global_options, "agent", "status", "--json", "--live"],
     )
     incidents_result = runner.invoke(
-        app, ["--compose-file", str(compose_file), "agent", "incidents", "--json"]
+        app, [*global_options, "agent", "incidents", "--json"]
     )
 
     assert status_result.exit_code == 0
@@ -233,6 +242,11 @@ def test_agent_status_and_incidents_json_are_machine_readable(tmp_path, monkeypa
     assert status_payload["daemon"]["running"] is False
     assert set(incidents_payload.keys()) == {"incidents"}
     assert incidents_payload["incidents"][0]["recommended_action"] == "rotate"
+    if file_logging:
+        records = [json.loads(line) for line in log_file.read_text().splitlines()]
+        assert any(
+            record["event"] == "health_assessment_completed" for record in records
+        )
 
 
 def test_agent_status_live_shows_health_analysis_status_bar(tmp_path, monkeypatch):
@@ -492,6 +506,8 @@ def test_agent_run_daemon_spawns_detached_child(tmp_path, monkeypatch):
     assert store.read_daemon_pid() is None
     assert captured["command"][:3] == [agent_commands.sys.executable, "-m", "proxy2vpn"]
     assert "--daemon-child" in captured["command"]
+    log_option = captured["command"].index("--log-file")
+    assert captured["command"][log_option + 1] == str(store.daemon_log_path)
 
 
 def test_agent_stop_terminates_daemon_process(tmp_path, monkeypatch):
@@ -535,3 +551,47 @@ def test_agent_stop_terminates_daemon_process(tmp_path, monkeypatch):
     assert store.read_daemon_pid() is None
     assert updated_state is not None
     assert updated_state.status.daemon_mode == "inactive"
+
+
+# @lat: [[lat.md/logging-tests#Logging Tests#Daemon File Logging]]
+def test_daemon_child_writes_structured_logs_without_console_output(
+    tmp_path, monkeypatch, isolated_logging
+):
+    from proxy2vpn.adapters.logging_utils import get_event_logger, logging_context
+
+    compose_file = _write_agent_compose(tmp_path)
+    store = AgentStateStore(compose_file)
+    store.ensure_dir()
+
+    async def fake_run_forever(self, daemon_mode):
+        assert daemon_mode == "daemon"
+        with logging_context(
+            clear=True, cycle_id="daemon-cycle", compose_path=str(compose_file)
+        ):
+            get_event_logger("daemon").info("daemon_cycle", password="daemon-secret")
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(AgentWatchdog, "run_forever", fake_run_forever)
+    monkeypatch.setattr(agent_commands, "_install_termination_handlers", lambda: None)
+    result = CliRunner().invoke(
+        app,
+        [
+            "--compose-file",
+            str(compose_file),
+            "--log-file",
+            str(store.daemon_log_path),
+            "agent",
+            "run",
+            "--daemon-child",
+        ],
+    )
+    assert result.exit_code == 0
+    assert result.output == ""
+    record = json.loads(store.daemon_log_path.read_text())
+    assert record["timestamp"].endswith("Z")
+    assert record["level"] == "INFO"
+    assert record["logger"] == "daemon"
+    assert record["event"] == record["message"] == "daemon_cycle"
+    assert record["cycle_id"] == "daemon-cycle"
+    assert record["password"] == "[REDACTED]"
+    assert store.read_daemon_pid() is None

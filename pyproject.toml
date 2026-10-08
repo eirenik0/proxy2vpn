@@ -28,6 +28,7 @@ dependencies = [
     "pydantic>=2",
     "pydantic-settings",
     "openai",
+    "structlog>=25.5,<27",
 ]
 
 [tool.towncrier]

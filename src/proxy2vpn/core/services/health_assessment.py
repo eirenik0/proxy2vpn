@@ -11,12 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from proxy2vpn.adapters import docker_ops, ip_utils
 from proxy2vpn.adapters.http_client import GluetunControlClient
-from proxy2vpn.adapters.logging_utils import get_logger
+from proxy2vpn.adapters.logging_utils import get_event_logger, logging_context
 from proxy2vpn.core.models import VPNService
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 
 
-logger = get_logger(__name__)
+logger = get_event_logger(__name__)
 
 
 class PeerEvidence(BaseModel):
@@ -75,6 +75,32 @@ class HealthAssessmentService:
         timeout: int | None = None,
     ) -> HealthAssessment:
         """Return a complete health assessment for one service."""
+
+        with logging_context(service_name=service.name, provider=service.provider):
+            logger.debug("health_assessment_started")
+            assessment = await self._assess_service(
+                service,
+                peer_assessments=peer_assessments,
+                lines=lines,
+                timeout=timeout,
+            )
+            logger.info(
+                "health_assessment_completed",
+                health_class=assessment.health_class,
+                health_score=assessment.health_score,
+                failing_checks=assessment.failing_checks,
+            )
+            return assessment
+
+    async def _assess_service(
+        self,
+        service: VPNService,
+        *,
+        peer_assessments: dict[str, HealthAssessment] | None,
+        lines: int,
+        timeout: int | None,
+    ) -> HealthAssessment:
+        """Collect diagnostics inside the service's logging context."""
 
         effective_timeout = timeout or self.probe_timeout
         container = docker_ops.get_container_by_service_name(service.name)
@@ -169,15 +195,17 @@ class HealthAssessmentService:
         async def _assess(
             service: VPNService,
         ) -> tuple[VPNService, HealthAssessment | None, Exception | None]:
-            try:
-                assessment = await self.assess_service(
-                    service,
-                    lines=lines,
-                    timeout=timeout,
-                )
-                return service, assessment, None
-            except Exception as exc:
-                return service, None, exc
+            with logging_context(service_name=service.name, provider=service.provider):
+                try:
+                    assessment = await self.assess_service(
+                        service,
+                        lines=lines,
+                        timeout=timeout,
+                    )
+                    return service, assessment, None
+                except Exception as exc:
+                    logger.exception("health_assessment_failed", error=str(exc))
+                    return service, None, exc
 
         assessment_tasks = [
             asyncio.create_task(_assess(service)) for service in services
@@ -188,10 +216,6 @@ class HealthAssessmentService:
             if assessment is not None:
                 assessments[assessment.service_name] = assessment
             else:
-                logger.warning(
-                    "health_assessment_failed",
-                    extra={"service_name": service.name, "error": str(error)},
-                )
                 assessments[service.name] = HealthAssessment(
                     service_name=service.name,
                     profile_name=service.profile,
