@@ -49,3 +49,11 @@ Successful, failed, cancelled, and raised rotation outcomes preserve requested/f
 ## Interrupted Manual Approval
 
 A cancelled approved rotation retains its open approval-required incident and failed action after rename, without losing the snapshot identity or leaving active progress behind.
+
+## Current Followup Diagnostics
+
+New persistent auth/config failures after restart or restore request investigation immediately; cleared authentication evidence cannot override current connectivity diagnostics.
+
+## Followup Investigation Execution
+
+Restart and restore rechecks reporting persistent auth/config failure persist a high-severity investigation incident without executing another recovery action.

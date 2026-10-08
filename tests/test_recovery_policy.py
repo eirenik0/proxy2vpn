@@ -398,3 +398,36 @@ def test_route_failure_first_seen_after_restore_keeps_original_grace():
     )
     assert POLICY.decide(restored, NOW).action == "wait"
     assert POLICY.decide(restored, NOW + timedelta(seconds=300)).action == "rotate"
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Current Followup Diagnostics]]
+@pytest.mark.parametrize("phase", ["restarted", "restored"])
+@pytest.mark.parametrize("failure", ["auth_failure", "config_error"])
+def test_new_persistent_auth_config_failure_immediately_requests_investigation(
+    phase, failure
+):
+    ctx = context()
+    followup = replace(
+        ctx, progress=RecoveryProgress(phase), results=[check(failure, persistent=True)]
+    )
+    decision = POLICY.decide(followup, NOW)
+    assert decision.action == "incident"
+    assert decision.incident_type == "auth_config_failure"
+
+
+def test_cleared_auth_does_not_override_current_connectivity_evidence():
+    initial = assessment(
+        results=[check("auth_failure", persistent=True)],
+        control=True,
+        peers=PeerEvidence(healthy=["peer"]),
+    )
+    ctx = context(observation=initial)
+    restart = POLICY.decide(ctx, NOW)
+    assert restart.trigger == "isolated_auth_failure"
+    current = replace(
+        ctx, progress=restart.next_progress, results=[check("connectivity")]
+    )
+    restore = POLICY.decide(current, NOW)
+    assert restore.action == "restore"
+    current = replace(current, progress=restore.next_progress)
+    assert POLICY.decide(current, NOW).action == "rotate"

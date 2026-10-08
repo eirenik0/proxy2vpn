@@ -176,7 +176,7 @@ class RecoveryPolicy:
         if snapshot.health_score >= self.settings.health_threshold:
             return RecoveryDecision("resolve", "Connectivity is healthy.")
 
-        if persistent_auth_or_config_failure(assessment.results):
+        if persistent_auth_or_config_failure(context.results):
             if context.progress.phase == "observed" and self._isolated_auth_restart(
                 context
             ):
@@ -332,8 +332,8 @@ class RecoveryPolicy:
     def rotation_block(
         self, context: RecoveryContext, now: datetime
     ) -> tuple[str, str] | None:
-        # Circuit breakers use the batch observation, as in the existing cycle.
-        if persistent_auth_or_config_failure(context.assessment.results):
+        # Scope breakers use batch peers; service failures use the latest recheck.
+        if persistent_auth_or_config_failure(context.results):
             return "Service still shows auth/config failure.", "rotation_exhausted"
         if self.profile_breaker(context, now):
             return (

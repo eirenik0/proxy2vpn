@@ -2962,3 +2962,44 @@ def test_manual_rotation_cancellation_retains_open_incident_and_action_identity(
     assert incident.status == "open" and incident.service_name == final_name
     assert incident.approval_required is True
     assert persisted.status.active_cycle_service_name is None
+
+
+# @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Followup Investigation Execution]]
+@pytest.mark.parametrize("first_action", ["restart_tunnel", "restore"])
+@pytest.mark.parametrize("failure", ["auth_failure", "config_error"])
+def test_followup_auth_config_evidence_creates_incident_without_more_actions(
+    agent_compose_file, fake_gluetun_runtime, first_action, failure
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.side_effect = [
+        gluetun_runtime.RuntimeInspection(
+            "running",
+            results=unhealthy_results(),
+            control_api_reachable=first_action == "restart_tunnel",
+        ),
+        gluetun_runtime.RuntimeInspection(
+            "running",
+            results=[
+                DiagnosticResult(
+                    check=failure,
+                    passed=False,
+                    persistent=True,
+                    message="Credentials or configuration failed",
+                    recommendation="Investigate",
+                )
+            ],
+        ),
+    ]
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    state = asyncio.run(watchdog.run_once())
+    incidents = watchdog.store.load_incidents()
+    assert len(state.actions) == 1
+    assert state.actions[0].action == first_action
+    assert incidents[0].type == "auth_config_failure"
+    assert incidents[0].severity == "high"
+    assert incidents[0].recommended_action == "investigate"
+    if first_action == "restart_tunnel":
+        runtime.restore.assert_not_awaited()
+    else:
+        runtime.restart_tunnel.assert_not_awaited()
+    assert state.services[0].health_score < watchdog.settings.health_threshold

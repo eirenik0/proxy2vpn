@@ -18,6 +18,8 @@ The policy retains the existing restart, restore, and rotation sequence, includi
 
 Initial healthy evidence resolves incidents. Persistent authentication/configuration evidence produces an investigation incident; an isolated authentication failure with healthy profile peers and a reachable control API may restart once unless an active auth incident already exists. Configuration failures and shared auth failures do not take that restart path.
 
+Service failure decisions use the latest diagnostics, including delayed rechecks. New persistent auth/config evidence immediately requests investigation, and cleared initial authentication evidence does not override current connectivity failures.
+
 Other first-cycle running failures restart when control is reachable. An unhealthy recheck ordinarily attempts restoration unless its cooldown is active. TLS failure after restart skips restoration. Persistent route/connectivity failure gets one restoration and waits until the next cycle before escalating; route failure first observed after restoration retains the ordinary grace period.
 
 Restore cooldowns count successful and failed attempts, including interrupted restores. Rotation grace uses the persisted degradation timestamp. Automatic rotation budgets retain their successful-action windows: one in 30 minutes or two in six hours, including requested/final rename identity. Profile auth/config breakers require two matching assessments or an active one-hour scope incident. Provider/country breakers require two other non-auth unhealthy peers or an active 30-minute scope incident.
