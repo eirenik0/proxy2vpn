@@ -61,3 +61,7 @@ Verify quoted and multiline dotenv parsing, empty-versus-unset behavior, interpo
 ## Literal And Raw Env Files
 
 Verify single-quoted credentials are literal with either assignment delimiter, raw env files retain quotes and dollar expressions without interpolation errors, and their encodings are excluded from persistence and both LLM boundaries.
+
+## Private Identity Keys
+
+Verify aliases resist unkeyed dictionary lookup, remain stable across processes, differ between roots, use private excluded keys, and migrate known legacy hashes while dropping unknown hashes.

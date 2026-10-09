@@ -7,12 +7,15 @@ from collections.abc import Mapping
 from datetime import datetime
 import json
 import hashlib
+import hmac
+import tempfile
 import os
 import re
 from pathlib import Path
 from typing import Any, get_args
 from urllib.parse import quote, quote_plus, unquote, urlsplit
 
+from filelock import FileLock
 from ruamel.yaml import YAML
 
 from proxy2vpn.agent.interpolation import dotenv_variables, interpolate
@@ -148,7 +151,8 @@ _CLASSIFICATIONS["purpose"] = frozenset(
 _IDENTITY_FIELDS = frozenset(
     "service_name requested_service_name final_service_name active_cycle_service_name healthy_shared_profile_peers auth_config_shared_profile_peers other_unhealthy_shared_profile_peers shared_profile_peer_probe_failures".split()
 )
-_IDENTITY_ALIAS = re.compile(r"\[SERVICE:[0-9a-f]{64}\]")
+_IDENTITY_ALIAS = re.compile(r"\[SERVICE:v2:[0-9a-f]{64}\]")
+_LEGACY_IDENTITY_ALIAS = re.compile(r"\[SERVICE:[0-9a-f]{64}\]")
 
 _TIMESTAMPS = frozenset(
     "started_at active_cycle_started_at last_loop_at last_progress_at degraded_since last_check_at ts created_at updated_at approved_at resolved_at investigated_at".split()
@@ -193,12 +197,43 @@ def _env_mappings(value: Any, depth: int = 0):
             yield from _env_mappings(item, depth + 1)
 
 
+def _identity_key(root: Path) -> bytes:
+    """Keep alias HMAC keys local, private, and stable across processes."""
+    directory = root / ".proxy2vpn-agent"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "identity.key"
+    with FileLock(str(directory / "identity.lock")):
+        if path.exists():
+            os.chmod(path, 0o600)
+            key = path.read_bytes()
+            if len(key) != 32:
+                raise ValueError("Invalid evidence identity key")
+            return key
+        key = os.urandom(32)
+        fd, temporary = tempfile.mkstemp(prefix="identity.", dir=directory)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(key)
+                handle.flush()
+                os.fsync(handle.fileno())
+            Path(temporary).replace(path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        return key
+
+
 class EvidenceSanitizer:
     """Mask configured credentials and project untrusted evidence onto safe fields."""
 
-    def __init__(self, secrets: list[str] | None = None) -> None:
+    def __init__(
+        self, secrets: list[str] | None = None, *, identity_key: bytes | None = None
+    ) -> None:
         self._values: set[str] = set()
         self._identity_names: dict[str, str] = {}
+        self._legacy_identity_names: dict[str, str] = {}
+        self._identity_key = (
+            identity_key if identity_key is not None else os.urandom(32)
+        )
         self._interpolation_variables: dict[str, str] = dict(os.environ)
         for secret in secrets or []:
             self.add_secret(secret)
@@ -314,9 +349,9 @@ class EvidenceSanitizer:
     def from_compose(
         cls, compose_file: Path, inventory_file: str = "external-proxies.json"
     ) -> EvidenceSanitizer:
-        sanitizer = cls()
-        sanitizer.collect_environment()
         root = compose_file.parent
+        sanitizer = cls(identity_key=_identity_key(root))
+        sanitizer.collect_environment()
         root_variables = dotenv_variables(root / ".env", os.environ)
         sanitizer._interpolation_variables = {**root_variables, **os.environ}
         sanitizer.collect(root_variables)
@@ -384,12 +419,14 @@ class EvidenceSanitizer:
                         )
         return sanitizer
 
-    @staticmethod
-    def identity_alias(name: str) -> str:
-        return "[SERVICE:" + hashlib.sha256(name.encode()).hexdigest() + "]"
+    def identity_alias(self, name: str) -> str:
+        digest = hmac.new(self._identity_key, name.encode(), hashlib.sha256).hexdigest()
+        return "[SERVICE:v2:" + digest + "]"
 
     def register_identity(self, name: str) -> None:
         self._identity_names[self.identity_alias(name)] = name
+        legacy = "[SERVICE:" + hashlib.sha256(name.encode()).hexdigest() + "]"
+        self._legacy_identity_names[legacy] = name
 
     def restore_identities(self, value: Any, *, key: str = "") -> Any:
         """Restore only configured identities for in-memory recovery decisions."""
@@ -448,6 +485,9 @@ class EvidenceSanitizer:
             ]
         if isinstance(value, str):
             if key in _IDENTITY_FIELDS:
+                if _LEGACY_IDENTITY_ALIAS.fullmatch(value):
+                    name = self._legacy_identity_names.get(value)
+                    return self.identity_alias(name) if name is not None else REDACTED
                 if _IDENTITY_ALIAS.fullmatch(value) or self.text(value) == value:
                     return value
                 return self.identity_alias(value)

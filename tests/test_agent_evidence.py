@@ -1004,3 +1004,68 @@ def test_literal_and_raw_env_credentials_remain_available_and_redacted(
     )
     for secret in encodings:
         assert secret not in output
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Private Identity Keys]]
+def test_identity_keys_are_private_stable_and_migrate_legacy_aliases(tmp_path):
+    import hashlib
+    import subprocess
+    import sys
+
+    root = tmp_path / "first"
+    root.mkdir()
+    compose = root / "compose.yml"
+    compose.write_text(
+        "services:\n  office:\n    environment:\n      OPENVPN_PASSWORD: office\n"
+    )
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        sanitizers = list(
+            pool.map(lambda _: EvidenceSanitizer.from_compose(compose), range(8))
+        )
+    payload = {"service_name": "office"}
+    alias = sanitizers[0].sanitize(payload)["service_name"]
+    legacy = "[SERVICE:" + hashlib.sha256(b"office").hexdigest() + "]"
+    assert alias != legacy
+    assert alias.startswith("[SERVICE:v2:")
+    assert all(s.sanitize(payload)["service_name"] == alias for s in sanitizers)
+    assert all(
+        s.restore_identities({"service_name": alias}) == payload for s in sanitizers
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; from proxy2vpn.agent.evidence import EvidenceSanitizer; "
+            "import sys; print(EvidenceSanitizer.from_compose(Path(sys.argv[1]))."
+            "sanitize({'service_name': 'office'})['service_name'])",
+            str(compose),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == alias
+    other = tmp_path / "second"
+    other.mkdir()
+    other_compose = other / "compose.yml"
+    other_compose.write_text(compose.read_text())
+    assert (
+        EvidenceSanitizer.from_compose(other_compose).sanitize(payload)["service_name"]
+        != alias
+    )
+    key_file = root / ".proxy2vpn-agent" / "identity.key"
+    assert key_file.stat().st_mode & 0o777 == 0o600
+    assert len(key_file.read_bytes()) == 32
+    sanitizer = sanitizers[0]
+    assert sanitizer.sanitize({"service_name": legacy}) == {"service_name": alias}
+    unknown = "[SERVICE:" + hashlib.sha256(b"removed").hexdigest() + "]"
+    assert sanitizer.sanitize({"service_name": unknown}) == {
+        "service_name": "[REDACTED]"
+    }
+    assert key_file.read_bytes().hex() not in json.dumps(sanitizer.sanitize(payload))
+    assert base64.b64encode(key_file.read_bytes()).decode() not in json.dumps(
+        sanitizer.sanitize(payload)
+    )
+    key_file.write_bytes(b"invalid")
+    with pytest.raises(ValueError, match="Invalid evidence identity key"):
+        EvidenceSanitizer.from_compose(compose)
