@@ -25,3 +25,11 @@ Verify both watchdog fallback paths remain sanitized when the LLM is disabled or
 ## Configuration Sources And Encodings
 
 Verify credential discovery from environment, Compose, control client/server files and external URL userinfo, supported encoded values, labelled secrets and authorization patterns.
+
+## Marker-containing Credentials
+
+Verify credentials containing the literal redaction marker and supported encodings are removed from state, historical incidents, both LLM requests and results, while repeated sanitization stays stable.
+
+## Replacement Convergence
+
+Verify replacing one credential cannot leave another configured credential formed from the inserted marker, and the resulting text remains idempotent.

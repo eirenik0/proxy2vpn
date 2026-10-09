@@ -116,21 +116,29 @@ class EvidenceSanitizer:
         )
 
     def text(self, value: str) -> str:
-        # A single substitution cannot inspect markers inserted by earlier matches.
-        pattern = "|".join(
-            re.escape(secret) for secret in sorted(self._values, key=len, reverse=True)
+        secrets = sorted(self._values, key=len, reverse=True)
+        # Full marker-containing credentials must win over a standalone marker.
+        # Other credentials (including marker fragments) cannot consume markers.
+        alternatives = (
+            [re.escape(secret) for secret in secrets if REDACTED in secret]
+            + [re.escape(REDACTED)]
+            + [re.escape(secret) for secret in secrets if REDACTED not in secret]
         )
-        parts = value.split(REDACTED)
-        if pattern:
-            parts = [re.sub(pattern, lambda _: REDACTED, part) for part in parts]
-        result = _redact_text(REDACTED.join(parts))
-        if len(result) <= 2048:
-            return result
-        bounded = result[:2048]
-        for length in range(1, len(REDACTED)):
-            if bounded.endswith(REDACTED[:length]):
-                return bounded[:-length]
-        return bounded
+        matcher = re.compile("|".join(alternatives))
+        while True:
+            result = _redact_text(matcher.sub(lambda _: REDACTED, value))
+            if len(result) > 2048:
+                result = result[:2048]
+                for length in range(1, len(REDACTED)):
+                    if result.endswith(REDACTED[:length]):
+                        result = result[:-length]
+                        break
+            if result == value:
+                return result
+            # Replacement can create a marker-containing configured credential.
+            # Further passes consume surrounding text or collapse multiple markers;
+            # standalone markers remain intact, so bounded output converges.
+            value = result
 
     def collect_environment(self) -> None:
         # Shell identity/location variables are metadata, not credential aliases.

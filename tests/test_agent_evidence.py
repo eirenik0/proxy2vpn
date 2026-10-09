@@ -130,6 +130,123 @@ def test_sanitizer_is_bounded_idempotent_and_preserves_classifications():
     )
 
 
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Marker-containing Credentials]]
+@pytest.mark.parametrize(
+    "secret",
+    ["foo[REDACTED]bar", "[REDACTED]bar", "foo[REDACTED]", "[REDACTED][REDACTED]"],
+)
+def test_marker_credentials_are_redacted_at_all_boundaries(tmp_path, secret):
+    encoded = [
+        secret,
+        quote(secret, safe=""),
+        quote_plus(secret),
+        base64.b64encode(secret.encode()).decode(),
+        base64.urlsafe_b64encode(secret.encode()).decode(),
+        json.dumps(secret, ensure_ascii=True)[1:-1],
+    ]
+    narrative = " ".join(encoded)
+    sanitizer = EvidenceSanitizer([secret, "RED", "ACT", "["])
+    safe_text = sanitizer.text(narrative)
+    for credential in encoded:
+        assert credential not in safe_text
+    assert safe_text == sanitizer.text(safe_text)
+    assert sanitizer.text("[REDACTED]") == "[REDACTED]"
+
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services: {}\n")
+    (tmp_path / ".env").write_text("OPENVPN_PASSWORD=" + secret + "\n")
+    store = AgentStateStore(compose)
+    now = utc_now()
+    state = AgentState(
+        status=AgentStatus(compose_path=str(compose), interval_seconds=60),
+        actions=[
+            ActionRecord(
+                ts=now,
+                service_name="vpn-a",
+                action="restore",
+                trigger="manual",
+                result="failed",
+                details={"profile": narrative},
+            )
+        ],
+    )
+    incident = AgentIncident(
+        id="marker138",
+        service_name="vpn-a",
+        type="auth_config_failure",
+        severity="high",
+        created_at=now,
+        updated_at=now,
+        summary=narrative,
+        recommended_action="investigate",
+        investigation=IncidentInvestigation(
+            summary=narrative,
+            findings=[narrative],
+            action_plan=[narrative],
+            investigated_at=now,
+        ),
+    )
+    # Seed legacy files, then exercise scrubbing and normal writes.
+    store.ensure_dir()
+    store.state_file.write_text(state.model_dump_json())
+    store.incidents_file.write_text(incident.model_dump_json() + "\n")
+    store.read_state()
+    store.load_incidents()
+    store.write_state(state)
+    store.append_incident(incident)
+    captured = []
+
+    def parse(**kwargs):
+        captured.append(kwargs["input"])
+        output_model = kwargs["text_format"]
+        result = (
+            IncidentEnrichment(summary=narrative, human_explanation=narrative)
+            if output_model is IncidentEnrichment
+            else InvestigationPlan(
+                summary=narrative, findings=[narrative], action_plan=[narrative]
+            )
+        )
+        return SimpleNamespace(output_parsed=result)
+
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    enrichment = OpenAIIncidentEnricher(
+        client=client, sanitizer=store.sanitizer()
+    ).enrich(
+        context().model_copy(
+            update={
+                "fallback_summary": narrative,
+                "issues": [],
+                "service_name": "vpn-a",
+            }
+        )
+    )
+    plan = OpenAIIncidentInvestigator(
+        client=client, sanitizer=store.sanitizer()
+    ).investigate(
+        investigation_context().model_copy(
+            update={
+                "incident_summary": narrative,
+                "profile_validation_errors": [narrative],
+            }
+        )
+    )
+    outputs = (
+        json.dumps(captured) + enrichment.model_dump_json() + plan.model_dump_json()
+    )
+    outputs += store.state_file.read_text() + store.incidents_file.read_text()
+    for credential in encoded:
+        assert credential not in outputs
+    assert incident.summary == narrative
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Replacement Convergence]]
+def test_redaction_converges_when_replacements_form_a_configured_secret():
+    sanitizer = EvidenceSanitizer(["foo", "[REDACTED]bar"])
+    safe = sanitizer.text("foobar")
+    assert "[REDACTED]bar" not in safe
+    assert safe == sanitizer.text(safe)
+
+
 # @lat: [[agent-evidence-tests#Agent Evidence Tests#Both LLM Boundaries]]
 @pytest.mark.parametrize("investigate", [False, True])
 def test_both_llm_requests_and_results_are_sanitized(investigate):
