@@ -8,14 +8,18 @@ from datetime import datetime
 import json
 import hashlib
 import hmac
-import tempfile
 import os
 import re
 from pathlib import Path
 from typing import Any, get_args
 from urllib.parse import quote, quote_plus, unquote, urlsplit
 
-from filelock import FileLock
+from proxy2vpn.core.private_storage import (
+    atomic_write,
+    private_directory,
+    private_file,
+    private_lock,
+)
 from ruamel.yaml import YAML
 
 from proxy2vpn.agent.interpolation import dotenv_variables, interpolate
@@ -149,6 +153,7 @@ _CLASSIFICATIONS["purpose"] = frozenset(
     {"repair_connectivity", "request_different_exit_ip"}
 )
 _IDENTITY_FIELDS = frozenset(
+    "revision generation "
     "service_name requested_service_name final_service_name active_cycle_service_name healthy_shared_profile_peers auth_config_shared_profile_peers other_unhealthy_shared_profile_peers shared_profile_peer_probe_failures".split()
 )
 _IDENTITY_ALIAS = re.compile(r"\[SERVICE:v2:[0-9a-f]{64}\]")
@@ -160,6 +165,7 @@ _TIMESTAMPS = frozenset(
 
 # Unknown payload keys are omitted rather than trusting their serialized value.
 _FIELDS = frozenset(
+    "revision generation "
     """status services actions compose_path daemon_mode started_at
 active_cycle_started_at active_cycle_phase active_cycle_service_name last_loop_at
 last_progress_at interval_seconds service_count unhealthy_count last_error llm_mode
@@ -205,25 +211,17 @@ def _env_mappings(value: Any):
 def _identity_key(root: Path) -> bytes:
     """Keep alias HMAC keys local, private, and stable across processes."""
     directory = root / ".proxy2vpn-agent"
-    directory.mkdir(parents=True, exist_ok=True)
+    private_directory(directory)
     path = directory / "identity.key"
-    with FileLock(str(directory / "identity.lock")):
+    with private_lock(directory / "identity.lock"):
+        private_file(path)
         if path.exists():
-            os.chmod(path, 0o600)
             key = path.read_bytes()
             if len(key) != 32:
                 raise ValueError("Invalid evidence identity key")
             return key
         key = os.urandom(32)
-        fd, temporary = tempfile.mkstemp(prefix="identity.", dir=directory)
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(key)
-                handle.flush()
-                os.fsync(handle.fileno())
-            Path(temporary).replace(path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        atomic_write(path, key)
         return key
 
 

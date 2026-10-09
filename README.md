@@ -535,6 +535,10 @@ Existing `state.json` is scrubbed on the first state read; `incidents.jsonl` is 
 
 The guarantee cannot identify arbitrary unlabelled secrets in narrative text or credentials already removed from configuration. Raw logs and issue payloads that cannot meet the contract are omitted. Repeated/nested encodings, encryption, shell command evaluation and externally supplied Compose `--env-file` overrides are unsupported. Existing backups, exported evidence and daemon logs are outside this migration; handle them separately under your retention policy. See `lat.md/agent.md` for the full contract.
 
+Agent storage now uses 0700 directories and 0600 files on POSIX, repairs older permissions, and rejects symlinks, hard links and unsafe filenames. Storage transactions time out after ten seconds; a conflict means another writer changed the evidence, so reload before retrying. Continuous watchdogs reload and resume on the next interval. Stop old binaries before upgrading; they do not participate in revision checks. Windows uses inherited account ACLs rather than POSIX modes.
+
+Monitoring reset increments a generation and clears history through a recoverable private journal. Delayed work from before reset cannot repopulate the cleared records. An interrupted replacement retains the previous file or finishes a pending reset on the next access. Only a truncated final JSONL record is recovered automatically; other corruption requires operator repair, with the original file left intact. Incident history is rewritten atomically without pruning, so large histories increase write cost. Preserve the identity key for correlation.
+
 ## Development
 
 ### Setup

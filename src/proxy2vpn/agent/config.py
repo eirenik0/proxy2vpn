@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,35 @@ class AgentSettings(BaseSettings):
     openai_timeout_seconds: float = 10.0
     openai_max_output_tokens: int = 220
     openai_reasoning_effort: str = "minimal"
+
+    @model_validator(mode="after")
+    def _safe_storage_names(self) -> "AgentSettings":
+        names = [
+            self.state_dirname,
+            self.state_file,
+            self.incidents_file,
+            self.runtime_lock_file,
+            self.daemon_pid_file,
+            self.daemon_log_file,
+        ]
+        if any(
+            not name
+            or name in {".", ".."}
+            or "/" in name
+            or "\\" in name
+            or name != name.rstrip(". ")
+            for name in names
+        ):
+            raise ValueError("Agent storage names must be single path components")
+        files = names[1:] + [
+            "evidence.lock",
+            "identity.lock",
+            "identity.key",
+            "transaction.json",
+        ]
+        if len({name.casefold() for name in files}) != len(files):
+            raise ValueError("Agent storage filenames must be distinct")
+        return self
 
     @field_validator("fallback_countries_by_provider", mode="before")
     @classmethod

@@ -29,11 +29,12 @@ DEFAULT_AGENT_SETTINGS = AgentSettings()
 
 
 def _mark_agent_inactive(store: AgentStateStore) -> None:
-    state = store.read_state()
-    if state is None:
-        return
-    state.status.daemon_mode = "inactive"
-    store.write_state(state)
+    with store.transaction():
+        state = store.read_state()
+        if state is None:
+            return
+        state.status.daemon_mode = "inactive"
+        store.write_state(state)
 
 
 def _daemon_payload(store: AgentStateStore) -> dict[str, object]:
@@ -206,7 +207,7 @@ def status(
     state = watchdog.store.read_state() or watchdog.empty_state()
     daemon_data = _daemon_payload(watchdog.store)
 
-    payload = state.model_dump(mode="json")
+    payload = state.model_dump(mode="json", exclude={"revision", "generation"})
     payload["daemon"] = daemon_data
     remediation = None
     if live:

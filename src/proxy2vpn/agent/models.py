@@ -74,6 +74,8 @@ class IncidentInvestigation(BaseModel):
 class AgentIncident(BaseModel):
     """Persisted incident for service failures that need attention."""
 
+    revision: int = Field(default=0, ge=0)
+    generation: int = Field(default=0, ge=0)
     source: str = "gluetun"
     id: str
     service_name: str
@@ -122,6 +124,8 @@ class ActionRecord(BaseModel):
 class AgentState(BaseModel):
     """Persisted state for the local watchdog."""
 
+    revision: int = Field(default=0, ge=0)
+    generation: int = Field(default=0, ge=0)
     status: AgentStatus
     services: list[ServiceSnapshot] = Field(default_factory=list)
     actions: list[ActionRecord] = Field(default_factory=list)

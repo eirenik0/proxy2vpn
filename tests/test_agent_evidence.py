@@ -335,7 +335,9 @@ def test_storage_scrubs_all_history_and_state_without_mutating_inputs(tmp_path):
     assert not list(store.agent_dir.glob("*.tmp"))
     safe_history = store.incidents_file.read_text()
     store.incidents_file.write_text(safe_history + "{malformed\n")
-    with pytest.raises(json.JSONDecodeError):
+    from proxy2vpn.core.private_storage import StorageError
+
+    with pytest.raises(StorageError, match="Corrupt agent incident history"):
         store.load_incidents()
     assert store.incidents_file.read_text() == safe_history + "{malformed\n"
     assert not list(store.agent_dir.glob("*.tmp"))

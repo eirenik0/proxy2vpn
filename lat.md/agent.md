@@ -37,3 +37,21 @@ Service identity fields overlapping credentials use HMAC-SHA-256 aliases keyed b
 Arbitrary unlabelled secrets in retained narrative text cannot be inferred. Unrecognized raw logs and issue payloads are excluded, but summaries and generated prose retain bounded, pattern-redacted text. Removed credentials no longer available in configuration are covered only by supported patterns. Nested/repeated encodings, encrypted values, shell command evaluation and externally supplied Compose --env-file overrides are outside the configured-value contract. Previously exported files, backups and daemon logs are not migrated by the state store.
 
 See [[agent-evidence-tests#Agent Evidence Tests]] for regression coverage and the README agent evidence section for operator migration guidance.
+
+# Storage Transactions
+
+Private, revision-checked storage transactions prevent delayed watchdog and operator work from overwriting newer evidence or resurrecting a reset history.
+
+[[src/proxy2vpn/agent/state.py#AgentStateStore#transaction]] uses the stable `evidence.lock` independently of the long-lived watchdog lock, with a ten-second timeout and a safe retry error. Transactions are synchronous and reentrant on one store; Docker, HTTP, and LLM work stays outside them. Readers, redaction migration, state writes, incident decisions, PID updates, and reset share this protocol. Future retention must use the same transaction and replacement API.
+
+State and incidents carry monotonically incremented revisions; legacy records start at zero. Writes compare the loaded revision under the lock and reject obsolete replacements. Watchdog incident decisions refresh history under the transaction so concurrent dismissals retain their cooldown suppression. Investigation rejects a changed incident instead of replacing a dismissal or resolution. Completed actions append to current state even when its status changed; this does not automatically repeat the operation.
+
+Each watchdog cycle captures its state's reset generation in a task-local observation session. Reset increments this generation, clears monitoring history, and preserves daemon metadata. Subsequent state writes and incident creation from an older cycle are rejected. A continuous watchdog reloads after a conflict and waits for its next interval; a one-shot or operator command reports the conflict for explicit retry. Reset does not undo already executed external operations.
+
+[[src/proxy2vpn/agent/state.py#AgentStateStore#replace_monitoring]] records sanitized replacement state and history in a private redo journal before replacing either file. Every transaction recovers a pending journal first. Files and their containing directory are synced before journal removal, making an interrupted reset recoverable on the next access. The replacement API requires callers to hold the shared transaction and supply complete current records.
+
+[[src/proxy2vpn/core/private_storage.py#atomic_write]] creates unique private temporary files, flushes and fsyncs them, replaces the target, and fsyncs its directory. Incident history retains all versions and is atomically rewritten, trading additional I/O for valid records after interruption. An invalid, unterminated final JSONL record is discarded as a torn append; earlier corruption or an invalid newline-terminated record fails closed without changing the history or exposing its content.
+
+On POSIX, storage directories are repaired to 0700 and regular files to 0600, including locks, PID files, identity keys, logs, journals, and temporaries. Symlink components/targets, hard-linked files, foreign-owned files, and unsafe/colliding configured filenames are rejected. Lock files retain their inode and are never replaced or removed. Windows enforces file-type/path validation but relies on the account's inherited ACLs; POSIX mode and directory-fsync guarantees do not apply there. Existing credential/key files must remain available for evidence sanitization and identity correlation.
+
+See [[agent-storage-tests#Agent Storage Tests]] for deterministic interleavings and interruption coverage.
