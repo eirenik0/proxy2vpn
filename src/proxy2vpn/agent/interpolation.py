@@ -77,12 +77,23 @@ def interpolate(value: str, variables: Mapping[str, str], depth: int = 0) -> str
     return "".join(output)
 
 
-def dotenv_variables(path: Path, inherited: Mapping[str, str]) -> dict[str, str]:
+def dotenv_variables(
+    path: Path, inherited: Mapping[str, str], *, raw: bool = False
+) -> dict[str, str]:
     """Parse quoted dotenv values and expand non-literal entries in file order."""
     if not path.is_file():
         return {}
     text = path.read_text()
     values: dict[str, str] = {}
+    if raw:
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, delimiter, value = line.partition("=")
+            if delimiter:
+                values[key.strip()] = value
+        return values
     for binding in parse_stream(StringIO(text)):
         if binding.error:
             normalized = re.sub(
@@ -103,7 +114,16 @@ def dotenv_variables(path: Path, inherited: Mapping[str, str]) -> dict[str, str]
             binding = converted[0]
         if binding.key is None or binding.value is None:
             continue
-        raw_value = binding.original.string.split("=", 1)[-1].lstrip()
+        assignment = re.match(
+            r"\s*(?:export\s+)?(?:[A-Za-z_][A-Za-z0-9_]*|'[^']*')\s*[=:]\s*(.*)",
+            binding.original.string,
+            re.DOTALL,
+        )
+        if assignment is None:
+            raise ValueError(
+                "Unsupported dotenv assignment in credential configuration"
+            )
+        raw_value = assignment[1]
         values[binding.key] = (
             binding.value
             if raw_value.startswith("'")

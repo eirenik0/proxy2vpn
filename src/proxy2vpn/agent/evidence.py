@@ -331,6 +331,8 @@ class EvidenceSanitizer:
             *json_paths,
         }
         paths.update((root / "profiles").glob("*.env"))
+        raw_paths: set[Path] = set()
+        standard_paths: set[Path] = set()
         if compose_file.exists():
             data = YAML(typ="safe").load(compose_file.read_text()) or {}
             sanitizer.collect(data, interpolate_values=True)
@@ -344,9 +346,14 @@ class EvidenceSanitizer:
                 for item in env_files:
                     path = item.get("path") if isinstance(item, dict) else item
                     if path:
-                        paths.add(
-                            root / interpolate(path, sanitizer._interpolation_variables)
+                        resolved = root / interpolate(
+                            path, sanitizer._interpolation_variables
                         )
+                        paths.add(resolved)
+                        if isinstance(item, dict) and item.get("format") == "raw":
+                            raw_paths.add(resolved)
+                        else:
+                            standard_paths.add(resolved)
         for path in paths:
             if not path.is_file():
                 continue
@@ -365,9 +372,16 @@ class EvidenceSanitizer:
             else:
                 sanitizer.collect(text.splitlines())
                 if path != root / config.CONTROL_AUTH_CONFIG_FILE:
-                    sanitizer.collect(
-                        dotenv_variables(path, sanitizer._interpolation_variables)
-                    )
+                    if path in raw_paths:
+                        sanitizer.collect(
+                            dotenv_variables(
+                                path, sanitizer._interpolation_variables, raw=True
+                            )
+                        )
+                    if path not in raw_paths or path in standard_paths:
+                        sanitizer.collect(
+                            dotenv_variables(path, sanitizer._interpolation_variables)
+                        )
         return sanitizer
 
     @staticmethod

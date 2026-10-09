@@ -904,3 +904,103 @@ def test_interpolation_sources_and_errors_fail_closed(tmp_path, monkeypatch):
     monkeypatch.delenv("MISSING_REQUIRED", raising=False)
     with pytest.raises(ValueError, match="required credential interpolation"):
         EvidenceSanitizer.from_compose(compose)
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Literal And Raw Env Files]]
+@pytest.mark.parametrize(
+    "raw,delimiter,value,expected",
+    [
+        (False, ":", "'${OTHER}'", "${OTHER}"),
+        (False, "=", "'${OTHER}'", "${OTHER}"),
+        (False, ":", '"${OTHER:-default-value-138}"', "default-value-138"),
+        (True, "=", "${MISSING:?literal}", "${MISSING:?literal}"),
+        (True, "=", '"${MISSING:?literal}"', '"${MISSING:?literal}"'),
+        (True, "=", "'$$literal # text'", "'$$literal # text'"),
+    ],
+)
+def test_literal_and_raw_env_credentials_remain_available_and_redacted(
+    tmp_path, monkeypatch, raw, delimiter, value, expected
+):
+    from proxy2vpn.agent.interpolation import dotenv_variables
+
+    monkeypatch.delenv("OTHER", raising=False)
+    monkeypatch.delenv("MISSING", raising=False)
+    env_file = tmp_path / "credentials.env"
+    env_file.write_text("OPENVPN_PASSWORD" + delimiter + " " + value + "\n")
+    # Raw format includes whitespace after the delimiter; use canonical key=value.
+    if raw:
+        env_file.write_text("OPENVPN_PASSWORD=" + value + "\n")
+    assert dotenv_variables(env_file, {}, raw=raw)["OPENVPN_PASSWORD"] == expected
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        "services:\n  vpn-a:\n    env_file:\n      - path: credentials.env\n"
+        + ("        format: raw\n" if raw else "")
+    )
+    store = AgentStateStore(compose)
+    now = utc_now()
+    encodings = [
+        expected,
+        quote(expected, safe=""),
+        quote_plus(expected),
+        base64.b64encode(expected.encode()).decode(),
+        base64.urlsafe_b64encode(expected.encode()).decode(),
+    ]
+    narrative = " ".join(encodings)
+    incident = AgentIncident(
+        id="literal138",
+        service_name="vpn-a",
+        type="auth_config_failure",
+        severity="high",
+        created_at=now,
+        updated_at=now,
+        summary=narrative,
+        recommended_action="investigate",
+    )
+    state = AgentState(
+        status=AgentStatus(compose_path=str(compose), interval_seconds=60),
+        actions=[
+            ActionRecord(
+                ts=now,
+                service_name="vpn-a",
+                action="restore",
+                trigger="manual",
+                result="failed",
+                details={"profile": narrative},
+            )
+        ],
+    )
+    store.write_state(state)
+    store.append_incident(incident)
+    assert store.read_state() is not None and len(store.load_incidents()) == 1
+    captured = []
+
+    def parse(**kwargs):
+        captured.append(kwargs["input"])
+        return SimpleNamespace(
+            output_parsed=(
+                IncidentEnrichment(summary=narrative, human_explanation=narrative)
+                if kwargs["text_format"] is IncidentEnrichment
+                else InvestigationPlan(
+                    summary=narrative, findings=[narrative], action_plan=[narrative]
+                )
+            )
+        )
+
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    enriched = OpenAIIncidentEnricher(
+        client=client, sanitizer=store.sanitizer()
+    ).enrich(context().model_copy(update={"fallback_summary": narrative, "issues": []}))
+    investigated = OpenAIIncidentInvestigator(
+        client=client, sanitizer=store.sanitizer()
+    ).investigate(
+        investigation_context().model_copy(update={"incident_summary": narrative})
+    )
+    output = (
+        store.state_file.read_text()
+        + store.incidents_file.read_text()
+        + json.dumps(captured)
+        + enriched.model_dump_json()
+        + investigated.model_dump_json()
+    )
+    for secret in encodings:
+        assert secret not in output

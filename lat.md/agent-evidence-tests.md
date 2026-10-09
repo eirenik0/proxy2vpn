@@ -57,3 +57,7 @@ Verify braced and unbraced credentials from shell and project dotenv values, pre
 ## Interpolation Source Semantics
 
 Verify quoted and multiline dotenv parsing, empty-versus-unset behavior, interpolated env-file paths, opaque shell values, and safe failure for unsupported or missing required expressions.
+
+## Literal And Raw Env Files
+
+Verify single-quoted credentials are literal with either assignment delimiter, raw env files retain quotes and dollar expressions without interpolation errors, and their encodings are excluded from persistence and both LLM boundaries.
