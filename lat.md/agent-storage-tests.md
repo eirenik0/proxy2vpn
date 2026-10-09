@@ -121,3 +121,7 @@ Windows devices, extended console names, alternate-stream delimiters, forbidden 
 ## Alternate Storage Identity Compatibility
 
 An alternate state directory with custom filenames can coexist with populated canonical storage while retaining the same identity key and leaving both histories usable.
+
+## Recovery Persistence Conflicts
+
+A concurrent state update during a tunnel restart preserves the actual action outcome once and aborts the stale cycle without recording storage conflicts as failed external operations.

@@ -409,6 +409,8 @@ class AgentWatchdog:
                     state, incident.service_name, incident.id, cancelled=True
                 )
                 raise
+            except StorageConflict:
+                raise
             except Exception as exc:
                 self._record_interrupted_rotation(
                     state, incident.service_name, incident.id, error=str(exc)
@@ -783,6 +785,8 @@ class AgentWatchdog:
                 try:
                     await asyncio.sleep(decision.observation.delay_seconds)
                     health = await self._evaluate_health(service)
+                except StorageConflict:
+                    raise
                 except (asyncio.CancelledError, Exception) as exc:
                     self._record_restart_recheck_failure(
                         state,
@@ -967,6 +971,8 @@ class AgentWatchdog:
         except asyncio.CancelledError:
             self._record_interrupted_rotation(state, service.name, cancelled=True)
             raise
+        except StorageConflict:
+            raise
         except Exception as exc:
             self._record_interrupted_rotation(state, service.name, error=str(exc))
             raise
@@ -1129,6 +1135,8 @@ class AgentWatchdog:
                 details={"cancelled": "true"},
             )
             raise
+        except StorageConflict:
+            raise
         except Exception as exc:
             self._append_action(
                 state,
@@ -1207,6 +1215,8 @@ class AgentWatchdog:
                 result="failed",
                 details={"cancelled": "true", "profile": service.profile},
             )
+            raise
+        except StorageConflict:
             raise
         except Exception as exc:
             self._append_action(
