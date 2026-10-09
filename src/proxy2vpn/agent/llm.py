@@ -37,6 +37,7 @@ class IncidentEnrichment(BaseModel):
 class InvestigationContext(BaseModel):
     """Structured incident context sent to the investigator."""
 
+    source: str = "gluetun"
     incident_id: str
     incident_type: str
     severity: str

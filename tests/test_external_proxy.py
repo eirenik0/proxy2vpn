@@ -1139,3 +1139,177 @@ def test_gluetun_incident_investigation_ignores_external_name_reuse(
     fake_gluetun_runtime.control_status.assert_not_awaited()
     fake_gluetun_runtime.restart_tunnel.assert_not_awaited()
     fake_gluetun_runtime.restore.assert_not_awaited()
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#External Incident Action Evidence]]
+def test_external_incident_llm_evidence_omits_gluetun_action_history(
+    tmp_path, monkeypatch, fake_gluetun_runtime
+):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from proxy2vpn.agent.llm import IncidentEnrichment, InvestigationPlan
+    from proxy2vpn.agent.models import ActionRecord
+    from proxy2vpn.core.egress import EgressObservation
+
+    write_config(tmp_path, [endpoint()])
+    watchdog = AgentWatchdog(
+        tmp_path / "compose.yml", runtime=fake_gluetun_runtime, llm_mode="openai"
+    )
+    state = watchdog.empty_state()
+    state.actions = [
+        ActionRecord(
+            ts=datetime.now(timezone.utc),
+            service_name=endpoint().name,
+            action=action,
+            trigger="automatic_remediation",
+            result="failed",
+        )
+        for action in ["restart_tunnel", "restore", "rotate"]
+    ]
+    watchdog.store.write_state(state)
+    enricher = SimpleNamespace(
+        enrich=Mock(
+            return_value=IncidentEnrichment(
+                summary="External connectivity failed",
+                human_explanation="Investigate the configured proxy",
+            )
+        )
+    )
+    investigator = SimpleNamespace(
+        investigate=Mock(
+            return_value=InvestigationPlan(
+                summary="External investigation",
+                findings=["Proxy is unavailable"],
+                action_plan=["Contact the endpoint operator"],
+            )
+        )
+    )
+    monkeypatch.setattr(watchdog, "_incident_enricher", enricher)
+    monkeypatch.setattr(watchdog, "_incident_investigator", investigator)
+    monkeypatch.setattr(
+        ExternalProxyAdapter,
+        "observe",
+        AsyncMock(
+            return_value=EgressObservation(0, "connectivity", connectivity=False)
+        ),
+    )
+
+    async def exercise():
+        updated = await watchdog.run_once()
+        assert len(updated.actions) == 3
+        incident = watchdog.store.load_incidents()[0]
+        assert incident.source == "external_proxy"
+        await watchdog.investigate_incident(incident.id)
+        assert len(watchdog.store.read_state().actions) == 3
+
+    asyncio.run(exercise())
+    enricher.enrich.assert_called_once()
+    assert enricher.enrich.call_args.args[0].recent_actions == []
+    investigator.investigate.assert_called_once()
+    assert investigator.investigate.call_args.args[0].recent_actions == []
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#Shared Provider Bucket]]
+@pytest.mark.parametrize("output_format", ["json", "yaml", "table"])
+def test_external_fleet_status_preserves_compose_provider_bucket(
+    tmp_path, monkeypatch, output_format
+):
+    from ruamel.yaml import YAML
+    from proxy2vpn.core.egress import EgressObservation
+
+    compose = tmp_path / "compose.yml"
+    original = "services:\n  managed:\n    image: qmcgaw/gluetun\n    ports: []\n    labels:\n      vpn.provider: external_proxy\n"
+    compose.write_text(original)
+    write_config(tmp_path, [endpoint()])
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.gluetun_runtime.GluetunRuntime.inspect",
+        AsyncMock(
+            return_value=RuntimeInspection(
+                "running",
+                [
+                    DiagnosticResult(
+                        check="connectivity",
+                        passed=True,
+                        message="working",
+                        recommendation="",
+                    )
+                ],
+                control_api_reachable=True,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        ExternalProxyAdapter,
+        "observe",
+        AsyncMock(return_value=EgressObservation(100, "healthy", connectivity=True)),
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "-f",
+            str(compose),
+            "fleet",
+            "status",
+            "--format",
+            output_format,
+            "--show-health",
+            "--no-show-allocation",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    if output_format == "table":
+        assert "managed" in result.output and "office-proxy" in result.output
+        assert "Total services: 2" in result.output
+    else:
+        payload = (
+            json.loads(result.output)
+            if output_format == "json"
+            else YAML(typ="safe").load(result.output)
+        )
+        assert payload["total_services"] == 2
+        assert [
+            item["name"] for item in payload["services_by_provider"]["external_proxy"]
+        ] == ["managed", "office-proxy"]
+        assert set(payload["health"]) == {"managed", "office-proxy"}
+        assert payload["health"]["managed"]["source"] == "gluetun"
+        assert payload["health"]["office-proxy"]["source"] == "external_proxy"
+    assert compose.read_text() == original
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#Provider Label Is Not Endpoint Source]]
+def test_gluetun_investigation_guidance_ignores_external_provider_label(
+    tmp_path, fake_gluetun_runtime
+):
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        "services:\n  managed:\n    image: qmcgaw/gluetun\n    ports: []\n    labels:\n      vpn.provider: external_proxy\n"
+    )
+    fake_gluetun_runtime.inspect.return_value = RuntimeInspection(
+        "running",
+        [
+            DiagnosticResult(
+                check="config_error",
+                passed=False,
+                message="Invalid VPN configuration",
+                recommendation="Repair the profile",
+                persistent=True,
+            )
+        ],
+    )
+    watchdog = AgentWatchdog(compose, runtime=fake_gluetun_runtime)
+
+    async def exercise():
+        await watchdog.run_once()
+        incident = watchdog.store.load_incidents()[0]
+        context = await watchdog._build_investigation_context(incident)
+        assert context.source == "gluetun" and context.provider == "external_proxy"
+        investigated = await watchdog.investigate_incident(incident.id)
+        assert "Current container status" in " ".join(
+            investigated.investigation.findings
+        )
+        assert not any(
+            "endpoint operator" in item
+            for item in investigated.investigation.action_plan
+        )
+
+    asyncio.run(exercise())

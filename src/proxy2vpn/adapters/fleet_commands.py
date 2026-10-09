@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Mapping
+from contextlib import nullcontext
 import json
 from pathlib import Path
 
@@ -188,8 +189,9 @@ def fleet_status(
         fleet_manager = None
         fleet_status_data: dict
         if compose_file.exists() or not external:
-            fleet_manager = FleetManager(compose_file_path=compose_file)
-            fleet_status_data = fleet_manager.get_fleet_status()
+            with console.capture() if format in {"json", "yaml"} else nullcontext():
+                fleet_manager = FleetManager(compose_file_path=compose_file)
+                fleet_status_data = fleet_manager.get_fleet_status()
         else:
             fleet_status_data = {
                 "total_services": 0,
@@ -208,18 +210,22 @@ def fleet_status(
                 "External endpoint ids must not collide with compose service names"
             )
         if external:
-            fleet_status_data["services_by_provider"]["external_proxy"] = [
-                {
-                    "name": endpoint.name,
-                    "profile": None,
-                    "location": "",
-                    "port": endpoint.connection.port,
-                    "host": endpoint.connection.host,
-                    "source": "external_proxy",
-                    "control_port": None,
-                }
-                for endpoint in external
-            ]
+            fleet_status_data["services_by_provider"].setdefault(
+                "external_proxy", []
+            ).extend(
+                [
+                    {
+                        "name": endpoint.name,
+                        "profile": None,
+                        "location": "",
+                        "port": endpoint.connection.port,
+                        "host": endpoint.connection.host,
+                        "source": "external_proxy",
+                        "control_port": None,
+                    }
+                    for endpoint in external
+                ]
+            )
             fleet_status_data["total_services"] += len(external)
 
         if show_allocation and (not external or format == "table"):

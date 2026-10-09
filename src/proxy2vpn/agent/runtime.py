@@ -829,7 +829,7 @@ class AgentWatchdog:
             list(results),
             fallback=reason,
             recommended_action=recommended_action,
-            recent_actions=state.actions,
+            recent_actions=state.actions if snapshot.source == "gluetun" else [],
             failure_count=snapshot.consecutive_failures,
         )
         severity: IncidentSeverity = (
@@ -1871,13 +1871,11 @@ class AgentWatchdog:
             ),
             None,
         )
-        recent_actions = [
-            action
-            for action in self._recent_actions_for_service(
-                state.actions,
-                incident.service_name,
-            )
-        ]
+        recent_actions = (
+            self._recent_actions_for_service(state.actions, incident.service_name)
+            if incident.source == "gluetun"
+            else []
+        )
 
         if incident.source == "external_proxy":
             external = next(
@@ -1894,6 +1892,7 @@ class AgentWatchdog:
                 else None
             )
             return InvestigationContext(
+                source=incident.source,
                 incident_id=incident.id,
                 incident_type=incident.type,
                 severity=incident.severity,
@@ -1985,6 +1984,7 @@ class AgentWatchdog:
             shared_profile_peer_probe_failures = peer_evidence["probe_failed"]
 
         return InvestigationContext(
+            source=incident.source,
             incident_id=incident.id,
             incident_type=incident.type,
             severity=incident.severity,
@@ -2182,7 +2182,7 @@ class AgentWatchdog:
     def _fallback_investigation(
         self, context: InvestigationContext
     ) -> InvestigationPlan:
-        if context.provider == "external_proxy":
+        if context.source == "external_proxy":
             return InvestigationPlan(
                 summary=f"Investigate external endpoint '{context.service_name}'.",
                 findings=[f"Current health score: {context.health_score}/100."]

@@ -85,3 +85,15 @@ Verify current Gluetun services can rotate automatically and by approval despite
 ## Investigation Uses Persisted Source
 
 Verify historical Gluetun incidents keep their investigation backend when an external endpoint or snapshot reuses the name, without probing the unrelated proxy or borrowing its health evidence.
+
+## External Incident Action Evidence
+
+Verify external incident enrichment and investigation omit historical Gluetun restart, restore, and rotation evidence after name reuse, while retaining the audit history in persisted state.
+
+## Shared Provider Bucket
+
+Verify external fleet entries extend an existing Compose provider bucket named external_proxy, preserving service counts and source-specific health in JSON, YAML, and table output.
+
+## Provider Label Is Not Endpoint Source
+
+Verify a Gluetun service labeled with provider external_proxy retains Gluetun investigation guidance, since provider grouping does not establish endpoint source.
