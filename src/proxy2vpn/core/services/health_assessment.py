@@ -7,12 +7,20 @@ from datetime import datetime, timezone
 from inspect import isawaitable
 from typing import Awaitable, Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from proxy2vpn.adapters.gluetun_runtime import GluetunRuntime, GluetunRuntimeInterface
 from proxy2vpn.adapters.logging_utils import get_event_logger, logging_context
+from proxy2vpn.adapters.egress import GluetunEgressAdapter
+from proxy2vpn.adapters.external_proxy import ExternalProxyAdapter
+from proxy2vpn.core.egress import (
+    EgressAdapter,
+    EgressCapabilities,
+    GLUETUN_CAPABILITIES,
+)
+from proxy2vpn.core.external_proxy import ExternalProxyEndpoint
 from proxy2vpn.core.models import VPNService
-from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
+from proxy2vpn.core.services.diagnostics import DiagnosticResult
 
 
 logger = get_event_logger(__name__)
@@ -40,12 +48,35 @@ class HealthAssessment(BaseModel):
     health_class: str
     failing_checks: list[str] = Field(default_factory=list)
     results: list[DiagnosticResult] = Field(default_factory=list)
-    control_api_reachable: bool = False
+    control_api_reachable: bool | None = False
+    source: str = "gluetun"
+    capabilities: EgressCapabilities = Field(
+        default_factory=lambda: GLUETUN_CAPABILITIES
+    )
+    available: bool | None = None
+    restart_ready: bool | None = None
+    authentication: bool | None = None
+    connectivity: bool | None = None
+    latency_ms: float | None = None
     current_egress_ip: str | None = None
     direct_ip: str | None = None
     peer_evidence: PeerEvidence = Field(default_factory=PeerEvidence)
 
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
+
+    @model_validator(mode="after")
+    def normalize_legacy_evidence(self) -> "HealthAssessment":
+        # Existing callers/state fixtures still construct Gluetun health objects.
+        if self.source == "gluetun":
+            if self.available is None:
+                object.__setattr__(
+                    self, "available", self.container_status == "running"
+                )
+            if self.restart_ready is None:
+                object.__setattr__(
+                    self, "restart_ready", bool(self.control_api_reachable)
+                )
+        return self
 
 
 # @lat: [[lat.md/health#Health Assessment]]
@@ -77,7 +108,7 @@ class HealthAssessmentService:
 
     async def assess_service(
         self,
-        service: VPNService,
+        service: VPNService | ExternalProxyEndpoint,
         *,
         peer_assessments: dict[str, HealthAssessment] | None = None,
         lines: int = 20,
@@ -103,7 +134,7 @@ class HealthAssessmentService:
 
     async def _assess_service(
         self,
-        service: VPNService,
+        service: VPNService | ExternalProxyEndpoint,
         *,
         peer_assessments: dict[str, HealthAssessment] | None,
         lines: int,
@@ -112,39 +143,51 @@ class HealthAssessmentService:
         """Collect diagnostics inside the service's logging context."""
 
         assessed_at = datetime.now(timezone.utc)
-        observation = await self.runtime.inspect(service, lines=lines, timeout=timeout)
-        if observation.failure is not None:
-            raise RuntimeError(observation.failure)
-        container_status = observation.container_status
-        results = observation.results
-        if container_status == "missing":
-            health_score, health_class = 0, "missing"
-            failing_checks = ["container_missing"]
-        elif container_status != "running":
-            health_score, health_class = 0, "container_stopped"
-            failing_checks = ["container_not_running"]
+        adapter: EgressAdapter
+        container_status = "not_applicable"
+        control_api_reachable = None
+        direct_ip = None
+        if isinstance(service, VPNService):
+            gluetun = GluetunEgressAdapter(service, self.runtime, self.threshold)
+            adapter = gluetun
+            observation = await adapter.observe(lines=lines, timeout=timeout)
+            assert gluetun.inspection is not None
+            container_status = gluetun.inspection.container_status
+            control_api_reachable = gluetun.inspection.control_api_reachable
+            direct_ip = gluetun.inspection.direct_ip
         else:
-            health_score = DiagnosticAnalyzer().health_score(results)
-            health_class = self._classify(container_status, health_score, results)
-            failing_checks = [result.check for result in results if not result.passed]
+            adapter = ExternalProxyAdapter(service, self.probe_timeout)
+            observation = await adapter.observe(lines=lines, timeout=timeout)
+        failing_checks = [r.check for r in observation.results if r.passed is not True]
+        if container_status == "missing":
+            failing_checks = ["container_missing"]
+        elif isinstance(service, VPNService) and container_status != "running":
+            failing_checks = ["container_not_running"]
         return HealthAssessment(
-            service_name=service.name,
+            service_name=adapter.identity.name,
             profile_name=service.profile,
             assessed_at=assessed_at,
             container_status=container_status,
-            health_score=health_score,
-            health_class=health_class,
+            health_score=observation.health_score,
+            health_class=observation.health_class,
             failing_checks=failing_checks,
-            results=results,
-            control_api_reachable=observation.control_api_reachable,
+            results=observation.results,
+            control_api_reachable=control_api_reachable,
             current_egress_ip=observation.current_egress_ip,
-            direct_ip=observation.direct_ip,
+            direct_ip=direct_ip,
+            source=adapter.identity.source,
+            capabilities=adapter.capabilities,
+            available=observation.available,
+            restart_ready=observation.restart_ready,
+            authentication=observation.authentication,
+            connectivity=observation.connectivity,
+            latency_ms=observation.latency_ms,
             peer_evidence=self._peer_evidence(service, peer_assessments),
         )
 
     async def assess_services(
         self,
-        services: list[VPNService],
+        services: list[VPNService | ExternalProxyEndpoint],
         *,
         lines: int = 20,
         timeout: int | None = None,
@@ -155,8 +198,12 @@ class HealthAssessmentService:
         assessments: dict[str, HealthAssessment] = {}
 
         async def _assess(
-            service: VPNService,
-        ) -> tuple[VPNService, HealthAssessment | None, Exception | None]:
+            service: VPNService | ExternalProxyEndpoint,
+        ) -> tuple[
+            VPNService | ExternalProxyEndpoint,
+            HealthAssessment | None,
+            Exception | None,
+        ]:
             with logging_context(service_name=service.name, provider=service.provider):
                 try:
                     assessment = await self.assess_service(
@@ -173,26 +220,40 @@ class HealthAssessmentService:
             asyncio.create_task(_assess(service)) for service in services
         ]
 
-        for task in asyncio.as_completed(assessment_tasks):
-            service, assessment, error = await task
-            if assessment is not None:
-                assessments[assessment.service_name] = assessment
-            else:
-                assessments[service.name] = HealthAssessment(
-                    service_name=service.name,
-                    profile_name=service.profile,
-                    assessed_at=datetime.now(timezone.utc),
-                    container_status="unknown",
-                    health_score=0,
-                    health_class="assessment_failed",
-                    failing_checks=["assessment_error"],
-                    control_api_reachable=False,
-                )
+        try:
+            for task in asyncio.as_completed(assessment_tasks):
+                service, assessment, error = await task
+                if assessment is not None:
+                    assessments[assessment.service_name] = assessment
+                else:
+                    assessments[service.name] = HealthAssessment(
+                        service_name=service.name,
+                        profile_name=service.profile,
+                        assessed_at=datetime.now(timezone.utc),
+                        container_status="unknown",
+                        health_score=0,
+                        health_class="assessment_failed",
+                        failing_checks=["assessment_error"],
+                        control_api_reachable=False
+                        if isinstance(service, VPNService)
+                        else None,
+                        source="gluetun"
+                        if isinstance(service, VPNService)
+                        else "external_proxy",
+                        capabilities=GLUETUN_CAPABILITIES
+                        if isinstance(service, VPNService)
+                        else EgressCapabilities(),
+                    )
 
-            if progress_callback is not None:
-                callback_result = progress_callback(service.name)
-                if isawaitable(callback_result):
-                    await callback_result
+                if progress_callback is not None:
+                    callback_result = progress_callback(service.name)
+                    if isawaitable(callback_result):
+                        await callback_result
+        finally:
+            for task in assessment_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*assessment_tasks, return_exceptions=True)
 
         enriched = {
             name: assessment.model_copy(
@@ -225,10 +286,10 @@ class HealthAssessmentService:
 
     def _peer_evidence(
         self,
-        service: VPNService,
+        service: VPNService | ExternalProxyEndpoint,
         peer_assessments: dict[str, HealthAssessment] | None,
     ) -> PeerEvidence:
-        if not peer_assessments:
+        if not peer_assessments or service.profile is None:
             return PeerEvidence()
 
         evidence = PeerEvidence()
@@ -238,7 +299,7 @@ class HealthAssessmentService:
             if assessment.profile_name != service.profile:
                 continue
             is_healthy = (
-                assessment.container_status == "running"
+                assessment.available is True
                 and assessment.health_score >= self.threshold
             )
             if is_healthy:
@@ -263,14 +324,14 @@ class HealthAssessmentService:
 
     def _peer_evidence_from_map(
         self,
-        services: list[VPNService],
+        services: list[VPNService | ExternalProxyEndpoint],
         peer_assessments: dict[str, HealthAssessment],
         service_name: str,
     ) -> PeerEvidence:
         current = next(
             (service for service in services if service.name == service_name), None
         )
-        if current is None:
+        if current is None or current.profile is None:
             return PeerEvidence()
 
         evidence = PeerEvidence()
@@ -282,7 +343,7 @@ class HealthAssessmentService:
                 evidence.probe_failed.append(candidate.name)
                 continue
             is_healthy = (
-                assessment.container_status == "running"
+                assessment.available is True
                 and assessment.health_score >= self.threshold
             )
             if is_healthy:

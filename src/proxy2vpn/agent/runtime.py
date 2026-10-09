@@ -39,6 +39,13 @@ from proxy2vpn.agent.recovery_policy import (
     persistent_auth_or_config_failure,
     recently_dismissed,
 )
+from proxy2vpn.adapters.external_proxy import load_external_endpoints
+from proxy2vpn.core.external_proxy import ExternalProxyEndpoint
+from proxy2vpn.core.egress import (
+    EgressCapabilities,
+    GLUETUN_CAPABILITIES,
+    require_supported_operation,
+)
 from proxy2vpn.adapters.docker_ops import _load_env_file
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.fleet_state_manager import (
@@ -65,10 +72,11 @@ logger = get_logger(__name__)
 events = get_event_logger(__name__)
 
 
-class HealthEvaluation(TypedDict):
+class HealthEvaluation(TypedDict, total=False):
     container_status: str
     health_score: int
     results: list[DiagnosticResult]
+    assessment: HealthAssessment
 
 
 def utc_now() -> datetime:
@@ -179,7 +187,7 @@ class AgentWatchdog:
     async def _run_cycle(self, state: AgentState) -> AgentState:
         """Perform a cycle inside the operation's logging context."""
 
-        manager = ComposeManager(self.compose_file)
+        manager = None
         self._inflight_service_names.clear()
         progress_at = utc_now()
         state.status.compose_path = str(self.compose_file)
@@ -194,10 +202,17 @@ class AgentWatchdog:
         updated_snapshots: list[ServiceSnapshot] = list(state.services)
         cycle_error: Exception | None = None
         try:
-            cleanup = await self._runtime.cleanup_orphans(manager)
-            if cleanup.error is not None:
+            manager, services = self._inventory()
+            # External-only workspaces require no Docker daemon.
+            cleanup = None
+            if manager is not None and (
+                not any(isinstance(item, ExternalProxyEndpoint) for item in services)
+                or any(isinstance(item, VPNService) for item in services)
+            ):
+                cleanup = await self._runtime.cleanup_orphans(manager)
+            if cleanup is not None and cleanup.error is not None:
                 raise RuntimeError(cleanup.error)
-            orphaned = cleanup.removed
+            orphaned = cleanup.removed if cleanup is not None else []
             if orphaned:
                 logger.warning(
                     "agent_orphaned_containers_removed",
@@ -207,7 +222,6 @@ class AgentWatchdog:
                         "count": len(orphaned),
                     },
                 )
-            services = manager.list_services()
             state.status.service_count = len(services)
             state.status.active_cycle_phase = "assessing_services"
             self.store.write_state(state)
@@ -340,6 +354,8 @@ class AgentWatchdog:
         incident = next((item for item in incidents if item.id == incident_id), None)
         if incident is None:
             raise KeyError(f"Incident '{incident_id}' not found")
+        if self._is_external_endpoint(incident.service_name):
+            require_supported_operation(EgressCapabilities(), "replace_endpoint")
         decision = self._recovery_policy.manual_rotation(incident, approved=True)
         state = self.store.read_state() or self.empty_state()
         self._inflight_service_names.pop(incident.service_name, None)
@@ -494,10 +510,51 @@ class AgentWatchdog:
             state.status.started_at = utc_now()
         return state
 
+    def _external_endpoints(self) -> list[ExternalProxyEndpoint]:
+        path = Path(self.settings.external_proxies_file).expanduser()
+        if not path.is_absolute():
+            path = self.compose_file.parent / path
+        return load_external_endpoints(path)
+
+    def _is_external_endpoint(self, service_name: str) -> bool:
+        if any(
+            endpoint.name == service_name for endpoint in self._external_endpoints()
+        ):
+            return True
+        state = self.store.read_state()
+        return bool(
+            state
+            and any(
+                snapshot.service_name == service_name
+                and snapshot.source == "external_proxy"
+                for snapshot in state.services
+            )
+        )
+
+    def _inventory(
+        self,
+    ) -> tuple[ComposeManager | None, list[VPNService | ExternalProxyEndpoint]]:
+        external = self._external_endpoints()
+        manager = (
+            ComposeManager(self.compose_file)
+            if self.compose_file.exists() or not external
+            else None
+        )
+        services: list[VPNService | ExternalProxyEndpoint] = (
+            list(manager.list_services()) if manager is not None else []
+        )
+        names = {service.name for service in services}
+        if any(endpoint.name in names for endpoint in external):
+            raise ValueError(
+                "External endpoint ids must not collide with compose service names"
+            )
+        services.extend(external)
+        return manager, services
+
     def _recovery_context(
         self,
-        manager: ComposeManager,
-        service: VPNService,
+        manager: ComposeManager | None,
+        service: VPNService | ExternalProxyEndpoint,
         assessment: HealthAssessment,
         snapshot: ServiceSnapshot,
         state: AgentState,
@@ -511,15 +568,18 @@ class AgentWatchdog:
                 candidate.profile,
                 candidate.provider,
                 self._service_country(candidate),
+                GLUETUN_CAPABILITIES,
             )
-            for candidate in manager.list_services()
+            for candidate in (manager.list_services() if manager is not None else [])
         }
         identity = ServiceIdentity(
             service.name,
-            service.profile,
+            service.profile or "",
             service.provider,
-            self._service_country(service),
+            self._service_country(service) if isinstance(service, VPNService) else "",
+            assessment.capabilities,
         )
+        identities[identity.name] = identity
         return RecoveryContext(
             service=identity,
             assessment=assessment,
@@ -533,8 +593,8 @@ class AgentWatchdog:
 
     async def _process_service(
         self,
-        manager: ComposeManager,
-        service: VPNService,
+        manager: ComposeManager | None,
+        service: VPNService | ExternalProxyEndpoint,
         previous: ServiceSnapshot | None,
         state: AgentState,
         incidents: list[AgentIncident],
@@ -590,10 +650,14 @@ class AgentWatchdog:
                     )
                 return snapshot
             if decision.action == "rotate":
+                require_supported_operation(assessment.capabilities, "replace_endpoint")
+                assert isinstance(service, VPNService)
                 return await self._execute_recovery_rotation(
                     service, snapshot, list(context.results), state, incidents
                 )
 
+            require_supported_operation(assessment.capabilities, decision.action)
+            assert isinstance(service, VPNService) and manager is not None
             self._persist_cycle_progress(
                 state,
                 service_name=service.name,
@@ -671,6 +735,15 @@ class AgentWatchdog:
             snapshot.container_status = health["container_status"]
             snapshot.health_score = health["health_score"]
             snapshot.last_check_at = utc_now()
+            observed = health.get("assessment")
+            if observed is not None:
+                snapshot.health_class = observed.health_class
+                snapshot.failing_checks = observed.failing_checks
+                snapshot.current_egress_ip = observed.current_egress_ip
+                snapshot.authentication = observed.authentication
+                snapshot.connectivity = observed.connectivity
+                snapshot.latency_ms = observed.latency_ms
+                context = replace(context, assessment=observed)
             recovered = snapshot.health_score >= self.settings.health_threshold
             snapshot.consecutive_failures = 0 if recovered else failure_count
             snapshot.degraded_since = None if recovered else degraded_since
@@ -723,7 +796,7 @@ class AgentWatchdog:
 
     def _record_recovery_incident(
         self,
-        service: VPNService,
+        service: VPNService | ExternalProxyEndpoint,
         snapshot: ServiceSnapshot,
         results: Sequence[DiagnosticResult],
         state: AgentState,
@@ -745,7 +818,7 @@ class AgentWatchdog:
         severity: IncidentSeverity = (
             "medium" if incident_type == "rotation_exhausted" else "high"
         )
-        if incident_type == "auth_config_failure":
+        if incident_type in {"auth_config_failure", "endpoint_unhealthy"}:
             incident = self._upsert_incident(
                 incidents,
                 service.name,
@@ -757,6 +830,7 @@ class AgentWatchdog:
                 snapshot.consecutive_failures,
             )
         else:
+            assert isinstance(service, VPNService)
             incident = self._upsert_scope_incident(
                 incidents,
                 service,
@@ -1056,6 +1130,7 @@ class AgentWatchdog:
             "container_status": assessment.container_status,
             "health_score": assessment.health_score,
             "results": assessment.results,
+            "assessment": assessment,
         }
 
     def _select_log_evidence(
@@ -1510,6 +1585,8 @@ class AgentWatchdog:
         *,
         state: AgentState | None = None,
     ) -> OperationResult:
+        if self._is_external_endpoint(service_name):
+            require_supported_operation(EgressCapabilities(), "replace_endpoint")
         fallback_countries: list[str] = []
         try:
             service = ComposeManager(self.compose_file).get_service(service_name)
@@ -1564,8 +1641,7 @@ class AgentWatchdog:
     async def build_remediation_overview(self, state: AgentState) -> dict[str, Any]:
         """Return live remediation status for the current compose root."""
 
-        manager = ComposeManager(self.compose_file)
-        services = manager.list_services()
+        manager, services = self._inventory()
         assessments = await self._health_assessor.assess_services(services)
         incidents = self.store.load_incidents()
         snapshots_by_name = {
@@ -1583,6 +1659,24 @@ class AgentWatchdog:
                         "healthy": True,
                         "suppressed": False,
                         "blocks": [],
+                    }
+                )
+                continue
+
+            if isinstance(service, ExternalProxyEndpoint):
+                entries.append(
+                    {
+                        "service_name": service.name,
+                        "healthy": False,
+                        "suppressed": True,
+                        "health_class": assessment.health_class,
+                        "health_score": assessment.health_score,
+                        "blocks": [
+                            {
+                                "type": "unsupported_operation",
+                                "reason": "External endpoint recovery requires its operator.",
+                            }
+                        ],
                     }
                 )
                 continue
@@ -1760,6 +1854,53 @@ class AgentWatchdog:
                 incident.service_name,
             )
         ]
+
+        external = next(
+            (
+                endpoint
+                for endpoint in self._external_endpoints()
+                if endpoint.name == incident.service_name
+            ),
+            None,
+        )
+        if external is not None or (
+            snapshot is not None and snapshot.source == "external_proxy"
+        ):
+            assessment = (
+                await self._health_assessor.assess_service(external)
+                if external is not None
+                else None
+            )
+            return InvestigationContext(
+                incident_id=incident.id,
+                incident_type=incident.type,
+                severity=incident.severity,
+                status=incident.status,
+                service_name=incident.service_name,
+                incident_summary=incident.summary,
+                recommended_action=incident.recommended_action,
+                failure_count=incident.failure_count,
+                provider="external_proxy",
+                container_status="not_applicable",
+                health_score=assessment.health_score
+                if assessment is not None
+                else snapshot.health_score
+                if snapshot is not None
+                else None,
+                control_api_reachable=None,
+                profile_validation_errors=[],
+                issues=self._diagnostic_payload(assessment.results)
+                if assessment is not None
+                else [
+                    {
+                        "check": "configuration",
+                        "message": "External endpoint is no longer configured.",
+                        "recommendation": "Restore its configuration or dismiss this incident.",
+                    }
+                ],
+                recent_actions=recent_actions,
+                human_explanation=incident.human_explanation,
+            )
 
         manager: ComposeManager | None = None
         service: VPNService | None = None
@@ -2019,6 +2160,17 @@ class AgentWatchdog:
     def _fallback_investigation(
         self, context: InvestigationContext
     ) -> InvestigationPlan:
+        if context.provider == "external_proxy":
+            return InvestigationPlan(
+                summary=f"Investigate external endpoint '{context.service_name}'.",
+                findings=[f"Current health score: {context.health_score}/100."]
+                + [issue["message"] for issue in context.issues],
+                action_plan=[
+                    "Verify the configured proxy address and credential environment variables.",
+                    "Check upstream availability and any configured exit-IP allowlist with the endpoint operator.",
+                    "Reassess the endpoint after repair. Restart, replacement, session renewal, and exit-IP change are unsupported by this adapter.",
+                ],
+            )
         findings: list[str] = []
         issues_by_check = {issue["check"]: issue for issue in context.issues}
 

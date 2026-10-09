@@ -15,7 +15,7 @@ class DiagnosticResult(BaseModel):
     """Result of running a diagnostic check."""
 
     check: str
-    passed: bool
+    passed: bool | None
     message: str
     recommendation: str
     persistent: bool = False

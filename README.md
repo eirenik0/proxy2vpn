@@ -242,6 +242,66 @@ password = "mypassword"
 
 After editing the file, run `proxy2vpn vpn update NAME` to recreate the container with the new auth configuration.
 
+## External HTTP CONNECT proxies
+
+External endpoints can join health checks and watchdog incidents without a local
+Docker container. Save `external-proxies.json` next to the active Compose path:
+
+```json
+{
+  "version": 1,
+  "endpoints": [{
+    "id": "office-proxy",
+    "connection": {
+      "protocol": "http_connect",
+      "host": "proxy.example.com",
+      "port": 3128
+    },
+    "credentials": {
+      "username_env": "OFFICE_PROXY_USER",
+      "password_env": "OFFICE_PROXY_PASSWORD"
+    },
+    "expected_egress_ips": ["203.0.113.10"]
+  }]
+}
+```
+
+Set those credential variables in the watchdog environment. Omit `credentials`
+for anonymous proxies; only variable names belong in the JSON file. Endpoint ids
+must be unique and must not collide with Compose service names. Existing Compose
+files need no changes. An external-only workspace can omit the Compose file:
+its selected path still determines the configuration and `.proxy2vpn-agent/` root.
+
+```bash
+proxy2vpn -f /path/to/workspace/compose.yml agent run --once
+proxy2vpn -f /path/to/workspace/compose.yml agent status --json --live
+proxy2vpn -f /path/to/workspace/compose.yml agent incidents --json
+proxy2vpn -f /path/to/workspace/compose.yml fleet status --show-health --format json --no-show-allocation
+```
+
+`PROXY2VPN_AGENT_EXTERNAL_PROXIES_FILE` overrides the JSON path for watchdog and
+fleet status; relative paths resolve next to the selected Compose path. Optional
+`probe_urls` overrides the default HTTPS IP reflectors (`ipinfo.io/ip` and
+`ifconfig.me/ip`). Each probe must return a complete IP literal. TLS certificates
+are verified, redirects are disabled, and failed requests never fall back to a
+direct host connection. The proxy hostname resolves locally; CONNECT sends the
+target hostname for proxy-side DNS. The proxy hop itself uses HTTP; the target
+connection uses TLS. Ambient proxy variables and netrc are ignored.
+
+Health requires request connectivity and observed IP evidence. Missing evidence
+is unknown; HTTP 407 means rejected proxy authentication. The optional
+`expected_egress_ips` allowlist checks egress identity. Without it, a successful
+probe confirms the configured proxy route, without claiming geography, anonymity,
+or vendor identity. Sharing the host's public IP is allowed. Credentials,
+response bodies, and raw request exceptions are excluded from diagnostics.
+
+The first adapter offers health and investigation only. It cannot restart,
+restore, replace endpoints/sessions, or request an exit-IP change. Unhealthy
+endpoints create operator-investigation incidents; healthy observations resolve
+them using the same configured id. Each assessment opens a new client session,
+with no sticky-session or stable-exit-IP guarantee. Compose deployment, allocation,
+and rotation commands continue to manage Gluetun services.
+
 ## Enterprise Fleet Management
 
 **The real power of Proxy2VPN**: Deploy and manage dozens of VPN endpoints across the globe like infrastructure, not individual connections.

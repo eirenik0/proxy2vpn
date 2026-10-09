@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AgentSettings(BaseSettings):
     """Single source of truth for watchdog and enrichment settings."""
 
+    external_proxies_file: str = "external-proxies.json"
     state_dirname: str = ".proxy2vpn-agent"
     state_file: str = "state.json"
     incidents_file: str = "incidents.jsonl"

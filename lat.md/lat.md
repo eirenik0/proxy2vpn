@@ -17,3 +17,6 @@ This index points to the stable concepts that explain how the CLI, compose state
 
 - [[recovery-policy]]: Pure recovery decisions, observation requirements, limits, and orchestration ownership.
 - [[recovery-policy-tests]]: Deterministic policy and interrupted-execution specifications.
+
+- [[egress]]: Shared endpoint identity, capabilities, external configuration, and source-specific health.
+- [[egress-tests]]: Controlled CONNECT/TLS, unsupported-action, and workflow regression specifications.

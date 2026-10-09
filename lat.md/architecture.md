@@ -42,6 +42,8 @@ Profiles define reusable container defaults, while VPN services add the per-cont
 
 [[src/proxy2vpn/core/models.py#Profile]] models the profile anchor stored in compose. [[src/proxy2vpn/core/models.py#VPNService]] models the concrete service that is materialized into compose, Docker labels, and container environment variables. The service model is responsible for derived mutations such as renaming, updating location metadata, and projecting the effective state back to compose-compatible structures.
 
+External endpoints use [[egress#External Endpoint Configuration]] instead of fabricating VPN containers or Compose definitions. The [[egress#Shared Egress Interface]] unifies common health evidence while retaining backend-specific models.
+
 # Server Catalog
 
 The location catalog preserves one provider-keyed cache while adapting Gluetun's upstream manifest and per-provider files.

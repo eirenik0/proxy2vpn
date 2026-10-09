@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from proxy2vpn.core.egress import EgressCapabilities, GLUETUN_CAPABILITIES
 
 
 IncidentSeverity = Literal["low", "medium", "high"]
@@ -42,6 +43,16 @@ class ServiceSnapshot(BaseModel):
     consecutive_failures: int = 0
     degraded_since: datetime | None = None
     last_check_at: datetime
+    source: str = "gluetun"
+    capabilities: EgressCapabilities = Field(
+        default_factory=lambda: GLUETUN_CAPABILITIES
+    )
+    health_class: str | None = None
+    failing_checks: list[str] = Field(default_factory=list)
+    current_egress_ip: str | None = None
+    authentication: bool | None = None
+    connectivity: bool | None = None
+    latency_ms: float | None = None
     last_action: str | None = None
     last_action_result: str | None = None
 

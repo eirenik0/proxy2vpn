@@ -8,6 +8,8 @@ Cycle, service, action, and incident events follow [[lat.md/logging#Operational 
 
 Runtime inspection, incident evidence, control requests, restoration, and orphan cleanup use [[lat.md/gluetun-runtime#Gluetun Runtime]]. The watchdog retains recovery execution, rechecks, timing, and action history; deterministic decisions use [[recovery-policy#Recovery Policy]]; its shared assessor receives the same injected runtime instance.
 
+[[egress#Watchdog And Fleet Workflows]] adds external endpoint inventory and investigation-only incidents. External-only roots need no Docker or Compose file. Capabilities block unsupported recovery before execution, while existing Gluetun actions and state remain compatible.
+
 # Incidents And State
 
 Agent state is stored next to the compose file so watchdog status, daemon metadata, and incident history move with the workspace.
