@@ -1,4 +1,4 @@
-.PHONY: help test changelog-check changelog changelog-draft lint fmt fmt-check clean all
+.PHONY: help test test-live-security changelog-check changelog changelog-draft lint fmt fmt-check clean all
 
 UV_PATH = PATH="$$PATH:$(HOME)/.local/bin"
 
@@ -13,6 +13,9 @@ help: ## Show available targets
 		@echo "  fmt-check         Check Python formatting without modifying files"
 		@echo "  clean             Clean up temporary files and caches"
 		@echo "  all               Run all checks (format check, lint, test)"
+
+test-live-security:
+	PROXY2VPN_LIVE_SECURITY=1 PROXY2VPN_LIVE_STRICT=1 $(UV_PATH) uv run --locked pytest tests/test_live_security.py -q -rs --tb=short --junitxml=/tmp/proxy2vpn-live-security.xml
 
 test:
 	$(UV_PATH) uv run --locked pytest -n auto
