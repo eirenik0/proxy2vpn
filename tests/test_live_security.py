@@ -54,10 +54,13 @@ def command(args, *, stage, input=None, timeout=180):
     return result.stdout
 
 
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+def free_ports():
+    # Reserve both together across IPv4 interfaces to avoid duplicate allocation
+    # or selecting a port already occupied on the private publication address.
+    with socket.socket() as proxy, socket.socket() as control:
+        proxy.bind(("0.0.0.0", 0))
+        control.bind(("0.0.0.0", 0))
+        return proxy.getsockname()[1], control.getsockname()[1]
 
 
 def private_write(path, text):
@@ -71,7 +74,7 @@ class Lab:
         root.mkdir(mode=0o700)
         self.compose = root / "compose.yml"
         self.project = "p2v-live-" + uuid.uuid4().hex[:12]
-        self.proxy_port, self.control_port = free_port(), free_port()
+        self.proxy_port, self.control_port = free_ports()
         self.network = self.project + "-probe"
         private_write(root / "vpn.env", profile.read_text())
         self.data = {

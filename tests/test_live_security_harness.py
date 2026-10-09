@@ -8,8 +8,7 @@ import test_live_security as live
 
 # @lat: [[live-security-tests#Live Security Tests#Harness Failure And Isolation Guards]]
 def test_live_harness_preserves_backups_and_attempts_all_cleanup(tmp_path, monkeypatch):
-    ports = iter((28000, 28001))
-    monkeypatch.setattr(live, "free_port", lambda: next(ports))
+    monkeypatch.setattr(live, "free_ports", lambda: (28000, 28001))
     profile = tmp_path / "input.env"
     profile.write_text(
         "VPN_SERVICE_PROVIDER=protonvpn\nOPENVPN_USER=test\nOPENVPN_PASSWORD=test\n"
@@ -119,8 +118,7 @@ def test_cleanup_failure_attempts_every_lab_and_erases_private_inputs(
 def test_cleanup_continues_after_each_discovery_or_removal_failure(
     tmp_path, monkeypatch, failed_stage
 ):
-    ports = iter((28000, 28001))
-    monkeypatch.setattr(live, "free_port", lambda: next(ports))
+    monkeypatch.setattr(live, "free_ports", lambda: (28000, 28001))
     profile = tmp_path / "vpn.env"
     profile.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
     lab = live.Lab(tmp_path / "lab", profile, "192.168.1.20")
@@ -144,3 +142,29 @@ def test_cleanup_continues_after_each_discovery_or_removal_failure(
     assert "find owned Compose networks" in stages
     assert "find owned probe bridges" in stages
     assert "remove isolated network" in stages
+
+
+# @lat: [[live-security-tests#Live Security Tests#Port Allocation Across Interfaces]]
+def test_ports_are_reserved_together_across_ipv4_interfaces(monkeypatch):
+    bindings = []
+    active = set()
+
+    class Socket:
+        def __enter__(self):
+            active.add(self)
+            return self
+
+        def __exit__(self, *args):
+            active.remove(self)
+
+        def bind(self, address):
+            bindings.append((address, len(active)))
+            self.port = 28000 + len(bindings)
+
+        def getsockname(self):
+            return "0.0.0.0", self.port
+
+    monkeypatch.setattr(live.socket, "socket", Socket)
+    assert live.free_ports() == (28001, 28002)
+    assert bindings == [(("0.0.0.0", 0), 2), (("0.0.0.0", 0), 2)]
+    assert not active

@@ -33,3 +33,7 @@ Resource cleanup attempts every lab despite failures, removes private scratch in
 ## Independent Cleanup Stages
 
 Container discovery, forced removal and each network-discovery failure are reported without skipping remaining independent cleanup phases, limiting leftover resources during daemon instability.
+
+## Port Allocation Across Interfaces
+
+Proxy and control ports are reserved together on all IPv4 interfaces before release, preventing duplicate selection and collisions with listeners bound only to the private address. Docker still detects subsequent external allocation races.
