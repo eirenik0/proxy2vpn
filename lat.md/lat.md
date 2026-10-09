@@ -24,3 +24,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[security-tests]]: Credential isolation, authenticated requests, and binding compatibility specifications.
 
 - [[agent-evidence-tests]]: Secrecy contract regression specifications for state, LLM requests and migration.
+
+- [[agent-storage-tests]]: Private storage, concurrency, reset fencing, and interruption specifications.

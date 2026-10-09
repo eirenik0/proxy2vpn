@@ -44,7 +44,7 @@ def main(
 ):
     """Store global options in context."""
     if log_file:
-        log_file = log_file.expanduser().resolve()
+        log_file = log_file.expanduser().absolute()
     configure_logging(log_file=log_file)
     if version:
         from proxy2vpn import __version__

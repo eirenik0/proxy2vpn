@@ -29,7 +29,7 @@ from proxy2vpn.agent.models import (
     IncidentStatus,
     ServiceSnapshot,
 )
-from proxy2vpn.agent.state import AgentStateStore
+from proxy2vpn.agent.state import AgentStateStore, StorageConflict
 from proxy2vpn.agent.recovery_policy import (
     RecoveryContext,
     RecoveryPolicy,
@@ -154,10 +154,19 @@ class AgentWatchdog:
     async def run_forever(self, daemon_mode: DaemonMode = "foreground") -> AgentState:
         """Run until interrupted."""
 
-        state = self._load_state(daemon_mode, refresh_started_at=True)
-        self.store.write_state(state)
+        state: AgentState | None = None
+        initialized = False
         while True:
-            state = await self.run_cycle(state)
+            try:
+                if state is None:
+                    state = self._load_state(
+                        daemon_mode, refresh_started_at=not initialized
+                    )
+                    self.store.write_state(state)
+                    initialized = True
+                state = await self.run_cycle(state)
+            except StorageConflict:
+                state = None
             await asyncio.sleep(self.interval_seconds)
 
     async def run_once(self) -> AgentState:
@@ -173,7 +182,8 @@ class AgentWatchdog:
         ):
             events.info("agent_cycle_started")
             try:
-                result = await self._run_cycle(state)
+                with self.store.observation_session(state.generation):
+                    result = await self._run_cycle(state)
             except Exception as exc:
                 events.exception("agent_cycle_failed", error=str(exc))
                 raise
@@ -201,6 +211,7 @@ class AgentWatchdog:
         self.store.write_state(state)
         updated_snapshots: list[ServiceSnapshot] = list(state.services)
         cycle_error: Exception | None = None
+        storage_conflict = False
         try:
             manager, services = self._inventory()
             # External-only workspaces require no Docker daemon.
@@ -267,6 +278,9 @@ class AgentWatchdog:
                 )
                 state.status.last_progress_at = utc_now()
                 self.store.write_state(state)
+        except StorageConflict:
+            storage_conflict = True
+            raise
         except asyncio.CancelledError:
             state.status.last_error = "Cycle cancelled"
             updated_snapshots = list(state.services)
@@ -288,7 +302,8 @@ class AgentWatchdog:
                 for snapshot in updated_snapshots
                 if snapshot.health_score < self.settings.health_threshold
             )
-            self.store.write_state(state)
+            if not storage_conflict:
+                self.store.write_state(state)
         if cycle_error is not None:
             raise cycle_error
         return state
@@ -354,98 +369,159 @@ class AgentWatchdog:
         incident = next((item for item in incidents if item.id == incident_id), None)
         if incident is None:
             raise KeyError(f"Incident '{incident_id}' not found")
-        if incident.source == "external_proxy" or self._is_external_endpoint(
-            incident.service_name
-        ):
-            require_supported_operation(EgressCapabilities(), "replace_endpoint")
-        decision = self._recovery_policy.manual_rotation(incident, approved=True)
-        state = self.store.read_state() or self.empty_state()
-        self._inflight_service_names.pop(incident.service_name, None)
-        try:
-            result = await self._rotate_service_via_fleet(
-                incident.service_name, state=state
-            )
-        except asyncio.CancelledError:
-            self._record_interrupted_rotation(
-                state, incident.service_name, incident.id, cancelled=True
-            )
-            raise
-        except Exception as exc:
-            self._record_interrupted_rotation(
-                state, incident.service_name, incident.id, error=str(exc)
-            )
-            raise
-        finally:
-            if state.status.active_cycle_started_at is None:
-                state.status.active_cycle_service_name = None
-                self.store.write_state(state)
-
-        action_result = "success" if result.success else "failed"
-        action_details = self._build_rotation_action_details(
-            incident_id=incident.id,
-            requested_service_name=incident.service_name,
-            result=result,
-        )
-        action_service_name = action_details.get(
-            "final_service_name", incident.service_name
-        )
-        self._append_action(
-            state,
-            service_name=action_service_name,
-            action="rotate",
-            trigger=decision.trigger,
-            result=action_result,
-            details=action_details,
-        )
-        self._update_snapshot_action(
-            state,
-            incident.service_name,
-            last_action="rotate",
-            last_action_result=action_result,
-            new_service_name=action_details.get("final_service_name"),
-        )
-        self.store.write_state(state)
-        final_service_name = action_details.get("final_service_name")
-        if final_service_name not in {None, incident.service_name}:
-            self._migrate_active_incidents(
-                old_service_name=incident.service_name,
-                new_service_name=final_service_name,
-                exclude_incident_ids={incident.id},
-            )
-
-        terminal_status: IncidentStatus = "resolved" if result.success else "failed"
-        summary_text = (
-            incident.summary
-            if result.success
-            else f"{incident.summary} Rotation failed: {' | '.join(result.errors)}"
-        )
-        summary, human_explanation = self._enrich_summary(
-            IncidentContext(
-                service_name=incident.service_name,
-                fallback_summary=summary_text,
-                recommended_action=incident.recommended_action,
-                failure_count=incident.failure_count,
-                issues=[],
-                recent_actions=[
-                    action
-                    for action in self._recent_actions_for_service(
-                        state.actions,
-                        incident.service_name,
+        with self.store.observation_session(incident.generation):
+            with self.store.transaction():
+                self.store.check_generation(incident.generation)
+                state = self.store.read_state() or self.empty_state()
+            if incident.source == "external_proxy" or self._is_external_endpoint(
+                incident.service_name
+            ):
+                require_supported_operation(EgressCapabilities(), "replace_endpoint")
+            with self.store.transaction():
+                self.store.check_generation(incident.generation)
+                latest = next(
+                    (
+                        item
+                        for item in self.store.load_incidents()
+                        if item.id == incident.id
+                    ),
+                    None,
+                )
+                if latest is None or latest.revision != incident.revision:
+                    raise StorageConflict("Incident changed; refresh before retrying")
+                decision = self._recovery_policy.manual_rotation(latest, approved=True)
+                if latest.approved_at is not None:
+                    raise RuntimeError(
+                        "Incident rotation is already claimed; inspect the previous operation before retrying"
                     )
-                ],
+                incident = latest.model_copy(
+                    update={"approved_at": utc_now(), "updated_at": utc_now()}
+                )
+                self.store.append_incident(incident)
+                state = self.store.read_state() or self.empty_state()
+            self._inflight_service_names.pop(incident.service_name, None)
+            try:
+                result = await self._rotate_service_via_fleet(
+                    incident.service_name, state=state
+                )
+            except asyncio.CancelledError:
+                self._record_interrupted_rotation(
+                    state, incident.service_name, incident.id, cancelled=True
+                )
+                raise
+            except StorageConflict:
+                raise
+            except Exception as exc:
+                self._record_interrupted_rotation(
+                    state, incident.service_name, incident.id, error=str(exc)
+                )
+                raise
+            finally:
+                if state.status.active_cycle_started_at is None:
+                    state.status.active_cycle_service_name = None
+
+            action_result = "success" if result.success else "failed"
+            action_details = self._build_rotation_action_details(
+                incident_id=incident.id,
+                requested_service_name=incident.service_name,
+                result=result,
             )
-        )
-        terminal = incident.model_copy(
-            update={
-                "status": terminal_status,
-                "resolved_at": utc_now() if result.success else None,
-                "updated_at": utc_now(),
-                "summary": summary,
-                "human_explanation": human_explanation or incident.human_explanation,
-            }
-        )
-        self.store.append_incident(terminal)
-        return terminal
+            action_service_name = action_details.get(
+                "final_service_name", incident.service_name
+            )
+            self._append_action(
+                state,
+                service_name=action_service_name,
+                action="rotate",
+                trigger=decision.trigger,
+                result=action_result,
+                details=action_details,
+            )
+            self._update_snapshot_action(
+                state,
+                incident.service_name,
+                last_action="rotate",
+                last_action_result=action_result,
+                new_service_name=action_details.get("final_service_name"),
+            )
+            self.store.write_state(state)
+            final_service_name = action_details.get("final_service_name")
+            if final_service_name not in {None, incident.service_name}:
+                self._migrate_active_incidents(
+                    old_service_name=incident.service_name,
+                    new_service_name=final_service_name,
+                    exclude_incident_ids={incident.id},
+                )
+
+            terminal_status: IncidentStatus = "resolved" if result.success else "failed"
+            summary_text = (
+                incident.summary
+                if result.success
+                else f"{incident.summary} Rotation failed: {' | '.join(result.errors)}"
+            )
+            summary, human_explanation = self._enrich_summary(
+                IncidentContext(
+                    service_name=incident.service_name,
+                    fallback_summary=summary_text,
+                    recommended_action=incident.recommended_action,
+                    failure_count=incident.failure_count,
+                    issues=[],
+                    recent_actions=[
+                        action
+                        for action in self._recent_actions_for_service(
+                            state.actions,
+                            incident.service_name,
+                        )
+                    ],
+                )
+            )
+            terminal = incident.model_copy(
+                update={
+                    "status": terminal_status,
+                    "resolved_at": utc_now() if result.success else None,
+                    "updated_at": utc_now(),
+                    "summary": summary,
+                    "human_explanation": human_explanation
+                    or incident.human_explanation,
+                }
+            )
+            with self.store.transaction():
+                self.store.check_generation(incident.generation)
+                latest = next(
+                    (
+                        item
+                        for item in self.store.load_incidents()
+                        if item.id == incident.id
+                    ),
+                    None,
+                )
+                if (
+                    latest is None
+                    or latest.approved_at != incident.approved_at
+                    or latest.generation != incident.generation
+                ):
+                    raise StorageConflict(
+                        "Incident execution claim changed; refresh before retrying"
+                    )
+                if latest.status in {"dismissed", "resolved"}:
+                    return latest
+                terminal = latest.model_copy(
+                    update={
+                        "status": terminal.status,
+                        "resolved_at": terminal.resolved_at,
+                        "updated_at": terminal.updated_at,
+                        "summary": terminal.summary
+                        if latest.summary == incident.summary
+                        else latest.summary,
+                        "human_explanation": (
+                            latest.human_explanation
+                            if latest.human_explanation != incident.human_explanation
+                            else terminal.human_explanation or latest.human_explanation
+                        ),
+                    }
+                )
+                self.store.append_incident(terminal)
+                return terminal
 
     def dismiss_incident(self, incident_id: str) -> AgentIncident:
         """Dismiss one incident and suppress re-opening it for a cooldown window."""
@@ -709,6 +785,8 @@ class AgentWatchdog:
                 try:
                     await asyncio.sleep(decision.observation.delay_seconds)
                     health = await self._evaluate_health(service)
+                except StorageConflict:
+                    raise
                 except (asyncio.CancelledError, Exception) as exc:
                     self._record_restart_recheck_failure(
                         state,
@@ -743,6 +821,8 @@ class AgentWatchdog:
                             snapshot.consecutive_failures,
                         )
                     raise
+                if request_action is not None:
+                    request_action.details.pop("observation", None)
                 self._persist_cycle_progress(
                     state,
                     service_name=service.name,
@@ -893,6 +973,8 @@ class AgentWatchdog:
         except asyncio.CancelledError:
             self._record_interrupted_rotation(state, service.name, cancelled=True)
             raise
+        except StorageConflict:
+            raise
         except Exception as exc:
             self._record_interrupted_rotation(state, service.name, error=str(exc))
             raise
@@ -995,8 +1077,8 @@ class AgentWatchdog:
             "failed",
             new_service_name=live_name,
         )
-        if live_name != requested_service_name:
-            self._migrate_active_incidents(requested_service_name, live_name)
+        if incident_id is not None and state.status.active_cycle_started_at is None:
+            state.status.active_cycle_service_name = None
         self._append_action(
             state,
             service_name=live_name,
@@ -1005,6 +1087,8 @@ class AgentWatchdog:
             result="failed",
             details=details,
         )
+        if live_name != requested_service_name:
+            self._migrate_active_incidents(requested_service_name, live_name)
 
     async def _control_api_reachable(self, service: VPNService) -> bool:
         return (await self._runtime.control_status(service)).success
@@ -1031,7 +1115,11 @@ class AgentWatchdog:
                 action="restart_tunnel",
                 trigger=trigger,
                 result="success",
-                details={"control_port": str(service.control_port)},
+                details={
+                    "control_port": str(service.control_port),
+                    "runtime_request_result": "success",
+                    "observation": "pending",
+                },
             )
             self._persist_cycle_progress(
                 state,
@@ -1053,6 +1141,8 @@ class AgentWatchdog:
                 details={"cancelled": "true"},
             )
             raise
+        except StorageConflict:
+            raise
         except Exception as exc:
             self._append_action(
                 state,
@@ -1060,7 +1150,11 @@ class AgentWatchdog:
                 action="restart_tunnel",
                 trigger=trigger,
                 result="failed",
-                details={"error": str(exc)},
+                details={
+                    "error": str(exc),
+                    "runtime_request_result": "failed",
+                    "observation": "pending",
+                },
             )
             self._persist_cycle_progress(
                 state,
@@ -1131,6 +1225,8 @@ class AgentWatchdog:
                 result="failed",
                 details={"cancelled": "true", "profile": service.profile},
             )
+            raise
+        except StorageConflict:
             raise
         except Exception as exc:
             self._append_action(
@@ -1277,7 +1373,7 @@ class AgentWatchdog:
         )
         state.actions = state.actions[-self.settings.action_history_limit :]
         state.status.last_progress_at = utc_now()
-        self.store.write_state(state)
+        self.store.append_action(state, state.actions[-1])
         events.info(
             "agent_action_completed",
             service_name=service_name,
@@ -1451,63 +1547,65 @@ class AgentWatchdog:
         recommended_action: str,
         failure_count: int,
     ) -> AgentIncident | None:
-        now = utc_now()
-        if incident_type == "profile_auth_config_failure":
-            existing = next(
-                (
-                    item
-                    for item in incidents
-                    if item.type == incident_type
-                    and item.status not in {"resolved", "dismissed", "failed"}
-                    and self._same_profile(service, item.service_name)
-                    and item.updated_at >= now - timedelta(hours=1)
-                ),
-                None,
-            )
-        elif incident_type == "provider_outage_suspected":
-            existing = next(
-                (
-                    item
-                    for item in incidents
-                    if item.type == incident_type
-                    and item.status not in {"resolved", "dismissed", "failed"}
-                    and self._same_provider_country(service, item.service_name)
-                    and item.updated_at >= now - timedelta(minutes=30)
-                ),
-                None,
-            )
-        else:
-            existing = None
+        with self.store.transaction():
+            incidents[:] = self.store.load_incidents()
+            now = utc_now()
+            if incident_type == "profile_auth_config_failure":
+                existing = next(
+                    (
+                        item
+                        for item in incidents
+                        if item.type == incident_type
+                        and item.status not in {"resolved", "dismissed", "failed"}
+                        and self._same_profile(service, item.service_name)
+                        and item.updated_at >= now - timedelta(hours=1)
+                    ),
+                    None,
+                )
+            elif incident_type == "provider_outage_suspected":
+                existing = next(
+                    (
+                        item
+                        for item in incidents
+                        if item.type == incident_type
+                        and item.status not in {"resolved", "dismissed", "failed"}
+                        and self._same_provider_country(service, item.service_name)
+                        and item.updated_at >= now - timedelta(minutes=30)
+                    ),
+                    None,
+                )
+            else:
+                existing = None
 
-        if existing is not None:
-            updated = existing.model_copy(
-                update={
-                    "severity": severity,
-                    "summary": summary,
-                    "human_explanation": human_explanation,
-                    "recommended_action": recommended_action,
-                    "failure_count": failure_count,
-                    "updated_at": now,
-                }
-            )
-            self.store.append_incident(updated)
-            incidents[:] = [item for item in incidents if item.id != updated.id]
-            incidents.insert(0, updated)
-            events.bind(incident_id=updated.id, service_name=service.name).info(
-                "agent_incident_updated", incident_type=incident_type
-            )
-            return updated
+            if existing is not None:
+                updated = existing.model_copy(
+                    update={
+                        "severity": severity,
+                        "summary": summary,
+                        "human_explanation": human_explanation,
+                        "recommended_action": recommended_action,
+                        "failure_count": failure_count,
+                        "updated_at": now,
+                    }
+                )
+                self.store.append_incident(updated)
+                incidents[:] = [item for item in incidents if item.id != updated.id]
+                incidents.insert(0, updated)
+                events.bind(incident_id=updated.id, service_name=service.name).info(
+                    "agent_incident_updated", incident_type=incident_type
+                )
+                return updated
 
-        return self._upsert_incident(
-            incidents=incidents,
-            service_name=service.name,
-            incident_type=incident_type,
-            severity=severity,
-            summary=summary,
-            human_explanation=human_explanation,
-            recommended_action=recommended_action,
-            failure_count=failure_count,
-        )
+            return self._upsert_incident(
+                incidents=incidents,
+                service_name=service.name,
+                incident_type=incident_type,
+                severity=severity,
+                summary=summary,
+                human_explanation=human_explanation,
+                recommended_action=recommended_action,
+                failure_count=failure_count,
+            )
 
     def _service_rotation_budget_exhausted(
         self, service_name: str, actions: list[ActionRecord]
@@ -2516,53 +2614,57 @@ class AgentWatchdog:
         *,
         source: str = "gluetun",
     ) -> AgentIncident | None:
-        now = utc_now()
-        if self._is_recently_dismissed(incidents, service_name, incident_type, now):
-            return None
+        with self.store.transaction():
+            incidents[:] = self.store.load_incidents()
+            now = utc_now()
+            if self._is_recently_dismissed(incidents, service_name, incident_type, now):
+                return None
 
-        existing = self._find_active_incident(incidents, service_name, incident_type)
-        if existing is not None:
-            updated = existing.model_copy(
-                update={
-                    "source": source,
-                    "severity": severity,
-                    "summary": summary,
-                    "human_explanation": human_explanation,
-                    "recommended_action": recommended_action,
-                    "approval_required": False,
-                    "failure_count": failure_count,
-                    "updated_at": now,
-                }
+            existing = self._find_active_incident(
+                incidents, service_name, incident_type
             )
-            self.store.append_incident(updated)
-            incidents[:] = [item for item in incidents if item.id != updated.id]
-            incidents.insert(0, updated)
-            events.bind(incident_id=updated.id, service_name=service_name).info(
-                "agent_incident_updated", incident_type=incident_type
-            )
-            return updated
+            if existing is not None:
+                updated = existing.model_copy(
+                    update={
+                        "source": source,
+                        "severity": severity,
+                        "summary": summary,
+                        "human_explanation": human_explanation,
+                        "recommended_action": recommended_action,
+                        "approval_required": False,
+                        "failure_count": failure_count,
+                        "updated_at": now,
+                    }
+                )
+                self.store.append_incident(updated)
+                incidents[:] = [item for item in incidents if item.id != updated.id]
+                incidents.insert(0, updated)
+                events.bind(incident_id=updated.id, service_name=service_name).info(
+                    "agent_incident_updated", incident_type=incident_type
+                )
+                return updated
 
-        incident = AgentIncident(
-            source=source,
-            id=uuid4().hex[:12],
-            service_name=service_name,
-            type=incident_type,
-            severity=severity,
-            status="open",
-            created_at=now,
-            updated_at=now,
-            failure_count=failure_count,
-            summary=summary,
-            human_explanation=human_explanation,
-            recommended_action=recommended_action,
-            approval_required=False,
-        )
-        self.store.append_incident(incident)
-        incidents.insert(0, incident)
-        events.bind(incident_id=incident.id, service_name=service_name).warning(
-            "agent_incident_opened", incident_type=incident_type, severity=severity
-        )
-        return incident
+            incident = AgentIncident(
+                source=source,
+                id=uuid4().hex[:12],
+                service_name=service_name,
+                type=incident_type,
+                severity=severity,
+                status="open",
+                created_at=now,
+                updated_at=now,
+                failure_count=failure_count,
+                summary=summary,
+                human_explanation=human_explanation,
+                recommended_action=recommended_action,
+                approval_required=False,
+            )
+            self.store.append_incident(incident)
+            incidents.insert(0, incident)
+            events.bind(incident_id=incident.id, service_name=service_name).warning(
+                "agent_incident_opened", incident_type=incident_type, severity=severity
+            )
+            return incident
 
     def _resolve_active_incidents(
         self,
@@ -2571,21 +2673,23 @@ class AgentWatchdog:
         *,
         source: str = "gluetun",
     ) -> None:
-        now = utc_now()
-        for incident in list(incidents):
-            if incident.service_name != service_name or incident.source != source:
-                continue
-            if incident.status in {"resolved", "dismissed"}:
-                continue
-            resolved = incident.model_copy(
-                update={"status": "resolved", "resolved_at": now, "updated_at": now}
-            )
-            self.store.append_incident(resolved)
-            incidents.remove(incident)
-            incidents.insert(0, resolved)
-            events.bind(incident_id=incident.id, service_name=service_name).info(
-                "agent_incident_resolved", incident_type=incident.type
-            )
+        with self.store.transaction():
+            incidents[:] = self.store.load_incidents()
+            now = utc_now()
+            for incident in list(incidents):
+                if incident.service_name != service_name or incident.source != source:
+                    continue
+                if incident.status in {"resolved", "dismissed"}:
+                    continue
+                resolved = incident.model_copy(
+                    update={"status": "resolved", "resolved_at": now, "updated_at": now}
+                )
+                self.store.append_incident(resolved)
+                incidents.remove(incident)
+                incidents.insert(0, resolved)
+                events.bind(incident_id=incident.id, service_name=service_name).info(
+                    "agent_incident_resolved", incident_type=incident.type
+                )
 
     def _migrate_active_incidents(
         self,
@@ -2593,27 +2697,28 @@ class AgentWatchdog:
         new_service_name: str,
         exclude_incident_ids: set[str] | None = None,
     ) -> None:
-        exclude_ids = exclude_incident_ids or set()
-        now = utc_now()
-        old_identities = {
-            old_service_name,
-            self.store.sanitizer().identity_alias(old_service_name),
-        }
-        incidents = self.store.load_incidents()
-        for incident in incidents:
-            if incident.id in exclude_ids:
-                continue
-            if (
-                incident.service_name not in old_identities
-                or incident.source != "gluetun"
-            ):
-                continue
-            if incident.status in {"resolved", "dismissed", "failed"}:
-                continue
-            migrated = incident.model_copy(
-                update={"service_name": new_service_name, "updated_at": now}
-            )
-            self.store.append_incident(migrated)
+        with self.store.transaction():
+            exclude_ids = exclude_incident_ids or set()
+            now = utc_now()
+            old_identities = {
+                old_service_name,
+                self.store.sanitizer().identity_alias(old_service_name),
+            }
+            incidents = self.store.load_incidents()
+            for incident in incidents:
+                if incident.id in exclude_ids:
+                    continue
+                if (
+                    incident.service_name not in old_identities
+                    or incident.source != "gluetun"
+                ):
+                    continue
+                if incident.status in {"resolved", "dismissed", "failed"}:
+                    continue
+                migrated = incident.model_copy(
+                    update={"service_name": new_service_name, "updated_at": now}
+                )
+                self.store.append_incident(migrated)
 
     def _find_active_incident(
         self,

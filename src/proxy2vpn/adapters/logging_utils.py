@@ -3,6 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,22 @@ import structlog
 from structlog.types import EventDict, Processor
 
 
+from proxy2vpn.core.private_storage import private_file
 from proxy2vpn.core.redaction import REDACTED as REDACTED, _redact_value
 
 _owned_handler: logging.Handler | None = None
+
+
+class PrivateFileHandler(logging.FileHandler):
+    """Keep logs private and reject symlinks at every reopen."""
+
+    def _open(self):
+        path = Path(self.baseFilename)
+        private_file(path, create=True)
+        descriptor = os.open(
+            path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        )
+        return os.fdopen(descriptor, "a", encoding="utf-8")
 
 
 # @lat: [[lat.md/logging#Operational Logging#Secret Redaction]]
@@ -85,7 +99,7 @@ def configure_logging(
     )
     handler: logging.Handler
     if log_file:
-        handler = logging.FileHandler(log_file)
+        handler = PrivateFileHandler(log_file)
         handler.setFormatter(formatter)
     else:
         handler = logging.NullHandler()

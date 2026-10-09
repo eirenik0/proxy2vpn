@@ -18,7 +18,7 @@ from proxy2vpn.agent.models import (
 )
 from proxy2vpn.agent.llm import IncidentEnrichment, InvestigationPlan
 from proxy2vpn.agent.runtime import AgentWatchdog, utc_now
-from proxy2vpn.agent.state import AgentStateStore
+from proxy2vpn.agent.state import AgentStateStore, StorageConflict
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.fleet_state_manager import RotationChange
 from proxy2vpn.core import config
@@ -578,6 +578,7 @@ def test_agent_first_unhealthy_cycle_restarts_tunnel(
     assert state.services[0].health_score == 100
     assert watchdog.store.load_incidents() == []
     assert calls["restart_tunnel"] == 1
+    assert "observation" not in state.actions[0].details
 
 
 def test_agent_unhealthy_after_restart_triggers_restore(
@@ -3215,3 +3216,97 @@ def test_cancelled_isolated_auth_recheck_preserves_one_attempt_limit(
     assert len(state.actions) == 1 and state.actions[0].result == "failed"
     assert state.actions[0].trigger == "isolated_auth_failure"
     runtime.restore.assert_not_awaited()
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Recovery Persistence Conflicts]]
+@pytest.mark.parametrize("restart_succeeds", [True, False])
+@pytest.mark.parametrize("reset", [True, False])
+def test_restart_concurrent_state_change_keeps_single_actual_outcome(
+    agent_compose_file, fake_gluetun_runtime, restart_succeeds, reset
+):
+    runtime = fake_gluetun_runtime
+    runtime.inspect.return_value = gluetun_runtime.RuntimeInspection(
+        "running", results=unhealthy_results(), control_api_reachable=True
+    )
+    watchdog = AgentWatchdog(agent_compose_file, runtime=runtime)
+    other = AgentStateStore(agent_compose_file)
+
+    async def restart(_service):
+        with other.transaction():
+            if reset:
+                other.reset_monitoring_state()
+            else:
+                current = other.read_state()
+                current.status.interval_seconds = 777
+                other.write_state(current)
+        return gluetun_runtime.RuntimeActionResult(
+            restart_succeeds, None if restart_succeeds else "control restart failed"
+        )
+
+    runtime.restart_tunnel.side_effect = restart
+    with pytest.raises(StorageConflict):
+        asyncio.run(watchdog.run_once())
+    persisted = other.read_state()
+    if reset:
+        assert persisted.generation == 1
+        assert persisted.actions == []
+    else:
+        assert persisted.status.interval_seconds == 777
+        assert [(action.action, action.result) for action in persisted.actions] == [
+            ("restart_tunnel", "success" if restart_succeeds else "failed")
+        ]
+    runtime.restart_tunnel.assert_awaited_once()
+    runtime.restore.assert_not_awaited()
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Pending Auth Restart Observation]]
+@pytest.mark.parametrize("request_succeeded", [True, False])
+def test_auth_restart_conflict_does_not_repeat_on_next_cycle(
+    shared_profile_agent_compose_file, fake_gluetun_runtime, request_succeeded
+):
+    runtime = fake_gluetun_runtime
+    target = "protonvpn-united-states-new-york"
+
+    async def inspect(service, **kwargs):
+        results = (
+            [
+                DiagnosticResult(
+                    check="auth_failure",
+                    passed=False,
+                    persistent=True,
+                    message="Authentication failed",
+                    recommendation="Investigate",
+                )
+            ]
+            if service.name == target
+            else healthy_results()
+        )
+        return gluetun_runtime.RuntimeInspection(
+            "running", results=results, control_api_reachable=True
+        )
+
+    runtime.inspect.side_effect = inspect
+    watchdog = AgentWatchdog(shared_profile_agent_compose_file, runtime=runtime)
+    other = AgentStateStore(shared_profile_agent_compose_file)
+
+    async def restart(_service):
+        with other.transaction():
+            current = other.read_state()
+            current.status.interval_seconds = 777
+            other.write_state(current)
+        return gluetun_runtime.RuntimeActionResult(
+            request_succeeded, None if request_succeeded else "request failed"
+        )
+
+    runtime.restart_tunnel.side_effect = restart
+    with pytest.raises(StorageConflict):
+        asyncio.run(watchdog.run_once())
+    recorded = other.read_state().actions[0]
+    assert recorded.trigger == "isolated_auth_failure"
+    assert recorded.result == ("success" if request_succeeded else "failed")
+    assert recorded.details["runtime_request_result"] == recorded.result
+    assert recorded.details["observation"] == "pending"
+    state = asyncio.run(watchdog.run_once())
+    runtime.restart_tunnel.assert_awaited_once()
+    assert len(state.actions) == 1
+    assert any(i.type == "auth_config_failure" for i in other.load_incidents())

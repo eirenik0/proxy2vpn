@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from typing import Any
+import unicodedata
+from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +36,63 @@ class AgentSettings(BaseSettings):
     openai_timeout_seconds: float = 10.0
     openai_max_output_tokens: int = 220
     openai_reasoning_effort: str = "minimal"
+
+    @model_validator(mode="after")
+    def _safe_storage_names(self) -> "AgentSettings":
+        names = [
+            self.state_dirname,
+            self.state_file,
+            self.incidents_file,
+            self.runtime_lock_file,
+            self.daemon_pid_file,
+            self.daemon_log_file,
+        ]
+        reserved_devices = {"con", "prn", "aux", "nul", "conin$", "conout$"} | {
+            f"{prefix}{digit}" for prefix in ("com", "lpt") for digit in "123456789¹²³"
+        }
+        if any(
+            not name
+            or name in {".", ".."}
+            or any(
+                character in '<>:"/\\|?*' or ord(character) < 32 for character in name
+            )
+            or name.split(".", 1)[0].rstrip(" ").casefold() in reserved_devices
+            or name != name.rstrip(". ")
+            for name in names
+        ):
+            raise ValueError("Agent storage names must be single path components")
+        files = names[1:] + [
+            "evidence.lock",
+            "identity.lock",
+            "identity.key",
+            "transaction.json",
+        ]
+        legacy_temporary = Path(self.state_file).with_suffix(".tmp").name
+        if legacy_temporary != self.state_file:
+            files.append(legacy_temporary)
+        if len(
+            {unicodedata.normalize("NFC", name).casefold() for name in files}
+        ) != len(files):
+            raise ValueError("Agent storage filenames must be distinct")
+        return self
+
+    @property
+    def storage_artifact_names(self) -> frozenset[str]:
+        """Exact owned targets and legacy temporary name for directory validation."""
+        return frozenset(
+            {
+                self.state_file,
+                self.incidents_file,
+                self.runtime_lock_file,
+                self.daemon_pid_file,
+                self.daemon_log_file,
+                "evidence.lock",
+                "identity.lock",
+                "identity.key",
+                "transaction.json",
+                Path(self.state_file).with_suffix(".tmp").name,
+            }
+        )
 
     @field_validator("fallback_countries_by_provider", mode="before")
     @classmethod

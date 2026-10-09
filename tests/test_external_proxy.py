@@ -572,7 +572,8 @@ def test_external_watchdog_persists_incidents_and_recovers_without_docker(
             connectivity=True,
             current_egress_ip="198.51.100.8",
         )
-        # Restore an open incident to verify healthy evidence resolves it by stable id.
+        # Restore an open incident from its current revision to verify healthy resolution.
+        incident = watchdog.store.load_incidents()[0]
         incident.status = "open"
         watchdog.store.append_incident(incident)
         state = await watchdog.run_cycle(state)

@@ -95,11 +95,14 @@ def assert_clean(value):
 
 # @lat: [[agent-evidence-tests#Agent Evidence Tests#Bounded Copied Diagnostics]]
 def test_sanitizer_is_bounded_idempotent_and_preserves_classifications():
-    sanitizer = EvidenceSanitizer([SECRET, "RED", "ACT"])
+    sanitizer = EvidenceSanitizer([SECRET, "RED", "ACT", "pending"])
     original = investigation_context().model_dump()
     safe = sanitizer.sanitize(original)
     assert_clean(safe)
     assert safe == sanitizer.sanitize(safe)
+    assert sanitizer.sanitize({"details": {"observation": "pending"}}) == {
+        "details": {"observation": "pending"}
+    }
     assert safe["issues"][0]["check"] == "auth_failure"
     assert safe["issues"][0]["persistent"] is True
     assert safe["log_evidence"] == ["AUTH_FAILED"]
@@ -335,7 +338,9 @@ def test_storage_scrubs_all_history_and_state_without_mutating_inputs(tmp_path):
     assert not list(store.agent_dir.glob("*.tmp"))
     safe_history = store.incidents_file.read_text()
     store.incidents_file.write_text(safe_history + "{malformed\n")
-    with pytest.raises(json.JSONDecodeError):
+    from proxy2vpn.core.private_storage import StorageError
+
+    with pytest.raises(StorageError, match="Corrupt agent incident history"):
         store.load_incidents()
     assert store.incidents_file.read_text() == safe_history + "{malformed\n"
     assert not list(store.agent_dir.glob("*.tmp"))

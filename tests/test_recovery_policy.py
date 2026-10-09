@@ -436,7 +436,12 @@ def test_cleared_auth_does_not_override_current_connectivity_evidence():
 # @lat: [[lat.md/recovery-policy-tests#Recovery Policy Tests#Interrupted Auth Attempt Memory]]
 @pytest.mark.parametrize(
     "details",
-    [{"cancelled": "true"}, {"observation": "interrupted"}, {"observation": "failed"}],
+    [
+        {"cancelled": "true"},
+        {"observation": "pending"},
+        {"observation": "interrupted"},
+        {"observation": "failed"},
+    ],
 )
 @pytest.mark.parametrize("dismissed", [False, True])
 def test_interrupted_auth_attempt_is_bounded_even_when_incident_is_dismissed(
@@ -451,7 +456,7 @@ def test_interrupted_auth_attempt_is_bounded_even_when_incident_is_dismissed(
     previous_attempt = action(
         "restart_tunnel",
         trigger="isolated_auth_failure",
-        result="failed",
+        result="success" if details.get("observation") == "pending" else "failed",
         details=details,
     )
     ctx = context(
