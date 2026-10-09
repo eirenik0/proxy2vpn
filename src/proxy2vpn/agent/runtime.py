@@ -499,9 +499,12 @@ class AgentWatchdog:
                 "updated_at": utc_now(),
             }
         )
-        updated = self.store.sanitizer().model(updated)
+        sanitizer = self.store.sanitizer()
+        updated = sanitizer.model(updated)
         self.store.append_incident(updated)
-        return updated
+        return AgentIncident.model_validate(
+            sanitizer.restore_identities(updated.model_dump(mode="json"))
+        )
 
     def _load_state(
         self, daemon_mode: DaemonMode, refresh_started_at: bool

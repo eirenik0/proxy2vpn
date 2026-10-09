@@ -1069,3 +1069,48 @@ def test_identity_keys_are_private_stable_and_migrate_legacy_aliases(tmp_path):
     key_file.write_bytes(b"invalid")
     with pytest.raises(ValueError, match="Invalid evidence identity key"):
         EvidenceSanitizer.from_compose(compose)
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Interpolated Env Formats And Live Investigation Identities]]
+def test_interpolated_raw_format_and_investigation_live_identity(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.delenv("ENV_FORMAT", raising=False)
+    (tmp_path / "credentials.env").write_text("OPENVPN_PASSWORD=${MISSING:?literal}\n")
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        "services:\n  office:\n    environment:\n      HTTPPROXY_PASSWORD: office\n"
+        "    env_file:\n      - path: credentials.env\n        format: ${ENV_FORMAT:-raw}\n"
+    )
+    watchdog = AgentWatchdog(compose, llm_mode="disabled")
+    sanitizer = watchdog.store.sanitizer()
+    assert sanitizer.text("${MISSING:?literal}") == "[REDACTED]"
+    now = utc_now()
+    incident = AgentIncident(
+        id="live138",
+        service_name="office",
+        type="auth_config_failure",
+        severity="high",
+        created_at=now,
+        updated_at=now,
+        summary="credential office",
+        recommended_action="investigate",
+    )
+    watchdog.store.append_incident(incident)
+
+    async def context(_):
+        return investigation_context().model_copy(update={"service_name": "office"})
+
+    monkeypatch.setattr(watchdog, "_build_investigation_context", context)
+    monkeypatch.setattr(
+        watchdog,
+        "_investigate_context",
+        lambda _: InvestigationPlan(
+            summary="office", findings=["office"], action_plan=["office"]
+        ),
+    )
+    result = asyncio.run(watchdog.investigate_incident(incident.id))
+    assert result.service_name == "office"
+    assert "office" not in result.investigation.model_dump_json()
+    assert "office" not in watchdog.store.incidents_file.read_text()
+    assert watchdog.store.load_incidents()[0].service_name == "office"

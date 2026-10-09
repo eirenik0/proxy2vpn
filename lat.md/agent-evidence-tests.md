@@ -65,3 +65,7 @@ Verify single-quoted credentials are literal with either assignment delimiter, r
 ## Private Identity Keys
 
 Verify aliases resist unkeyed dictionary lookup, remain stable across processes, differ between roots, use private excluded keys, and migrate known legacy hashes while dropping unknown hashes.
+
+## Interpolated Env Formats And Live Investigation Identities
+
+Verify env-file format expressions select raw parsing and investigation returns restore configured identities while stored and transmitted copies retain keyed aliases.

@@ -385,7 +385,14 @@ class EvidenceSanitizer:
                             path, sanitizer._interpolation_variables
                         )
                         paths.add(resolved)
-                        if isinstance(item, dict) and item.get("format") == "raw":
+                        if (
+                            isinstance(item, dict)
+                            and interpolate(
+                                str(item.get("format", "")),
+                                sanitizer._interpolation_variables,
+                            )
+                            == "raw"
+                        ):
                             raw_paths.add(resolved)
                         else:
                             standard_paths.add(resolved)
