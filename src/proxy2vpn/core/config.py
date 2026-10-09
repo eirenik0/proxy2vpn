@@ -60,38 +60,42 @@ CONTROL_API_ENDPOINTS = {
 }
 
 # Path to the control server authentication configuration mounted into
-# each Gluetun container.  The configuration disables authentication for
-# a small set of non-sensitive routes used by proxy2vpn so the control
-# API can be queried without manual setup.
+# each Gluetun container. New workspaces use generated monitor/operator
+# credentials; existing custom files are preserved until explicit migration.
 CONTROL_AUTH_CONFIG_FILE: Path = Path("control-server-auth.toml")
 
 # Label written to compose-managed services and containers so runtime
 # cleanup can distinguish ownership when multiple compose files exist.
 COMPOSE_FILE_LABEL = "proxy2vpn.compose_file"
 
-# Default content of the control server authentication configuration.
-# It declares a single role allowing access to the endpoints required by
-# proxy2vpn with ``auth = "none"`` so no credentials are needed.
+# Password placeholders are filled only by core.security.ensure_control_auth.
+# Read and mutation routes are disjoint so monitoring credentials cannot
+# restart a tunnel or change DNS/updater state.
 CONTROL_AUTH_CONFIG_TEMPLATE = """[[roles]]
-name = "proxy2vpn"
-auth = "none"
+name = "proxy2vpn-monitor"
+auth = "basic"
+username = "proxy2vpn-monitor"
+password = "{monitor_password}"
 routes = [
-  # OpenVPN status and settings
   "GET /v1/openvpn/status",
-  "PUT /v1/openvpn/status",
   "GET /v1/openvpn/portforwarded",
-  "GET /v1/openvpn/settings",
-
-  # DNS control
+  "GET /v1/vpn/status",
+  "GET /v1/portforward",
   "GET /v1/dns/status",
-  "PUT /v1/dns/status",
-
-  # Updater control
   "GET /v1/updater/status",
-  "PUT /v1/updater/status",
-
-  # Public IP
   "GET /v1/publicip/ip",
+]
+
+[[roles]]
+name = "proxy2vpn-operator"
+auth = "basic"
+username = "proxy2vpn-operator"
+password = "{operator_password}"
+routes = [
+  "PUT /v1/openvpn/status",
+  "PUT /v1/vpn/status",
+  "PUT /v1/dns/status",
+  "PUT /v1/updater/status",
 ]
 """
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Iterable
 from pydantic import BaseModel, ConfigDict
 
@@ -235,9 +236,12 @@ class DiagnosticAnalyzer:
         proxy_password: str | None = None,
         timeout: int = 5,
         direct_ip: str | None = None,
+        proxy_host: str = "localhost",
     ) -> list[DiagnosticResult]:
         """Connectivity + DNS leak checks with HTTP proxy authentication support."""
-        proxies = build_proxy_urls(port, username=proxy_user, password=proxy_password)
+        proxies = build_proxy_urls(
+            port, username=proxy_user, password=proxy_password, host=proxy_host
+        )
 
         try:
             # Use pre-fetched direct IP if provided, otherwise fetch it
@@ -302,7 +306,9 @@ class DiagnosticAnalyzer:
                 )
             ]
 
-    def control_api_checks(self, base_url: str) -> list[DiagnosticResult]:
+    def control_api_checks(
+        self, base_url: str, *, compose_file: Path | None = None
+    ) -> list[DiagnosticResult]:
         """Query the control API for service health."""
 
         import asyncio
@@ -310,7 +316,9 @@ class DiagnosticAnalyzer:
 
         async def _query() -> list[DiagnosticResult]:
             results: list[DiagnosticResult] = []
-            async with GluetunControlClient(base_url) as client:
+            async with GluetunControlClient(
+                base_url, compose_file=compose_file
+            ) as client:
                 try:
                     dns = await client.dns_status()
                     ok = dns.status == "running"
@@ -395,13 +403,14 @@ class DiagnosticAnalyzer:
         proxy_password: str | None = None,
         timeout: int = 5,
         direct_ip: str | None = None,
+        proxy_host: str = "localhost",
     ) -> list[DiagnosticResult]:
         """Analyze logs and optionally test connectivity."""
         results = self.analyze_logs(log_lines)
         if port:
             results.extend(
                 self.check_connectivity(
-                    port, proxy_user, proxy_password, timeout, direct_ip
+                    port, proxy_user, proxy_password, timeout, direct_ip, proxy_host
                 )
             )
         return results

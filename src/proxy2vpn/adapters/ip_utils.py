@@ -64,6 +64,8 @@ def _curl_proxy_args(proxy: str) -> list[str]:
         return []
 
     netloc = parsed.hostname
+    if ":" in netloc:
+        netloc = f"[{netloc}]"
     if parsed.port is not None:
         netloc = f"{netloc}:{parsed.port}"
 

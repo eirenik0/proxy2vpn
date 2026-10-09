@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from pathlib import Path
 from typing import Any, TypeVar
 from urllib.parse import urlparse
 
@@ -9,11 +10,13 @@ import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, field_validator, AliasChoices
 
 from proxy2vpn.core.config import (
+    COMPOSE_FILE,
     CONTROL_API_ENDPOINTS,
     DEFAULT_TIMEOUT,
     MAX_RETRIES,
     VERIFY_SSL,
 )
+from proxy2vpn.core.security import load_control_auth
 from .http_client_config import GluetunControlSettings
 from .logging_utils import get_logger
 
@@ -256,12 +259,21 @@ class GluetunControlClient(HTTPClient):
         retry_attempts: int = MAX_RETRIES,
         retry_backoff: float = 0.5,
         settings: GluetunControlSettings | None = None,
+        compose_file: Path | None = None,
     ):
         parsed = urlparse(base_url)
         if not (parsed.scheme and parsed.netloc):
             raise ValueError(f"invalid base URL: {base_url}")
         control_settings = settings or GluetunControlSettings()
         auth = control_settings.auth_tuple()
+        self._operator_auth = auth
+        # Automatically discovered credentials belong only to local controls.
+        # Explicit environment/settings auth remains the custom-server override.
+        if auth is None and parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
+            auth = load_control_auth(compose_file or COMPOSE_FILE, "monitor")
+            self._operator_auth = load_control_auth(
+                compose_file or COMPOSE_FILE, "operator"
+            )
         config = HTTPClientConfig(
             base_url=f"{parsed.scheme}://{parsed.netloc}",
             timeout=timeout,
@@ -270,6 +282,12 @@ class GluetunControlClient(HTTPClient):
             retry=RetryPolicy(attempts=retry_attempts, backoff=retry_backoff),
         )
         super().__init__(config)
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        kwargs.setdefault("allow_redirects", False)
+        if method.upper() not in {"GET", "HEAD"} and self._operator_auth:
+            kwargs["auth"] = aiohttp.BasicAuth(*self._operator_auth)
+        return await super().request(method, path, **kwargs)
 
     async def status(self) -> StatusResponse:
         data = await self.get(self.ENDPOINTS["status"])

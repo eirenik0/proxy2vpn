@@ -2,10 +2,13 @@
 
 import json
 import logging
+from pathlib import Path
 
 import typer
 
 from proxy2vpn.core import config
+from proxy2vpn.core.security import ensure_control_auth, validate_bind_address
+from proxy2vpn.adapters.compose_utils import iter_port_mappings
 from proxy2vpn.cli.typer_ext import HelpfulTyper, run_async
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.server_manager import ServerManager
@@ -52,33 +55,14 @@ async def init(
         need_exit_error = True
         logger.info("compose_kept_existing", extra={"file": str(compose_file)})
 
-    # Create or update control server auth config only during system init
+    # Initialization never rotates credentials or overwrites custom auth files.
     auth_config = config.resolve_control_auth_config(compose_file)
-    created = False
-    updated = False
     try:
-        auth_config.parent.mkdir(parents=True, exist_ok=True)
-        if auth_config.exists():
-            if force or typer.confirm(
-                f"Overwrite existing '{auth_config}'?", abort=False
-            ):
-                auth_config.write_text(config.CONTROL_AUTH_CONFIG_TEMPLATE)
-                updated = True
-                logger.info(
-                    "auth_config_updated",
-                    extra={"file": str(auth_config.resolve())},
-                )
-        else:
-            auth_config.write_text(config.CONTROL_AUTH_CONFIG_TEMPLATE)
-            created = True
-            logger.info(
-                "auth_config_created",
-                extra={"file": str(auth_config.resolve())},
-            )
-    except Exception as exc:
+        created = ensure_control_auth(compose_file)
+    except (OSError, ValueError):
         abort(
-            f"Failed to write '{auth_config}': {exc}",
-            "Check file permissions or run again with appropriate rights.",
+            "Failed to initialize control authentication.",
+            "Check file permissions and use 'system secure' for explicit migration.",
         )
 
     server_list_updated = False
@@ -121,8 +105,6 @@ async def init(
     # Build a user-friendly status for the auth file
     if created:
         auth_msg = f"generated '{auth_config}'"
-    elif updated:
-        auth_msg = f"updated '{auth_config}'"
     else:
         auth_msg = f"kept existing '{auth_config}'"
 
@@ -143,6 +125,65 @@ async def init(
                 f"Compose file '{compose_file}' already exists",
                 "Use --force to overwrite",
             )
+
+
+@app.command("secure")
+def secure(
+    ctx: typer.Context,
+    proxy_bind_address: str = typer.Option(
+        "127.0.0.1",
+        "--proxy-bind-address",
+        help="Bind existing proxies to this IP address.",
+    ),
+    replace_control_auth: bool = typer.Option(
+        False,
+        "--replace-control-auth",
+        help="Back up and replace existing custom/legacy control authentication.",
+    ),
+):
+    """Prepare secure deployment files; recreate VPN services to apply them."""
+    compose_file = Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE))
+    try:
+        bind = validate_bind_address(proxy_bind_address)
+        manager = ComposeManager(compose_file)
+        updates = []
+        for service in manager.list_services():
+            definition = manager.data["services"][service.name]
+            ports = []
+            for item in definition.get("ports", []) or []:
+                if any(target == 8888 for _, target in iter_port_mappings([item])):
+                    if isinstance(item, dict):
+                        item = dict(item, host_ip=bind)
+                    else:
+                        parts = str(item).rsplit(":", 2)
+                        rendered_bind = f"[{bind}]" if ":" in bind else bind
+                        item = f"{rendered_bind}:{parts[-2]}:{parts[-1]}"
+                ports.append(item)
+            updates.append((definition, ports))
+        changed_auth = ensure_control_auth(compose_file, replace=replace_control_auth)
+        changed_bindings = any(
+            definition.get("ports", []) != ports for definition, ports in updates
+        )
+        for definition, ports in updates:
+            definition["ports"] = ports
+        if changed_bindings:
+            manager.save()
+    except (OSError, ValueError):
+        abort(
+            "Could not prepare secure deployment files.",
+            "Check the bind address, configuration, and file permissions.",
+        )
+    auth_state = "generated" if changed_auth else "preserved existing"
+    console.print(f"Control authentication: {auth_state}; proxy bind: {bind}.")
+    if not changed_auth:
+        console.print(
+            "Existing authentication was preserved. To migrate custom or legacy auth, "
+            "use --replace-control-auth."
+        )
+    console.print(
+        "Recreate VPN services with 'proxy2vpn vpn update --all' to apply these files. "
+        "Backups are kept beside the originals; live containers were not changed."
+    )
 
 
 @app.command("validate")
@@ -171,6 +212,7 @@ def validate(
 
 @app.command("diagnose")
 def diagnose(
+    ctx: typer.Context,
     name: str | None = typer.Argument(
         None, callback=lambda v: sanitize_name(v) if v else None
     ),
@@ -267,7 +309,19 @@ def diagnose(
         ):
             control_port = port_info[0].get("HostPort")
             base_url = f"http://localhost:{control_port}/v1"
-            results.extend(analyzer.control_api_checks(base_url))
+            results.extend(
+                analyzer.control_api_checks(
+                    base_url,
+                    compose_file=Path(
+                        (getattr(container, "labels", {}) or {}).get(
+                            config.COMPOSE_FILE_LABEL,
+                            str(
+                                (ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)
+                            ),
+                        )
+                    ),
+                )
+            )
         logger.debug(
             "log_analysis_complete",
             extra={"container_name": container.name, "issues_found": len(results)},

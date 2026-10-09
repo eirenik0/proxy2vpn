@@ -30,7 +30,6 @@ def test_control_auth_config_template_contains_supported_routes_only():
         "GET /v1/openvpn/status",
         "PUT /v1/openvpn/status",
         "GET /v1/openvpn/portforwarded",
-        "GET /v1/openvpn/settings",
         # DNS
         "GET /v1/dns/status",
         "PUT /v1/dns/status",
@@ -52,6 +51,8 @@ def test_control_auth_config_template_contains_supported_routes_only():
         '"GET /status"',
         '"GET /ip"',
         '"POST /openvpn"',
+        "GET /v1/openvpn/settings",  # settings can expose secrets
+        "GET /v1/vpn/settings",
         "/openvpn/restart",  # not part of template
     ]
     for s in must_exclude:

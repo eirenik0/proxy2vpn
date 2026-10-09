@@ -1,6 +1,7 @@
 """Exercise the runtime interface without a Docker daemon or network requests."""
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -163,7 +164,11 @@ def test_inspection_collects_authenticated_probe_inputs_off_loop():
     assert diagnostics[3:] == (7, "203.0.113.1")
     assert ("direct_ip", (7,)) in backend.calls
     assert clients[0].url == "http://localhost:30000/v1"
-    assert clients[0].options == {"timeout": 1.25, "retry_attempts": 2}
+    assert clients[0].options == {
+        "timeout": 1.25,
+        "retry_attempts": 2,
+        "compose_file": Path("compose.yml"),
+    }
     assert clients[0].closed
 
 

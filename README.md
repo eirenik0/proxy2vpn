@@ -227,20 +227,45 @@ This makes the workspace portable and avoids cwd-dependent behavior.
 
 ### Control server authentication
 
-`proxy2vpn system init` generates `control-server-auth.toml` next to the active compose file and mounts it into each container automatically. The generated role uses `auth = "none"` for the localhost-bound control routes that `proxy2vpn` calls, so no extra manual setup is required for the built-in control commands.
+`proxy2vpn system init` generates `control-server-auth.toml` and
+`control-client-auth.json` next to the active Compose file. Both use owner-only
+permissions. Separate random credentials authorize monitoring reads and recovery
+writes; the CLI and watchdog discover them automatically from the Compose root.
+Keep both files together when moving a workspace. Neither role exposes settings
+that may contain credentials.
 
-If you need stricter access control, replace that generated file with your own Gluetun auth configuration such as:
+Existing custom and legacy authentication files are preserved, including when
+initializing with `--force`. For custom auth, continue to configure
+`GLUETUN_CONTROL_AUTH=user:password`. Do not edit files carrying the generated
+header independently: clients verify that the server/client pair matches.
 
-```toml
-[[roles]]
-name = "qbittorrent"
-routes = ["GET /v1/openvpn/portforwarded"]
-auth = "basic"
-username = "myusername"
-password = "mypassword"
+New VPN proxies bind to `127.0.0.1` by default. Select an explicit private or public
+interface with `vpn add --proxy-bind-address ADDRESS`; fleet configuration files
+and saved deployment plans accept `proxy_bind_address` too. Existing Compose
+bindings are preserved when loading, updating, restoring, or rotating services.
+Remote clients need a reachable selected interface; an authenticated proxy still
+needs a protected client-to-proxy network connection.
+
+To explicitly migrate an existing workspace:
+
+```bash
+proxy2vpn --compose-file state/compose.yml system secure --replace-control-auth
+proxy2vpn --compose-file state/compose.yml vpn update --all
 ```
 
-After editing the file, run `proxy2vpn vpn update NAME` to recreate the container with the new auth configuration.
+The first command backs up authentication files and Compose, prepares generated
+authentication, and changes proxy bindings to localhost. It does not modify live
+containers. The second recreates VPN containers to apply the files and interrupts
+existing connections. Choose `--proxy-bind-address YOUR_PRIVATE_HOST_IP` on the
+first command if remote private clients need access, or explicitly choose
+`0.0.0.0` to publish on all IPv4 interfaces.
+
+Without `--replace-control-auth`, the command preserves existing authentication.
+Repeating migration preserves valid generated credentials. To roll back, restore
+`compose.yml.bak`, `control-server-auth.toml.bak`, and (if one existed)
+`control-client-auth.json.bak` together, then recreate the services. When rolling
+back to legacy/custom auth that had no client file, remove the newly generated
+client file. Backups contain credentials and must stay private.
 
 ## External HTTP CONNECT proxies
 
@@ -550,7 +575,7 @@ Recent highlights (see CHANGELOG.md for details):
 - `vpn add` is the single compose-only service-definition command.
 - `vpn update` is the explicit recreate-and-refresh command for VPN containers.
 - Profile lifecycle split: `profile remove` (from compose) and `profile delete` (delete env file).
-- Control server auth config is created during `system init`, mounted automatically, and defaults to `auth = "none"` for localhost-bound control routes.
+- Control authentication is generated during `system init`, mounted automatically, and uses separate monitor/operator credentials for localhost-bound controls.
 - Default health analysis in `vpn list`; removed `--diagnose`/`--ips-only` flags.
 
 ---
