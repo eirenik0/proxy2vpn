@@ -920,7 +920,7 @@ def test_deploy_fleet_failure_preserves_existing_agent_state(tmp_path, monkeypat
     assert result.deployed == 0
     assert result.failed == 1
     assert any("Deployment failed: boom" in error for error in result.errors)
-    assert store.read_state() == previous_state
+    assert store.read_state() == store.sanitizer().model(previous_state)
     assert store.load_incidents() == [previous_incident]
 
 

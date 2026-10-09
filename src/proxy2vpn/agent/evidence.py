@@ -1,0 +1,282 @@
+"""Bounded, copied diagnostic representations for storage and transmission."""
+
+from __future__ import annotations
+
+import base64
+from collections.abc import Mapping
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote, quote_plus, unquote, urlsplit
+
+from ruamel.yaml import YAML
+
+from proxy2vpn.core import config
+from proxy2vpn.core.security import CLIENT_AUTH_FILE
+from proxy2vpn.core.redaction import REDACTED, _redact_text, _secret_key
+
+# Raw log lines are never retained. Only these literal diagnostic facts survive.
+_LOG_FACTS = (
+    "AUTH_FAILED",
+    "authentication failure",
+    "TLS handshake failed",
+    "RTNETLINK answers: File exists",
+    "Linux route add command failed",
+    "Network unreachable",
+    "DNS resolution failed",
+    "connection refused",
+    "connection timed out",
+    "certificate verification failed",
+)
+_CHECKS = frozenset(
+    (
+        "auth_failure",
+        "config_error",
+        "tls_error",
+        "route_error",
+        "dns_error",
+        "connectivity",
+        "control_api",
+        "dns_status",
+        "updater_status",
+        "port_forward",
+        "logs",
+        "authentication",
+        "latency",
+        "container",
+        "egress_ip",
+        "egress_identity",
+        "configuration",
+        "unknown",
+    )
+)
+# Unknown payload keys are omitted rather than trusting their serialized value.
+_FIELDS = frozenset(
+    """status services actions compose_path daemon_mode started_at
+active_cycle_started_at active_cycle_phase active_cycle_service_name last_loop_at
+last_progress_at interval_seconds service_count unhealthy_count last_error llm_mode
+service_name container_status health_score consecutive_failures degraded_since
+last_check_at source capabilities health_class failing_checks current_egress_ip
+authentication connectivity latency_ms last_action last_action_result ts action
+trigger result details id type severity created_at updated_at failure_count summary
+recommended_action approval_required approved_at resolved_at human_explanation
+investigation findings log_evidence action_plan investigated_at fallback_summary
+issues recent_actions incident_id incident_type incident_summary provider location
+profile_name profile_env_file control_api_reachable profile_validation_errors
+healthy_shared_profile_peers auth_config_shared_profile_peers
+other_unhealthy_shared_profile_peers shared_profile_peer_probe_failures check passed
+persistent message recommendation inspect_runtime collect_logs restart_tunnel
+restore replace_endpoint replace_session request_different_exit_ip
+recreate_service rotate_location requested_service_name final_service_name
+old_location new_location candidate_locations attempted_locations errors error
+cancelled incident_id control_port profile runtime_request_result observation
+observation_error exit_ip_changed previous_exit_ip current_exit_ip old_exit_ip new_exit_ip request_result
+rotation_result reason message_count purpose""".split()
+)
+
+
+def _env_mappings(value: Any, depth: int = 0):
+    """Discover env-file references in services and shared Compose profile anchors."""
+    if depth > 20:
+        return
+    if isinstance(value, Mapping):
+        if "env_file" in value:
+            yield value
+        for item in value.values():
+            yield from _env_mappings(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _env_mappings(item, depth + 1)
+
+
+class EvidenceSanitizer:
+    """Mask configured credentials and project untrusted evidence onto safe fields."""
+
+    def __init__(self, secrets: list[str] | None = None) -> None:
+        self._values: set[str] = set()
+        for secret in secrets or []:
+            self.add_secret(secret)
+
+    def add_secret(self, secret: str) -> None:
+        if not secret or secret in {REDACTED, "[TRUNCATED]"}:
+            return
+        # Explicitly supported one-layer encodings; no heuristic decoding of text.
+        raw = secret.encode()
+        self._values.update(
+            (
+                secret,
+                quote(secret, safe=""),
+                quote_plus(secret),
+                base64.b64encode(raw).decode(),
+                base64.urlsafe_b64encode(raw).decode(),
+                json.dumps(secret, ensure_ascii=True)[1:-1],
+            )
+        )
+
+    def text(self, value: str) -> str:
+        # A single substitution cannot inspect markers inserted by earlier matches.
+        pattern = "|".join(
+            re.escape(secret) for secret in sorted(self._values, key=len, reverse=True)
+        )
+        parts = value.split(REDACTED)
+        if pattern:
+            parts = [re.sub(pattern, lambda _: REDACTED, part) for part in parts]
+        result = _redact_text(REDACTED.join(parts))
+        if len(result) <= 2048:
+            return result
+        bounded = result[:2048]
+        for length in range(1, len(REDACTED)):
+            if bounded.endswith(REDACTED[:length]):
+                return bounded[:-length]
+        return bounded
+
+    def collect_environment(self) -> None:
+        # Shell identity/location variables are metadata, not credential aliases.
+        self.collect(
+            {
+                key: value
+                for key, value in os.environ.items()
+                if key.upper() not in {"USER", "USERNAME", "PWD", "OLDPWD"}
+            }
+        )
+
+    def collect(self, value: Any, *, depth: int = 0) -> None:
+        if depth > 20:
+            return
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                if (
+                    _secret_key(str(key))
+                    or str(key).lower() in {"username", "user"}
+                    or str(key).upper().endswith(("_USER", "_USERNAME"))
+                ) and isinstance(item, str):
+                    self.add_secret(item)
+                self.collect(item, depth=depth + 1)
+        elif isinstance(value, list):
+            for item in value:
+                self.collect(item, depth=depth + 1)
+        elif isinstance(value, str):
+            if "=" in value:
+                key, item = value.split("=", 1)
+                if (
+                    _secret_key(key)
+                    or key.lower() in {"username", "user"}
+                    or key.upper().endswith(("_USER", "_USERNAME"))
+                ):
+                    self.add_secret(item)
+                    self.add_secret(item.strip().strip("\"'"))
+            if "://" in value:
+                try:
+                    url = urlsplit(value)
+                    for part in (url.username, url.password):
+                        if part:
+                            self.add_secret(unquote(part))
+                    if url.username and url.password:
+                        self.add_secret(
+                            f"{unquote(url.username)}:{unquote(url.password)}"
+                        )
+                except ValueError:
+                    pass
+
+    @classmethod
+    def from_compose(
+        cls, compose_file: Path, inventory_file: str = "external-proxies.json"
+    ) -> EvidenceSanitizer:
+        sanitizer = cls()
+        sanitizer.collect_environment()
+        root = compose_file.parent
+        json_paths = {root / inventory_file, root / CLIENT_AUTH_FILE}
+        paths = {
+            compose_file,
+            root / ".env",
+            root / config.CONTROL_AUTH_CONFIG_FILE,
+            *json_paths,
+        }
+        paths.update((root / "profiles").glob("*.env"))
+        if compose_file.exists():
+            data = YAML(typ="safe").load(compose_file.read_text()) or {}
+            sanitizer.collect(data)
+            for service in _env_mappings(data):
+                env_files = service.get("env_file", [])
+                if isinstance(env_files, (str, dict)):
+                    env_files = [env_files]
+                for item in env_files:
+                    path = item.get("path") if isinstance(item, dict) else item
+                    if path:
+                        paths.add(root / path)
+        for path in paths:
+            if not path.is_file():
+                continue
+            text = path.read_text()
+            if path == compose_file:
+                continue
+            if path in json_paths:
+                sanitizer.collect(json.loads(text))
+            else:
+                sanitizer.collect(text.splitlines())
+        return sanitizer
+
+    # @lat: [[agent#Evidence Secrecy Contract]]
+    def sanitize(self, value: Any, *, key: str = "", depth: int = 0) -> Any:
+        if depth > 20:
+            return "[TRUNCATED]"
+        if _secret_key(key):
+            return REDACTED
+        if isinstance(value, Mapping):
+            if key == "issues":
+                check = value.get("check", "unknown")
+                check = (
+                    check if isinstance(check, str) and check in _CHECKS else "unknown"
+                )
+                return {
+                    "check": check,
+                    "passed": value.get("passed")
+                    if isinstance(value.get("passed"), bool)
+                    else None,
+                    "persistent": bool(value.get("persistent", False)),
+                    "message": "External endpoint is no longer configured."
+                    if check == "configuration"
+                    and value.get("message")
+                    == "External endpoint is no longer configured."
+                    else f"Diagnostic check: {check}",
+                    "recommendation": "Review diagnostic classification",
+                }
+            return {
+                name: self.sanitize(item, key=name, depth=depth + 1)
+                for name, item in value.items()
+                if isinstance(name, str) and name in _FIELDS
+            }
+        if isinstance(value, (list, tuple)):
+            if key == "log_evidence":
+                facts = [
+                    fact
+                    for fact in _LOG_FACTS
+                    if any(fact.lower() in str(line).lower() for line in value)
+                ]
+                return [fact for fact in facts if self.text(fact) == fact][:6]
+            return [
+                self.sanitize(item, key=key, depth=depth + 1)
+                for item in (value if key in {"services", "actions"} else value[:64])
+            ]
+        if isinstance(value, str):
+            if key in {"error", "errors", "observation_error", "last_error"}:
+                return (
+                    value
+                    if value == "Cycle cancelled"
+                    else "Diagnostic error (raw text omitted)"
+                )
+            return self.text(value)
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return "[OMITTED]"
+
+    def model(self, value: Any) -> Any:
+        data = self.sanitize(value.model_dump(mode="json"))
+        if "fallback_summary" in data and data.get("issues"):
+            checks = ", ".join(issue["check"] for issue in data["issues"])
+            data["fallback_summary"] = self.text(
+                f"{data['service_name']}: diagnostic checks: {checks}"
+            )
+        return type(value).model_validate(data)

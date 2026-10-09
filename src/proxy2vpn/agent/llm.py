@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from proxy2vpn.adapters.logging_utils import get_logger
 from proxy2vpn.agent.config import AgentSettings
+from proxy2vpn.agent.evidence import EvidenceSanitizer
 
 logger = get_logger(__name__)
 
@@ -87,6 +88,7 @@ class _OpenAIResponderBase:
         reasoning_effort: str | None = None,
         settings: AgentSettings | None = None,
         client: Any | None = None,
+        sanitizer: EvidenceSanitizer | None = None,
     ) -> None:
         self.settings = settings or AgentSettings()
         self.model = (model or self.settings.openai_model).strip()
@@ -104,6 +106,8 @@ class _OpenAIResponderBase:
             reasoning_effort or self.settings.openai_reasoning_effort
         ).strip()
         self._client = client
+        self.sanitizer = sanitizer or EvidenceSanitizer()
+        self.sanitizer.collect_environment()
 
     def _get_client(self) -> Any:
         if self._client is not None:
@@ -145,7 +149,7 @@ class _OpenAIResponderBase:
             raise RuntimeError(
                 "OpenAI response did not return parsed structured output"
             )
-        return parsed
+        return self.sanitizer.model(parsed)
 
 
 class OpenAIIncidentEnricher(_OpenAIResponderBase):
@@ -162,7 +166,7 @@ class OpenAIIncidentEnricher(_OpenAIResponderBase):
             ),
             user_prompt=(
                 "Produce incident JSON for this service.\n"
-                f"{context.model_dump_json(indent=2)}"
+                f"{self.sanitizer.model(context).model_dump_json(indent=2)}"
             ),
             output_model=IncidentEnrichment,
         )
@@ -194,7 +198,7 @@ class OpenAIIncidentInvestigator(_OpenAIResponderBase):
             ),
             user_prompt=(
                 "Produce investigation JSON for this incident.\n"
-                f"{context.model_dump_json(indent=2)}"
+                f"{self.sanitizer.model(context).model_dump_json(indent=2)}"
             ),
             output_model=InvestigationPlan,
         )

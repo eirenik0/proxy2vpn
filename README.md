@@ -525,6 +525,16 @@ Notes:
 - `proxy2vpn fleet rotate [--country COUNTRY] [--criteria random|performance|load] [--dry-run]`
 - `proxy2vpn fleet scale up|down [--countries COUNTRIES] [--factor N]`
 
+## Agent evidence privacy and migration
+
+The watchdog sanitizes stored state, incident history, LLM requests and generated investigation results. It retains allowlisted diagnostic fields and check classifications, replaces raw log lines with recognized diagnostic facts, and omits raw exception messages. Live configuration and health objects used for recovery are not edited.
+
+Configured credentials are discovered in sensitive process environment fields, Compose environment and referenced env files (including shared profile anchors and custom filenames), the root `.env`, `profiles/*.env`, the configured external-proxy inventory, and compose-root control client/server credentials. Matching covers literal values, one layer of canonical URL/form encoding, padded standard or URL-safe Base64, and JSON string escaping. Labelled passwords, tokens, authorization values, private keys and credential URL userinfo also use the shared logging redactor.
+
+Existing `state.json` is scrubbed on the first state read; `incidents.jsonl` is scrubbed in full on the first history read or append, including superseded records. Run `proxy2vpn agent status` and `proxy2vpn agent incidents --all` after upgrading, for each compose root, while the old credentials are still available in configuration. Rewrites use an independent storage lock and atomic replacement; historical records are preserved. Invalid records or unreadable configuration stop the operation instead of forwarding unsafe evidence. Old binaries must be stopped before migration because they do not honor the new storage lock.
+
+The guarantee cannot identify arbitrary unlabelled secrets in narrative text or credentials already removed from configuration. Raw logs and issue payloads that cannot meet the contract are omitted. Repeated/nested encodings, encryption, shell evaluation and multiline dotenv values are unsupported. Existing backups, exported evidence and daemon logs are outside this migration; handle them separately under your retention policy. See `lat.md/agent.md` for the full contract.
+
 ## Development
 
 ### Setup

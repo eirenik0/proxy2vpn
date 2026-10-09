@@ -1,74 +1,18 @@
 """One redacted JSON pipeline for structlog and standard-library records."""
 
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from contextlib import contextmanager
 import logging
 from pathlib import Path
-import re
 from typing import Any
 
 import structlog
 from structlog.types import EventDict, Processor
 
 
-REDACTED = "[REDACTED]"
-_SECRET_NAMES = (
-    "password",
-    "passwd",
-    "passphrase",
-    "token",
-    "apikey",
-    "secret",
-    "credential",
-    "authorization",
-    "privatekey",
-    "accesskey",
-)
-_URL_CREDENTIALS = re.compile(r"(?i)(\b[a-z][a-z0-9+.-]*://)[^/\s?#]+@")
-_AUTHORIZATION = re.compile(r"(?i)(\b(?:bearer|basic)\s+)[^\s,;\"'}\]]+")
-_SECRET_ASSIGNMENT = re.compile(
-    r"(?i)([\"']?[\w.-]*(?:password|passwd|passphrase|token|api[_-]?key|secret|"
-    r"credential|authorization|private[_-]?key|access[_-]?key|\bpwd\b|\bpass\b)"
-    r"[\w.-]*[\"']?\s*[:=]\s*)"
-    r"(?:\[REDACTED\]|\"[^\"]*\"|'[^']*'|[^\s,;&}\]]+)"
-)
+from proxy2vpn.core.redaction import REDACTED as REDACTED, _redact_value
+
 _owned_handler: logging.Handler | None = None
-
-
-def _secret_key(key: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9]", "", key.lower())
-    return normalized in {"pass", "pwd"} or any(
-        name in normalized for name in _SECRET_NAMES
-    )
-
-
-def _redact_text(value: str) -> str:
-    value = _URL_CREDENTIALS.sub(r"\1[REDACTED]@", value)
-    value = _AUTHORIZATION.sub(r"\1[REDACTED]", value)
-    return _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", value)
-
-
-def _redact_value(value: Any, *, depth: int = 0) -> Any:
-    # Normalize before JSONRenderer so custom objects cannot serialize secrets
-    # through a later __structlog__ or repr fallback. Bound depth handles cycles.
-    if depth > 20:
-        return "[TRUNCATED]"
-    if isinstance(value, Mapping):
-        return {
-            _redact_text(str(key)): REDACTED
-            if _secret_key(str(key))
-            else _redact_value(item, depth=depth + 1)
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_redact_value(item, depth=depth + 1) for item in value]
-    if isinstance(value, bytes):
-        return _redact_text(value.decode("utf-8", errors="replace"))
-    if isinstance(value, str):
-        return _redact_text(value)
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return _redact_text(str(value))
 
 
 # @lat: [[lat.md/logging#Operational Logging#Secret Redaction]]
