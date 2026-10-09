@@ -19,6 +19,7 @@ def test_live_harness_preserves_backups_and_attempts_all_cleanup(tmp_path, monke
     live.private_write(
         server, '[[roles]]\nname="legacy"\nauth="none"\nroutes=["GET /v1/vpn/status"]\n'
     )
+    assert lab.data["services"]["vpn"]["labels"]["vpn.type"] == "live-security"
     before = lab.compose.read_bytes()
     lab.secure("127.0.0.1", replace=True)
     assert lab.compose.with_name("compose.yml.bak").read_bytes() == before
@@ -26,6 +27,12 @@ def test_live_harness_preserves_backups_and_attempts_all_cleanup(tmp_path, monke
     first = server.read_bytes()
     lab.secure("127.0.0.1", replace=True)
     assert server.read_bytes() == first
+    assert (
+        live.YAML().load(lab.compose.read_text())["services"]["vpn"]["labels"][
+            "vpn.type"
+        ]
+        == "live-security"
+    )
     assert lab.compose.with_name("compose.yml.bak").read_bytes() == before
     calls = []
 

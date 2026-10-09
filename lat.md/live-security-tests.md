@@ -20,7 +20,7 @@ Legacy and custom auth remain live until explicit migration and recreation; back
 
 ## Harness Failure And Isolation Guards
 
-Credential-free checks ensure scratch migration preserves its original backup on rerun and failed Compose teardown still attempts removal of owned containers and networks.
+Scratch migration preserves original backups and the distinct live-security type label, keeping fixtures outside production VPN selectors; failed Compose teardown still attempts removal of owned containers and networks.
 
 ## Strict Prerequisites And Private Failures
 

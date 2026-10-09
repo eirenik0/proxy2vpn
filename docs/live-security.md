@@ -1,10 +1,10 @@
 # Live secure-defaults validation and migration
 
-Issue #140's opt-in suite runs real Gluetun v3.41.1 and curl 8.19.0, each pinned to a multi-platform OCI digest in `tests/test_live_security.py`. It creates private temporary workspaces, unique Compose projects and separate probe bridges. It never selects a repository VPN profile automatically or changes an existing fleet.
+Issue #140's opt-in suite runs real Gluetun v3.41.1 and curl 8.19.0, each pinned to a multi-platform OCI digest in `tests/test_live_security.py`. It creates private temporary workspaces, unique Compose projects and separate probe bridges. It never selects a repository VPN profile automatically or changes an existing fleet. Test containers use `vpn.type=live-security` so global production VPN selectors do not include them; UUID labels scope cleanup.
 
 ## Run the live suite
 
-Use Docker with Compose v2, host curl, NET_ADMIN and `/dev/net/tun` support, an explicitly selected working Gluetun VPN environment file, and a private IPv4 address actually assigned to the Docker host. The profile must be self-contained: env values, no references to extra WireGuard/OpenVPN files. The selected VPN account must permit two simultaneous test tunnels. Each scenario cleans up before the next starts. The suite overrides only its proxy/control configuration and runs Gluetun as root so its read-only mount can read owner-only authentication files.
+Use Docker with Compose v2, host curl, NET_ADMIN and `/dev/net/tun` support, an explicitly selected working Gluetun VPN environment file, and a private IPv4 address actually assigned to the Docker host. The profile must be self-contained: env values, no references to extra WireGuard/OpenVPN files. The selected VPN account must have spare capacity for two additional simultaneous test tunnels, or be dedicated to testing. Reusing a production account can evict existing provider sessions even when Docker resources are isolated. Each scenario cleans up before the next starts. The suite overrides only its proxy/control configuration and runs Gluetun as root so its read-only mount can read owner-only authentication files.
 
 ```sh
 export PROXY2VPN_LIVE_SECURITY=1

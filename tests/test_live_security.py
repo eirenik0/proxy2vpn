@@ -99,7 +99,7 @@ class Lab:
                     ],
                     "labels": {
                         "proxy2vpn.live": self.project,
-                        "vpn.type": "vpn",
+                        "vpn.type": "live-security",
                         "vpn.port": str(self.proxy_port),
                         "vpn.control_port": str(self.control_port),
                         "vpn.profile": "live",
