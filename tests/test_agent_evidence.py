@@ -393,3 +393,184 @@ def test_config_sources_and_pattern_redaction(tmp_path, monkeypatch):
         and "another-value" not in text
         and "credential@" not in text
     )
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#External Credential References]]
+def test_arbitrary_external_environment_references_are_scrubbed(tmp_path, monkeypatch):
+    username, password = "external-login-138", "external-key-138"
+    monkeypatch.setenv("LOGIN", username)
+    monkeypatch.setenv("KEY", password)
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services: {}\n")
+    (tmp_path / "external-proxies.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "id": "office",
+                        "connection": {"host": "127.0.0.1", "port": 8080},
+                        "credentials": {"username_env": "LOGIN", "password_env": "KEY"},
+                    }
+                ],
+            }
+        )
+    )
+    secrets = [username, password]
+    encodings = [
+        value
+        for secret in secrets
+        for value in (
+            secret,
+            quote(secret, safe=""),
+            quote_plus(secret),
+            base64.b64encode(secret.encode()).decode(),
+            base64.urlsafe_b64encode(secret.encode()).decode(),
+        )
+    ]
+    narrative = " ".join(encodings)
+    store = AgentStateStore(compose)
+    now = utc_now()
+    incident = AgentIncident(
+        id="external138",
+        service_name="office",
+        type="endpoint_unhealthy",
+        severity="high",
+        source="external_proxy",
+        created_at=now,
+        updated_at=now,
+        summary=narrative,
+        recommended_action="investigate",
+    )
+    state = AgentState(
+        status=AgentStatus(compose_path=str(compose), interval_seconds=60),
+        actions=[
+            ActionRecord(
+                ts=now,
+                service_name="office",
+                action="restore",
+                trigger="manual",
+                result="failed",
+                details={"profile": narrative},
+            )
+        ],
+    )
+    store.ensure_dir()
+    store.state_file.write_text(state.model_dump_json())
+    store.incidents_file.write_text(incident.model_dump_json() + "\n")
+    store.read_state()
+    store.load_incidents()
+    store.write_state(state)
+    store.append_incident(incident)
+    captured = []
+
+    def parse(**kwargs):
+        captured.append(kwargs["input"])
+        return SimpleNamespace(
+            output_parsed=(
+                IncidentEnrichment(summary=narrative, human_explanation=narrative)
+                if kwargs["text_format"] is IncidentEnrichment
+                else InvestigationPlan(
+                    summary=narrative, findings=[narrative], action_plan=[narrative]
+                )
+            )
+        )
+
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    sanitizer = store.sanitizer()
+    assert sanitizer.text("LOGIN KEY") == "LOGIN KEY"
+    enrichment = OpenAIIncidentEnricher(client=client, sanitizer=sanitizer).enrich(
+        context().model_copy(update={"fallback_summary": narrative, "issues": []})
+    )
+    plan = OpenAIIncidentInvestigator(client=client, sanitizer=sanitizer).investigate(
+        investigation_context().model_copy(update={"incident_summary": narrative})
+    )
+    output = store.state_file.read_text() + store.incidents_file.read_text()
+    output += (
+        json.dumps(captured) + enrichment.model_dump_json() + plan.model_dump_json()
+    )
+    for secret in encodings:
+        assert secret not in output
+    assert incident.summary == narrative
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Typed Control Facts]]
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "open",
+        "high",
+        "once",
+        "external_proxy",
+        "running",
+        "rotate",
+        "success",
+        "auth_failure",
+        "2026",
+    ],
+)
+def test_credential_collisions_preserve_typed_control_facts(tmp_path, secret):
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services: {}\n")
+    (tmp_path / ".env").write_text("OPENVPN_PASSWORD=" + secret + "\n")
+    store = AgentStateStore(compose)
+    now = utc_now().replace(year=2026)
+    incident = AgentIncident(
+        id="control138",
+        service_name="vpn-a",
+        type="endpoint_unhealthy",
+        severity="high",
+        source="external_proxy",
+        status="open",
+        created_at=now,
+        updated_at=now,
+        summary="Unlabelled diagnostic contains " + secret,
+        recommended_action="rotate",
+    )
+    state = AgentState(
+        status=AgentStatus(
+            compose_path=str(compose),
+            daemon_mode="once",
+            started_at=now,
+            interval_seconds=60,
+        ),
+        actions=[
+            ActionRecord(
+                ts=now,
+                service_name="vpn-a",
+                action="rotate",
+                trigger="manual",
+                result="success",
+            )
+        ],
+    )
+    store.write_state(state)
+    store.append_incident(incident)
+    loaded_state, loaded_incident = store.read_state(), store.load_incidents()[0]
+    assert loaded_state.status.daemon_mode == "once"
+    assert loaded_state.status.started_at == now
+    assert loaded_state.actions[0].action == "rotate"
+    assert loaded_state.actions[0].result == "success"
+    assert loaded_incident.status == "open"
+    assert loaded_incident.severity == "high"
+    assert loaded_incident.source == "external_proxy"
+    assert loaded_incident.recommended_action == "rotate"
+    assert loaded_incident.created_at == now
+    assert secret not in loaded_incident.summary
+    sanitizer = store.sanitizer()
+    diagnostic = {
+        "container_status": "running",
+        "failing_checks": ["auth_failure"],
+        "source": "external_proxy",
+    }
+    assert sanitizer.sanitize(diagnostic) == diagnostic
+    assert (
+        sanitizer.sanitize({"status": "unexpected-" + secret})["status"]
+        != "unexpected-" + secret
+    )
+    plan_context = investigation_context().model_copy(
+        update={"status": "open", "severity": "high", "incident_summary": secret}
+    )
+    safe_context = sanitizer.model(plan_context)
+    assert safe_context.status == "open" and safe_context.severity == "high"
+    assert secret not in safe_context.incident_summary

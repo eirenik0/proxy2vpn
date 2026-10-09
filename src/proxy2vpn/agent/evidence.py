@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping
+from datetime import datetime
 import json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 from ruamel.yaml import YAML
 
+from proxy2vpn.agent.models import DaemonMode, IncidentSeverity, IncidentStatus
 from proxy2vpn.core import config
 from proxy2vpn.core.security import CLIENT_AUTH_FILE
 from proxy2vpn.core.redaction import REDACTED, _redact_text, _secret_key
@@ -52,6 +54,99 @@ _CHECKS = frozenset(
         "unknown",
     )
 )
+# Only recognized typed/control facts bypass credential substring matching.
+_CLASSIFICATIONS = {
+    "status": frozenset(get_args(IncidentStatus)),
+    "severity": frozenset(get_args(IncidentSeverity)),
+    "daemon_mode": frozenset(get_args(DaemonMode)),
+    "source": frozenset({"gluetun", "external_proxy"}),
+    "llm_mode": frozenset({"disabled", "openai"}),
+    "container_status": frozenset(
+        {
+            "created",
+            "running",
+            "paused",
+            "restarting",
+            "removing",
+            "exited",
+            "dead",
+            "missing",
+            "unknown",
+            "not_applicable",
+        }
+    ),
+    "health_class": frozenset(
+        {
+            "healthy",
+            "auth_config",
+            "connectivity",
+            "container_stopped",
+            "degraded",
+            "assessment_failed",
+        }
+    ),
+    "failing_checks": _CHECKS,
+    "check": _CHECKS,
+    "active_cycle_phase": frozenset(
+        {"cleanup", "assessing_services", "processing_services"}
+    ),
+}
+_ACTIONS = frozenset(
+    {
+        "restart_tunnel",
+        "restore",
+        "rotate",
+        "investigate",
+        "replace_endpoint",
+        "replace_session",
+        "request_different_exit_ip",
+    }
+)
+_RESULTS = frozenset(
+    {
+        "success",
+        "failed",
+        "cancelled",
+        "interrupted",
+        "accepted",
+        "rejected",
+        "unsupported",
+        "unknown",
+    }
+)
+for _field in ("action", "last_action", "recommended_action"):
+    _CLASSIFICATIONS[_field] = _ACTIONS
+for _field in ("result", "last_action_result", "runtime_request_result", "observation"):
+    _CLASSIFICATIONS[_field] = _RESULTS
+_INCIDENT_TYPES = frozenset(
+    {
+        "auth_config_failure",
+        "endpoint_unhealthy",
+        "rotation_exhausted",
+        "rotation_required",
+        "profile_auth_config_failure",
+        "provider_outage_suspected",
+    }
+)
+for _field in ("type", "incident_type"):
+    _CLASSIFICATIONS[_field] = _INCIDENT_TYPES
+_CLASSIFICATIONS["trigger"] = frozenset(
+    {
+        "manual",
+        "manual_approval",
+        "automatic_remediation",
+        "auto_rotation",
+        "first_unhealthy_cycle",
+        "isolated_auth_failure",
+    }
+)
+_CLASSIFICATIONS["purpose"] = frozenset(
+    {"repair_connectivity", "request_different_exit_ip"}
+)
+_TIMESTAMPS = frozenset(
+    "started_at active_cycle_started_at last_loop_at last_progress_at degraded_since last_check_at ts created_at updated_at approved_at resolved_at investigated_at".split()
+)
+
 # Unknown payload keys are omitted rather than trusting their serialized value.
 _FIELDS = frozenset(
     """status services actions compose_path daemon_mode started_at
@@ -155,6 +250,11 @@ class EvidenceSanitizer:
             return
         if isinstance(value, Mapping):
             for key, item in value.items():
+                if key in {"username_env", "password_env"} and isinstance(item, str):
+                    credential = os.environ.get(item)
+                    if credential:
+                        self.add_secret(credential)
+                    continue
                 if (
                     _secret_key(str(key))
                     or str(key).lower() in {"username", "user"}
@@ -195,7 +295,10 @@ class EvidenceSanitizer:
         sanitizer = cls()
         sanitizer.collect_environment()
         root = compose_file.parent
-        json_paths = {root / inventory_file, root / CLIENT_AUTH_FILE}
+        inventory_path = Path(inventory_file).expanduser()
+        if not inventory_path.is_absolute():
+            inventory_path = root / inventory_path
+        json_paths = {inventory_path, root / CLIENT_AUTH_FILE}
         paths = {
             compose_file,
             root / ".env",
@@ -269,6 +372,15 @@ class EvidenceSanitizer:
                 for item in (value if key in {"services", "actions"} else value[:64])
             ]
         if isinstance(value, str):
+            if value in _CLASSIFICATIONS.get(key, ()):
+                return value
+            if key in _TIMESTAMPS:
+                try:
+                    datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+                else:
+                    return value
             if key in {"error", "errors", "observation_error", "last_error"}:
                 return (
                     value

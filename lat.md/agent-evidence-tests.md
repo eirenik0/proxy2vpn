@@ -33,3 +33,11 @@ Verify credentials containing the literal redaction marker and supported encodin
 ## Replacement Convergence
 
 Verify replacing one credential cannot leave another configured credential formed from the inserted marker, and the resulting text remains idempotent.
+
+## External Credential References
+
+Verify arbitrary username_env and password_env references resolve to environment credential values before sanitizing history, state, both LLM requests and generated results.
+
+## Typed Control Facts
+
+Verify credential collisions with recognized statuses, severity, daemon modes, sources, action results, diagnostic checks and valid timestamps preserve typed facts while narrative values stay redacted.
