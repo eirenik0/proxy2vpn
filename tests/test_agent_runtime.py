@@ -434,7 +434,7 @@ def test_agent_run_cycle_clears_active_cycle_state_on_setup_failure(
     assert persisted is not None
     assert persisted.status.active_cycle_phase is None
     assert persisted.status.active_cycle_started_at is None
-    assert persisted.status.last_error == message
+    assert persisted.status.last_error == "Diagnostic error (raw text omitted)"
     assert persisted.status.last_loop_at is not None
 
 
@@ -1042,8 +1042,8 @@ def test_investigate_incident_persists_action_plan(agent_compose_file, monkeypat
         for finding in investigated.investigation.findings
     )
     assert investigated.investigation.log_evidence == [
-        "2026-03-27T10:19:07Z ERROR [openvpn] OpenVPN tried to add an IP route which already exists (RTNETLINK answers: File exists)",
-        "2026-03-27T10:19:07Z WARN [openvpn] Previous error details: Linux route add command failed: external program exited with error status: 2",
+        "RTNETLINK answers: File exists",
+        "Linux route add command failed",
     ]
     assert any(
         "proxy2vpn vpn update protonvpn-united-states-new-york" in step
@@ -1144,9 +1144,7 @@ def test_investigate_incident_uses_route_logs_to_shape_generic_action_plan(
 
     assert investigated.investigation is not None
     assert "route setup errors" in investigated.investigation.summary
-    assert investigated.investigation.log_evidence[0].endswith(
-        "generic error (-101): Network unreachable"
-    )
+    assert "Network unreachable" in investigated.investigation.log_evidence
     assert investigated.investigation.action_plan[0].startswith(
         "Review the attached route-related log evidence"
     )
@@ -2674,7 +2672,10 @@ def test_watchdog_restore_policy_with_runtime_results(
     assert profile._resolve_env_path() == agent_compose_file.parent / "env.test"
     manager = runtime.cleanup_orphans.call_args.args[0]
     assert manager.compose_path == agent_compose_file
-    assert watchdog.store.read_state().model_dump() == state.model_dump()
+    assert (
+        watchdog.store.read_state().model_dump()
+        == watchdog.store.sanitizer().model(state).model_dump()
+    )
 
 
 # @lat: [[lat.md/gluetun-runtime-tests#Gluetun Runtime Tests#Watchdog Restart Policy]]
@@ -2752,7 +2753,7 @@ def test_watchdog_persists_runtime_cleanup_failure(
     with pytest.raises(RuntimeError, match="cleanup unavailable"):
         asyncio.run(watchdog.run_once())
     state = watchdog.store.read_state()
-    assert state.status.last_error == "cleanup unavailable"
+    assert state.status.last_error == "Diagnostic error (raw text omitted)"
     assert state.status.active_cycle_started_at is None
     runtime.inspect.assert_not_awaited()
 
@@ -3152,12 +3153,15 @@ def test_restart_recheck_failure_preserves_request_and_failed_outcome(
     )
     if failure_phase == "failed_probe":
         assert recorded.details["observation"] == "failed"
-        assert recorded.details["observation_error"] == "probe failed"
+        assert (
+            recorded.details["observation_error"]
+            == "Diagnostic error (raw text omitted)"
+        )
     else:
         assert recorded.details["cancelled"] == "true"
         assert recorded.details["observation"] == "interrupted"
     if not request_succeeded:
-        assert recorded.details["error"] == "control request failed"
+        assert recorded.details["error"] == "Diagnostic error (raw text omitted)"
     snapshot = persisted.services[0]
     assert (
         snapshot.last_action == "restart_tunnel"

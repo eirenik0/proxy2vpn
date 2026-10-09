@@ -805,7 +805,7 @@ def test_real_proxy_rejection_reaches_watchdog_without_backend_operations(
             assert state.services[0].health_class == "auth_config"
             assert state.services[0].current_egress_ip is None
             incident = watchdog.store.load_incidents()[0]
-            assert "authentication was rejected" in incident.summary
+            assert "auth_failure" in incident.summary
             assert incident.recommended_action == "investigate"
             assert state.actions == []
 

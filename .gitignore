@@ -19,3 +19,5 @@ tmp_test_cli_create/
 .pi
 .codex
 lat.md/.cache
+
+**/.proxy2vpn-agent/identity.key

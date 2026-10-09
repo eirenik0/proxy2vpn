@@ -22,3 +22,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[egress-tests]]: Controlled CONNECT/TLS, unsupported-action, and workflow regression specifications.
 - [[security]]: Authenticated controls, proxy publication defaults, and explicit deployment migration.
 - [[security-tests]]: Credential isolation, authenticated requests, and binding compatibility specifications.
+
+- [[agent-evidence-tests]]: Secrecy contract regression specifications for state, LLM requests and migration.

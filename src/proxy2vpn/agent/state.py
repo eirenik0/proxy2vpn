@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from contextlib import suppress
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from filelock import BaseFileLock, FileLock
 import psutil
 
 from proxy2vpn.agent.config import AgentSettings
+from proxy2vpn.agent.evidence import EvidenceSanitizer
 from proxy2vpn.agent.models import AgentIncident, AgentState, AgentStatus
 from proxy2vpn.core import config
 
@@ -85,16 +88,48 @@ class AgentStateStore:
     def daemon_is_running(self) -> bool:
         return self.daemon_process() is not None
 
+    def sanitizer(self) -> EvidenceSanitizer:
+        return EvidenceSanitizer.from_compose(
+            self.compose_file, self.settings.external_proxies_file
+        )
+
+    def _storage_lock(self) -> BaseFileLock:
+        self.ensure_dir()
+        return FileLock(str(self.agent_dir / "evidence.lock"))
+
+    def _atomic_write(self, path: Path, text: str) -> None:
+        fd, name = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=self.agent_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            Path(name).replace(path)
+        finally:
+            with suppress(FileNotFoundError):
+                Path(name).unlink()
+
     def read_state(self) -> AgentState | None:
-        if not self.state_file.exists():
-            return None
-        return AgentState.model_validate_json(self.state_file.read_text())
+        with self._storage_lock():
+            if not self.state_file.exists():
+                return None
+            original = self.state_file.read_text()
+            sanitizer = self.sanitizer()
+            sanitized = sanitizer.sanitize(json.loads(original))
+            state = AgentState.model_validate(sanitized)
+            text = json.dumps(state.model_dump(mode="json"), indent=2)
+            if text != original:
+                self._atomic_write(self.state_file, text)
+            return AgentState.model_validate(
+                sanitizer.restore_identities(state.model_dump(mode="json"))
+            )
 
     def write_state(self, state: AgentState) -> None:
-        self.ensure_dir()
-        tmp_file = self.state_file.with_suffix(".tmp")
-        tmp_file.write_text(json.dumps(state.model_dump(mode="json"), indent=2))
-        tmp_file.replace(self.state_file)
+        with self._storage_lock():
+            sanitized = self.sanitizer().model(state)
+            self._atomic_write(
+                self.state_file, json.dumps(sanitized.model_dump(mode="json"), indent=2)
+            )
 
     def reset_monitoring_state(self) -> None:
         """Clear persisted incidents and service history while preserving runtime metadata."""
@@ -127,19 +162,36 @@ class AgentStateStore:
             )
 
         self.write_state(AgentState(status=status))
-        with suppress(FileNotFoundError):
-            self.incidents_file.unlink()
+        with self._storage_lock():
+            with suppress(FileNotFoundError):
+                self.incidents_file.unlink()
 
-    def load_incidents(self) -> list[AgentIncident]:
+    def _scrub_incidents(self) -> list[AgentIncident]:
         if not self.incidents_file.exists():
             return []
+        original = self.incidents_file.read_text()
+        sanitizer = self.sanitizer()
+        records = [
+            AgentIncident.model_validate(sanitizer.sanitize(json.loads(line)))
+            for line in original.splitlines()
+            if line.strip()
+        ]
+        text = "".join(
+            json.dumps(record.model_dump(mode="json")) + "\n" for record in records
+        )
+        if text != original:
+            self._atomic_write(self.incidents_file, text)
+        return [
+            AgentIncident.model_validate(
+                sanitizer.restore_identities(record.model_dump(mode="json"))
+            )
+            for record in records
+        ]
 
-        latest_by_id: dict[str, AgentIncident] = {}
-        for line in self.incidents_file.read_text().splitlines():
-            if not line.strip():
-                continue
-            incident = AgentIncident.model_validate_json(line)
-            latest_by_id[incident.id] = incident
+    def load_incidents(self) -> list[AgentIncident]:
+        with self._storage_lock():
+            records = self._scrub_incidents()
+        latest_by_id = {incident.id: incident for incident in records}
         return sorted(
             latest_by_id.values(),
             key=lambda incident: incident.updated_at,
@@ -147,7 +199,8 @@ class AgentStateStore:
         )
 
     def append_incident(self, incident: AgentIncident) -> None:
-        self.ensure_dir()
-        with self.incidents_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(incident.model_dump(mode="json")))
-            handle.write("\n")
+        with self._storage_lock():
+            self._scrub_incidents()
+            sanitized = self.sanitizer().model(incident)
+            with self.incidents_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(sanitized.model_dump(mode="json")) + "\n")

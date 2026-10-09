@@ -473,7 +473,9 @@ class AgentWatchdog:
         if incident.status in {"resolved", "dismissed", "failed"}:
             raise RuntimeError(f"Incident '{incident_id}' is already closed")
 
-        context = await self._build_investigation_context(incident)
+        context = self.store.sanitizer().model(
+            await self._build_investigation_context(incident)
+        )
         investigation = self._investigate_context(context)
         updated = incident.model_copy(
             update={
@@ -497,8 +499,12 @@ class AgentWatchdog:
                 "updated_at": utc_now(),
             }
         )
+        sanitizer = self.store.sanitizer()
+        updated = sanitizer.model(updated)
         self.store.append_incident(updated)
-        return updated
+        return AgentIncident.model_validate(
+            sanitizer.restore_identities(updated.model_dump(mode="json"))
+        )
 
     def _load_state(
         self, daemon_mode: DaemonMode, refresh_started_at: bool
@@ -1824,10 +1830,13 @@ class AgentWatchdog:
         )
 
     def _enrich_summary(self, context: IncidentContext) -> tuple[str, str | None]:
+        sanitizer = self.store.sanitizer()
+        context = sanitizer.model(context)
         if self._incident_enricher is None:
             return context.fallback_summary, None
         try:
-            enrichment = self._incident_enricher.enrich(context)
+            self._incident_enricher.sanitizer = sanitizer
+            enrichment = sanitizer.model(self._incident_enricher.enrich(context))
             summary = enrichment.summary.strip() or context.fallback_summary
             human_explanation = enrichment.human_explanation.strip() or None
             return summary, human_explanation
@@ -1835,7 +1844,10 @@ class AgentWatchdog:
             if not self._llm_warning_emitted:
                 logger.warning(
                     "agent_llm_unavailable",
-                    extra={"llm_mode": self.llm_mode, "error": str(exc)},
+                    extra={
+                        "llm_mode": self.llm_mode,
+                        "error": sanitizer.text(str(exc)),
+                    },
                 )
                 self._llm_warning_emitted = True
             return context.fallback_summary, None
@@ -2154,17 +2166,23 @@ class AgentWatchdog:
         return evidence
 
     def _investigate_context(self, context: InvestigationContext) -> InvestigationPlan:
-        fallback = self._fallback_investigation(context)
+        sanitizer = self.store.sanitizer()
+        context = sanitizer.model(context)
+        fallback = sanitizer.model(self._fallback_investigation(context))
         if self._incident_investigator is None:
             return fallback
 
         try:
-            plan = self._incident_investigator.investigate(context)
+            self._incident_investigator.sanitizer = sanitizer
+            plan = sanitizer.model(self._incident_investigator.investigate(context))
         except Exception as exc:
             if not self._llm_warning_emitted:
                 logger.warning(
                     "agent_llm_unavailable",
-                    extra={"llm_mode": self.llm_mode, "error": str(exc)},
+                    extra={
+                        "llm_mode": self.llm_mode,
+                        "error": sanitizer.text(str(exc)),
+                    },
                 )
                 self._llm_warning_emitted = True
             return fallback
@@ -2577,12 +2595,16 @@ class AgentWatchdog:
     ) -> None:
         exclude_ids = exclude_incident_ids or set()
         now = utc_now()
+        old_identities = {
+            old_service_name,
+            self.store.sanitizer().identity_alias(old_service_name),
+        }
         incidents = self.store.load_incidents()
         for incident in incidents:
             if incident.id in exclude_ids:
                 continue
             if (
-                incident.service_name != old_service_name
+                incident.service_name not in old_identities
                 or incident.source != "gluetun"
             ):
                 continue
