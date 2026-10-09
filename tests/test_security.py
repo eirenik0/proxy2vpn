@@ -222,6 +222,16 @@ def test_runtime_control_clients_receive_owned_compose_path(tmp_path):
         (["192.0.2.10:20000:8888/tcp"], "192.0.2.10"),
         (["[::1]:20000:8888/tcp"], "::1"),
         ([{"target": 8888, "published": 20000, "host_ip": "192.0.2.10"}], "192.0.2.10"),
+        (
+            [{"target": 8888, "published": 20000, "host_ip": "${BIND_IP:-127.0.0.1}"}],
+            "${BIND_IP:-127.0.0.1}",
+        ),
+        (
+            [{"target": 8888, "published": 20000, "host_ip": "${BIND_IP:-::1}"}],
+            "${BIND_IP:-::1}",
+        ),
+        (["${BIND_IP:-127.0.0.1}:20000:8888/tcp"], "${BIND_IP:-127.0.0.1}"),
+        (["$BIND_IP:20000:8888/tcp"], "$BIND_IP"),
     ],
 )
 def test_existing_proxy_bindings_roundtrip(ports, expected):
@@ -236,6 +246,53 @@ def test_existing_proxy_bindings_roundtrip(ports, expected):
     restored = VPNService.from_compose_service("vpn", vpn.to_compose_service())
     assert restored.proxy_bind_address == expected
     assert service().proxy_bind_address == "127.0.0.1"
+
+
+# @lat: [[lat.md/security-tests#Deployment Security Tests#Compose Binding Interpolation]]
+def test_compose_interpolation_survives_listing_and_saving(tmp_path, monkeypatch):
+    compose = tmp_path / "compose.yml"
+    compose.write_text("""services:
+  vpn:
+    ports:
+      - target: 8888
+        published: 20000
+        host_ip: ${BIND_IP:-127.0.0.1}
+      - 127.0.0.1:30000:8000/tcp
+""")
+    monkeypatch.setenv("BIND_IP", "0.0.0.0")
+    manager = ComposeManager(compose)
+    vpn = manager.list_services()[0]
+    assert vpn.proxy_bind_address == "${BIND_IP:-127.0.0.1}"
+    manager.data["services"]["vpn"]["ports"] = vpn.to_compose_service()["ports"]
+    manager.save()
+    reloaded = ComposeManager(compose).list_services()[0]
+    assert reloaded.proxy_bind_address == vpn.proxy_bind_address
+    assert reloaded.port == 20000 and reloaded.control_port == 30000
+
+
+# @lat: [[lat.md/security-tests#Deployment Security Tests#Unresolved Binding Safety]]
+@pytest.mark.parametrize(
+    "operation", ["create_vpn_container", "recreate_vpn_container"]
+)
+def test_new_input_and_docker_creation_reject_unresolved_binding(
+    monkeypatch, operation
+):
+    from proxy2vpn.adapters import docker_ops
+    from proxy2vpn.core.models import Profile
+
+    expression = "${BIND_IP:-127.0.0.1}"
+    with pytest.raises(ValueError, match="IPv4 or IPv6"):
+        service(proxy_bind_address=expression)
+    vpn = VPNService.from_compose_service(
+        "vpn", {"ports": [{"target": 8888, "published": 20000, "host_ip": expression}]}
+    )
+
+    def forbidden_client():
+        pytest.fail("Docker must not be accessed for an unresolved binding")
+
+    monkeypatch.setattr(docker_ops, "_client", forbidden_client)
+    with pytest.raises(ValueError, match="IPv4 or IPv6"):
+        getattr(docker_ops, operation)(vpn, Profile(name="test", env_file="test.env"))
 
 
 # @lat: [[lat.md/security-tests#Deployment Security Tests#Explicit Migration]]

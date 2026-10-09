@@ -39,9 +39,13 @@ def compose_proxy_bind_address(ports: Any) -> str:
         if not any(target == 8888 for _, target in iter_port_mappings([item])):
             continue
         if isinstance(item, dict):
-            return validate_bind_address(str(item.get("host_ip") or "0.0.0.0"))
-        parts = str(item).split("/")[0].rsplit(":", 2)
-        address = parts[0].strip("[]") if len(parts) == 3 else "0.0.0.0"
+            address = str(item.get("host_ip") or "0.0.0.0")
+        else:
+            parts = str(item).split("/")[0].rsplit(":", 2)
+            address = parts[0].strip("[]") if len(parts) == 3 else "0.0.0.0"
+        # Compose owns interpolation; preserve expressions without guessing.
+        if "$" in address:
+            return address
         return validate_bind_address(address)
     return "127.0.0.1"
 

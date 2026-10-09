@@ -3,7 +3,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationInfo,
+    field_validator,
+)
 from proxy2vpn.adapters.compose_utils import parse_env, iter_port_mappings
 from proxy2vpn.core import config
 from proxy2vpn.core.security import compose_proxy_bind_address, validate_bind_address
@@ -22,7 +29,9 @@ class VPNContainer(BaseModel):
 
     @field_validator("proxy_bind_address")
     @classmethod
-    def _validate_bind_address(cls, value: str) -> str:
+    def _validate_bind_address(cls, value: str, info: ValidationInfo) -> str:
+        if info.context and info.context.get("from_compose") and "$" in value:
+            return value
         return validate_bind_address(value)
 
     model_config = ConfigDict(validate_assignment=True)
@@ -183,11 +192,16 @@ class VPNService(BaseModel):
 
         labels = dict(service_def.get("labels", {}))
 
-        container = VPNContainer(
-            name=name,
-            proxy_port=host_port,
-            control_port=control_host_port,
-            proxy_bind_address=compose_proxy_bind_address(service_def.get("ports", [])),
+        container = VPNContainer.model_validate(
+            {
+                "name": name,
+                "proxy_port": host_port,
+                "control_port": control_host_port,
+                "proxy_bind_address": compose_proxy_bind_address(
+                    service_def.get("ports", [])
+                ),
+            },
+            context={"from_compose": True},
         )
         config = VPNConfig(
             provider=labels.get(
@@ -253,10 +267,21 @@ class VPNService(BaseModel):
 
         env_list = [f"{k}={v}" for k, v in env_dict.items()]
         proxy_bind = self.proxy_bind_address
-        if ":" in proxy_bind:
+        if ":" in proxy_bind and "$" not in proxy_bind:
             proxy_bind = f"[{proxy_bind}]"
+        # Long syntax keeps interpolation default colons unambiguous.
+        proxy_mapping = (
+            {
+                "host_ip": proxy_bind,
+                "published": self.container.proxy_port,
+                "target": 8888,
+                "protocol": "tcp",
+            }
+            if "$" in proxy_bind
+            else f"{proxy_bind}:{self.container.proxy_port}:8888/tcp"
+        )
         ports = [
-            f"{proxy_bind}:{self.container.proxy_port}:8888/tcp",
+            proxy_mapping,
             f"127.0.0.1:{self.container.control_port}:8000/tcp",
         ]
         labels = dict(self.config.labels)

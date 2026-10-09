@@ -38,6 +38,14 @@ Watchdog control requests pass the endpoint's owning Compose path so authenticat
 
 Existing implicit, explicit, private, IPv6, and long-form bindings survive model round trips while new endpoints default to localhost.
 
+## Compose Binding Interpolation
+
+Existing Compose host expressions survive listing, saving, and model round trips without being resolved against the process environment or accidentally bracketed as IPv6 addresses.
+
+## Unresolved Binding Safety
+
+New service input requires IP literals, and Docker creation rejects unresolved Compose expressions before accessing Docker or removing an existing container.
+
 ## Explicit Migration
 
 Migration preserves unrelated service fields and ports, keeps backups, and initialization does not rotate generated credentials.

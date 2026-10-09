@@ -22,6 +22,8 @@ New service definitions default to an IPv4 localhost binding, while loading and 
 
 `vpn add --proxy-bind-address ADDRESS` selects an address per new service. Fleet configuration and deployment plans also carry `proxy_bind_address`. An explicit `0.0.0.0` publishes on all IPv4 interfaces; a private host address restricts publication to that interface. Probe URLs use the live published address, substituting loopback for wildcard binds, and bracket IPv6 addresses correctly.
 
+Existing Compose host interpolation is preserved verbatim and serialized in long syntax to avoid confusing default-value colons with port separators. New configuration still requires an IP literal. Docker SDK creation rejects unresolved expressions before changing containers; it does not implement Compose environment resolution.
+
 ## Explicit Migration
 
 The system security command prepares backed-up deployment files and tells the operator to recreate services; it never mutates running containers.
