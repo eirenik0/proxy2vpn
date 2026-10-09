@@ -14,6 +14,7 @@ from .display_utils import console
 from .logging_utils import get_logger
 from .proxy_utils import (
     build_proxy_urls_from_container,
+    proxy_host_from_container,
     extract_proxy_credentials_from_env,
 )
 from . import ip_utils
@@ -167,7 +168,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         env.update(service.environment)
         ensure_network()
         port_bindings = {
-            "8888/tcp": service.port,
+            "8888/tcp": (service.proxy_bind_address, service.port),
             "8000/tcp": ("127.0.0.1", service.control_port),
         }
         auth_config = config.resolve_control_auth_config(compose_root=profile._base_dir)
@@ -641,6 +642,7 @@ def analyze_container_logs(
             proxy_password=proxy_password,
             timeout=timeout,
             direct_ip=direct_ip,
+            proxy_host=proxy_host_from_container(container),
         )
     except DockerException as exc:
         raise RuntimeError(f"Failed to analyze logs for {name}: {exc}") from exc
@@ -785,6 +787,17 @@ async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str,
 
         status = "active" if container.status == "running" else "stopped"
         host = host_ip if container.status == "running" else ""
+        bindings = (
+            _container_attrs(container)
+            .get("NetworkSettings", {})
+            .get("Ports", {})
+            .get("8888/tcp")
+            or []
+        )
+        if container.status == "running" and bindings:
+            published_address = bindings[0].get("HostIp")
+            if published_address and published_address not in {"0.0.0.0", "::"}:
+                host = published_address
 
         results.append(
             {

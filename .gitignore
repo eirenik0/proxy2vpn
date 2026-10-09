@@ -12,6 +12,9 @@ dist/
 compose.yml
 compose.yml.bak
 control-server-auth.toml
+control-server-auth.toml.bak
+control-client-auth.json
+control-client-auth.json.bak
 tmp_test_cli_create/
 .pi
 .codex

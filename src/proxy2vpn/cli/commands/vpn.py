@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 from pathlib import Path
+from typing import Annotated
 import csv
 
 import typer
@@ -203,6 +204,7 @@ def _build_service_definition(
     httpproxy_user: str | None,
     httpproxy_password: str | None,
     force: bool,
+    proxy_bind_address: str = "127.0.0.1",
 ) -> tuple[VPNService, bool]:
     profile = _resolve_profile(manager, profile_name)
     try:
@@ -258,6 +260,7 @@ def _build_service_definition(
         environment=environment,
         labels=labels,
         credentials=credentials,
+        proxy_bind_address=proxy_bind_address,
     )
     return svc, credentials is not None
 
@@ -283,6 +286,12 @@ def add(
         help="Control port; 0 for auto",
         callback=validate_port,
     ),
+    proxy_bind_address: Annotated[
+        str,
+        typer.Option(
+            "--proxy-bind-address", help="Proxy bind IP; defaults to localhost"
+        ),
+    ] = "127.0.0.1",
     location: str = typer.Option("", "--location", help="Location (optional)"),
     httpproxy_user: str | None = typer.Option(
         None, "--httpproxy-user", help="Override HTTP proxy username"
@@ -354,6 +363,7 @@ def add(
         httpproxy_user=httpproxy_user,
         httpproxy_password=httpproxy_password,
         force=resolved_force,
+        proxy_bind_address=proxy_bind_address,
     )
     try:
         manager.add_service(svc)
@@ -957,7 +967,10 @@ async def status(
     # Import via adapters module so tests can monkeypatch the client
     from proxy2vpn.adapters import http_client
 
-    async with http_client.GluetunControlClient(base_url) as client:
+    async with http_client.GluetunControlClient(
+        base_url,
+        compose_file=Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)),
+    ) as client:
         data = await client.status()
 
     def _to_dict(obj):
@@ -987,7 +1000,10 @@ async def public_ip(
     # Import via adapters module so tests can monkeypatch the client
     from proxy2vpn.adapters import http_client
 
-    async with http_client.GluetunControlClient(base_url) as client:
+    async with http_client.GluetunControlClient(
+        base_url,
+        compose_file=Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)),
+    ) as client:
         ip = await client.public_ip()
     console.print(ip.ip)
 
@@ -1006,7 +1022,10 @@ async def dns_status(
     base_url = _service_control_base_url(ctx, resolved)
     from proxy2vpn.adapters import http_client
 
-    async with http_client.GluetunControlClient(base_url) as client:
+    async with http_client.GluetunControlClient(
+        base_url,
+        compose_file=Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)),
+    ) as client:
         status = await client.dns_status()
     console.print(status.status)
 
@@ -1025,7 +1044,10 @@ async def updater_status(
     base_url = _service_control_base_url(ctx, resolved)
     from proxy2vpn.adapters import http_client
 
-    async with http_client.GluetunControlClient(base_url) as client:
+    async with http_client.GluetunControlClient(
+        base_url,
+        compose_file=Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)),
+    ) as client:
         status = await client.updater_status()
     console.print(status.status)
 
@@ -1044,7 +1066,10 @@ async def port_forwarded(
     base_url = _service_control_base_url(ctx, resolved)
     from proxy2vpn.adapters import http_client
 
-    async with http_client.GluetunControlClient(base_url) as client:
+    async with http_client.GluetunControlClient(
+        base_url,
+        compose_file=Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)),
+    ) as client:
         pf = await client.port_forwarded()
     console.print(str(pf.port))
 
@@ -1165,6 +1190,9 @@ async def restart_tunnel(
     # Import via adapters module so tests can monkeypatch the client
     from proxy2vpn.adapters import http_client
 
-    async with http_client.GluetunControlClient(base_url) as client:
+    async with http_client.GluetunControlClient(
+        base_url,
+        compose_file=Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)),
+    ) as client:
         await client.restart_tunnel()
     console.print("[green]\u2713[/green] Tunnel restart requested.")

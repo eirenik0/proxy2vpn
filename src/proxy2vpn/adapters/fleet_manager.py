@@ -11,6 +11,7 @@ from .display_utils import console
 from .docker_ops import ensure_network, remove_container, stop_container
 from .logging_utils import get_logger
 from proxy2vpn.core.models import VPNService
+from proxy2vpn.core.security import validate_bind_address
 from .server_manager import ServerManager
 
 logger = get_logger(__name__)
@@ -26,6 +27,12 @@ class FleetConfig(BaseModel):
     naming_template: str = "{provider}-{country}-{city}"
     max_per_profile: int | None = None
     unique_ips: bool = False
+    proxy_bind_address: str = "127.0.0.1"
+
+    @field_validator("proxy_bind_address")
+    @classmethod
+    def _validate_proxy_bind(cls, value: str) -> str:
+        return validate_bind_address(value)
 
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
@@ -57,6 +64,12 @@ class ServicePlan(BaseModel):
     provider: str
     hostname: str | None = None
     ip: str | None = None
+    proxy_bind_address: str = "127.0.0.1"
+
+    @field_validator("proxy_bind_address")
+    @classmethod
+    def _validate_proxy_bind(cls, value: str) -> str:
+        return validate_bind_address(value)
 
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
 
@@ -96,6 +109,7 @@ class DeploymentPlan(BaseModel):
         provider: str,
         hostname: str | None = None,
         ip: str | None = None,
+        proxy_bind_address: str = "127.0.0.1",
     ):
         """Add service to deployment plan"""
         self.services.append(
@@ -109,6 +123,7 @@ class DeploymentPlan(BaseModel):
                 provider=provider,
                 hostname=hostname,
                 ip=ip,
+                proxy_bind_address=proxy_bind_address,
             )
         )
 
@@ -128,6 +143,7 @@ class DeploymentPlan(BaseModel):
                     "hostname": s.hostname,
                     "ip": s.ip,
                     "control_port": s.control_port,
+                    "proxy_bind_address": s.proxy_bind_address,
                 }
                 for s in self.services
             ],
@@ -368,6 +384,7 @@ class FleetManager:
                 provider=provider,
                 hostname=hostname if hostname else None,
                 ip=ip if ip else None,
+                proxy_bind_address=config.proxy_bind_address,
             )
 
             self.profile_allocator.allocate_slot(profile_slot.name, service_name)
@@ -459,6 +476,7 @@ class FleetManager:
             location=service_plan.location,
             environment=env,
             labels=labels,
+            proxy_bind_address=service_plan.proxy_bind_address,
         )
 
     def _add_service_with_force_handling(

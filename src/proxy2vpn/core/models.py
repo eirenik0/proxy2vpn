@@ -6,6 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 from proxy2vpn.adapters.compose_utils import parse_env, iter_port_mappings
 from proxy2vpn.core import config
+from proxy2vpn.core.security import compose_proxy_bind_address, validate_bind_address
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -17,6 +18,12 @@ class VPNContainer(BaseModel):
     name: str
     proxy_port: int
     control_port: int
+    proxy_bind_address: str = "127.0.0.1"
+
+    @field_validator("proxy_bind_address")
+    @classmethod
+    def _validate_bind_address(cls, value: str) -> str:
+        return validate_bind_address(value)
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -80,6 +87,10 @@ class VPNService(BaseModel):
         return self.container.control_port
 
     @property
+    def proxy_bind_address(self) -> str:
+        return self.container.proxy_bind_address
+
+    @property
     def provider(self) -> str:
         return self.config.provider
 
@@ -137,10 +148,16 @@ class VPNService(BaseModel):
         environment: dict[str, str],
         labels: dict[str, str],
         credentials: ServiceCredentials | None = None,
+        proxy_bind_address: str = "127.0.0.1",
     ) -> "VPNService":
         """Backward compatible constructor for tests."""
 
-        container = VPNContainer(name=name, proxy_port=port, control_port=control_port)
+        container = VPNContainer(
+            name=name,
+            proxy_port=port,
+            control_port=control_port,
+            proxy_bind_address=proxy_bind_address,
+        )
         config = VPNConfig(
             provider=provider,
             location=location,
@@ -167,7 +184,10 @@ class VPNService(BaseModel):
         labels = dict(service_def.get("labels", {}))
 
         container = VPNContainer(
-            name=name, proxy_port=host_port, control_port=control_host_port
+            name=name,
+            proxy_port=host_port,
+            control_port=control_host_port,
+            proxy_bind_address=compose_proxy_bind_address(service_def.get("ports", [])),
         )
         config = VPNConfig(
             provider=labels.get(
@@ -232,8 +252,11 @@ class VPNService(BaseModel):
                 env_dict["HTTPPROXY_PASSWORD"] = self.credentials.httpproxy_password
 
         env_list = [f"{k}={v}" for k, v in env_dict.items()]
+        proxy_bind = self.proxy_bind_address
+        if ":" in proxy_bind:
+            proxy_bind = f"[{proxy_bind}]"
         ports = [
-            f"0.0.0.0:{self.container.proxy_port}:8888/tcp",
+            f"{proxy_bind}:{self.container.proxy_port}:8888/tcp",
             f"127.0.0.1:{self.container.control_port}:8000/tcp",
         ]
         labels = dict(self.config.labels)
