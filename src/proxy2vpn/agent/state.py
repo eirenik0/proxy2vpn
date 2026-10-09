@@ -114,12 +114,15 @@ class AgentStateStore:
             if not self.state_file.exists():
                 return None
             original = self.state_file.read_text()
-            sanitized = self.sanitizer().sanitize(json.loads(original))
+            sanitizer = self.sanitizer()
+            sanitized = sanitizer.sanitize(json.loads(original))
             state = AgentState.model_validate(sanitized)
             text = json.dumps(state.model_dump(mode="json"), indent=2)
             if text != original:
                 self._atomic_write(self.state_file, text)
-            return state
+            return AgentState.model_validate(
+                sanitizer.restore_identities(state.model_dump(mode="json"))
+            )
 
     def write_state(self, state: AgentState) -> None:
         with self._storage_lock():
@@ -178,7 +181,12 @@ class AgentStateStore:
         )
         if text != original:
             self._atomic_write(self.incidents_file, text)
-        return records
+        return [
+            AgentIncident.model_validate(
+                sanitizer.restore_identities(record.model_dump(mode="json"))
+            )
+            for record in records
+        ]
 
     def load_incidents(self) -> list[AgentIncident]:
         with self._storage_lock():

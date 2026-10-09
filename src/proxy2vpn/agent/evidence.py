@@ -6,6 +6,7 @@ import base64
 from collections.abc import Mapping
 from datetime import datetime
 import json
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -143,6 +144,11 @@ _CLASSIFICATIONS["trigger"] = frozenset(
 _CLASSIFICATIONS["purpose"] = frozenset(
     {"repair_connectivity", "request_different_exit_ip"}
 )
+_IDENTITY_FIELDS = frozenset(
+    "service_name requested_service_name final_service_name active_cycle_service_name healthy_shared_profile_peers auth_config_shared_profile_peers other_unhealthy_shared_profile_peers shared_profile_peer_probe_failures".split()
+)
+_IDENTITY_ALIAS = re.compile(r"\[SERVICE:[0-9a-f]{64}\]")
+
 _TIMESTAMPS = frozenset(
     "started_at active_cycle_started_at last_loop_at last_progress_at degraded_since last_check_at ts created_at updated_at approved_at resolved_at investigated_at".split()
 )
@@ -191,6 +197,7 @@ class EvidenceSanitizer:
 
     def __init__(self, secrets: list[str] | None = None) -> None:
         self._values: set[str] = set()
+        self._identity_names: dict[str, str] = {}
         for secret in secrets or []:
             self.add_secret(secret)
 
@@ -259,8 +266,8 @@ class EvidenceSanitizer:
                     _secret_key(str(key))
                     or str(key).lower() in {"username", "user"}
                     or str(key).upper().endswith(("_USER", "_USERNAME"))
-                ) and isinstance(item, str):
-                    self.add_secret(item)
+                ) and isinstance(item, (str, int, float, bool)):
+                    self.add_secret(str(item))
                 self.collect(item, depth=depth + 1)
         elif isinstance(value, list):
             for item in value:
@@ -309,6 +316,9 @@ class EvidenceSanitizer:
         if compose_file.exists():
             data = YAML(typ="safe").load(compose_file.read_text()) or {}
             sanitizer.collect(data)
+            for name in data.get("services") or {}:
+                if isinstance(name, str):
+                    sanitizer.register_identity(name)
             for service in _env_mappings(data):
                 env_files = service.get("env_file", [])
                 if isinstance(env_files, (str, dict)):
@@ -324,10 +334,37 @@ class EvidenceSanitizer:
             if path == compose_file:
                 continue
             if path in json_paths:
-                sanitizer.collect(json.loads(text))
+                data = json.loads(text)
+                sanitizer.collect(data)
+                if path == inventory_path and isinstance(data, dict):
+                    for endpoint in data.get("endpoints", []):
+                        if isinstance(endpoint, dict) and isinstance(
+                            endpoint.get("id"), str
+                        ):
+                            sanitizer.register_identity(endpoint["id"])
             else:
                 sanitizer.collect(text.splitlines())
         return sanitizer
+
+    @staticmethod
+    def identity_alias(name: str) -> str:
+        return "[SERVICE:" + hashlib.sha256(name.encode()).hexdigest() + "]"
+
+    def register_identity(self, name: str) -> None:
+        self._identity_names[self.identity_alias(name)] = name
+
+    def restore_identities(self, value: Any, *, key: str = "") -> Any:
+        """Restore only configured identities for in-memory recovery decisions."""
+        if isinstance(value, Mapping):
+            return {
+                name: self.restore_identities(item, key=name)
+                for name, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self.restore_identities(item, key=key) for item in value]
+        if isinstance(value, str) and key in _IDENTITY_FIELDS:
+            return self._identity_names.get(value, value)
+        return value
 
     # @lat: [[agent#Evidence Secrecy Contract]]
     def sanitize(self, value: Any, *, key: str = "", depth: int = 0) -> Any:
@@ -372,6 +409,12 @@ class EvidenceSanitizer:
                 for item in (value if key in {"services", "actions"} else value[:64])
             ]
         if isinstance(value, str):
+            if key in _IDENTITY_FIELDS:
+                if _IDENTITY_ALIAS.fullmatch(value) or self.text(value) == value:
+                    return value
+                return self.identity_alias(value)
+            if key in {"id", "incident_id"} and re.fullmatch(r"[0-9a-f]{12}", value):
+                return value
             if value in _CLASSIFICATIONS.get(key, ()):
                 return value
             if key in _TIMESTAMPS:

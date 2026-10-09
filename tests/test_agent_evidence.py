@@ -574,3 +574,173 @@ def test_credential_collisions_preserve_typed_control_facts(tmp_path, secret):
     safe_context = sanitizer.model(plan_context)
     assert safe_context.status == "open" and safe_context.severity == "high"
     assert secret not in safe_context.incident_summary
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Scalar Compose Credentials]]
+@pytest.mark.parametrize("value", [123456, True, False, 0, 12.5])
+def test_scalar_compose_credentials_use_runtime_string_representation(tmp_path, value):
+    from proxy2vpn.adapters.compose_utils import parse_env_with_issues
+
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        f"services:\n  vpn-a:\n    environment:\n      HTTPPROXY_PASSWORD: {value}\n"
+    )
+    runtime_value = parse_env_with_issues({"HTTPPROXY_PASSWORD": value})[0][
+        "HTTPPROXY_PASSWORD"
+    ]
+    encodings = [
+        runtime_value,
+        quote(runtime_value, safe=""),
+        quote_plus(runtime_value),
+        base64.b64encode(runtime_value.encode()).decode(),
+        base64.urlsafe_b64encode(runtime_value.encode()).decode(),
+    ]
+    narrative = " ".join(encodings)
+    store = AgentStateStore(compose)
+    now = utc_now()
+    incident = AgentIncident(
+        id="scalar-value",
+        service_name="vpn-a",
+        type="auth_config_failure",
+        severity="high",
+        created_at=now,
+        updated_at=now,
+        summary=narrative,
+        recommended_action="investigate",
+    )
+    state = AgentState(
+        status=AgentStatus(compose_path=str(compose), interval_seconds=60),
+        actions=[
+            ActionRecord(
+                ts=now,
+                service_name="vpn-a",
+                action="restore",
+                trigger="manual",
+                result="failed",
+                details={"profile": narrative},
+            )
+        ],
+    )
+    store.ensure_dir()
+    store.state_file.write_text(state.model_dump_json())
+    store.incidents_file.write_text(incident.model_dump_json() + "\n")
+    assert runtime_value not in store.load_incidents()[0].summary
+    assert runtime_value not in store.read_state().actions[0].details["profile"]
+    store.write_state(state)
+    store.append_incident(incident)
+    assert (
+        runtime_value
+        not in json.loads(store.incidents_file.read_text().splitlines()[-1])["summary"]
+    )
+    captured = []
+
+    def parse(**kwargs):
+        captured.append(kwargs["input"])
+        return SimpleNamespace(
+            output_parsed=(
+                IncidentEnrichment(summary=narrative, human_explanation=narrative)
+                if kwargs["text_format"] is IncidentEnrichment
+                else InvestigationPlan(
+                    summary=narrative, findings=[narrative], action_plan=[narrative]
+                )
+            )
+        )
+
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    enrichment = OpenAIIncidentEnricher(
+        client=client, sanitizer=store.sanitizer()
+    ).enrich(context().model_copy(update={"fallback_summary": narrative, "issues": []}))
+    plan = OpenAIIncidentInvestigator(
+        client=client, sanitizer=store.sanitizer()
+    ).investigate(
+        investigation_context().model_copy(update={"incident_summary": narrative})
+    )
+    payload = json.loads(captured[0][1]["content"].split("\n", 1)[1])
+    investigator_payload = json.loads(captured[1][1]["content"].split("\n", 1)[1])
+    for secret in encodings:
+        for text in [
+            payload["fallback_summary"],
+            investigator_payload["incident_summary"],
+            enrichment.summary,
+            plan.summary,
+        ]:
+            assert secret not in text
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Stable Service Identity Aliases]]
+def test_aliases_preserve_service_identity_across_cycles(tmp_path, monkeypatch):
+    import asyncio
+    from proxy2vpn.adapters.external_proxy import ExternalProxyAdapter
+    from proxy2vpn.core.egress import EgressObservation
+    from proxy2vpn.core.services.diagnostics import DiagnosticResult
+
+    monkeypatch.setenv("LOGIN", "office")
+    monkeypatch.setenv("KEY", "distinct-password-138")
+    (tmp_path / "external-proxies.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "endpoints": [
+                    {
+                        "id": "office",
+                        "connection": {"host": "127.0.0.1", "port": 8080},
+                        "credentials": {"username_env": "LOGIN", "password_env": "KEY"},
+                    }
+                ],
+            }
+        )
+    )
+    healthy = False
+
+    async def observe(self, **kwargs):
+        return EgressObservation(
+            100 if healthy else 0,
+            "healthy" if healthy else "connectivity",
+            results=[
+                DiagnosticResult(
+                    check="connectivity",
+                    passed=healthy,
+                    message="endpoint probe",
+                    recommendation="",
+                )
+            ],
+            connectivity=healthy,
+        )
+
+    monkeypatch.setattr(ExternalProxyAdapter, "observe", observe)
+    watchdog = AgentWatchdog(tmp_path / "compose.yml", llm_mode="disabled")
+    first = asyncio.run(watchdog.run_once())
+    incident_id = watchdog.store.load_incidents()[0].id
+    second = asyncio.run(watchdog.run_once())
+    assert first.services[0].consecutive_failures == 1
+    assert second.services[0].consecutive_failures == 2
+    assert len(watchdog.store.load_incidents()) == 1
+    assert watchdog.store.load_incidents()[0].id == incident_id
+    assert watchdog.store.load_incidents()[0].service_name == "office"
+    assert "office" not in watchdog.store.state_file.read_text()
+    assert "office" not in watchdog.store.incidents_file.read_text()
+    safe = watchdog.store.sanitizer().sanitize(
+        {
+            "service_name": "office",
+            "recent_actions": [
+                {"requested_service_name": "office", "final_service_name": "office"}
+            ],
+        }
+    )
+    assert safe == watchdog.store.sanitizer().sanitize(safe)
+    restored = watchdog.store.sanitizer().restore_identities(safe)
+    assert (
+        restored["service_name"]
+        == restored["recent_actions"][0]["final_service_name"]
+        == "office"
+    )
+    monkeypatch.setenv("LOGIN", "changed-username-138")
+    assert watchdog.store.read_state().services[0].service_name == "office"
+    monkeypatch.setenv("LOGIN", "office")
+    healthy = True
+    third = asyncio.run(watchdog.run_once())
+    assert third.services[0].consecutive_failures == 0
+    assert len(watchdog.store.load_incidents()) == 1
+    assert watchdog.store.load_incidents()[0].status == "resolved"
+    assert "office" not in watchdog.store.state_file.read_text()
+    assert "office" not in watchdog.store.incidents_file.read_text()

@@ -41,3 +41,11 @@ Verify arbitrary username_env and password_env references resolve to environment
 ## Typed Control Facts
 
 Verify credential collisions with recognized statuses, severity, daemon modes, sources, action results, diagnostic checks and valid timestamps preserve typed facts while narrative values stay redacted.
+
+## Scalar Compose Credentials
+
+Verify numeric, boolean and floating-point Compose credentials use the runtime string representation for literal and encoded redaction in storage, migration and both LLM callers.
+
+## Stable Service Identity Aliases
+
+Verify credential-overlapping endpoint names use stable stored aliases while configuration restores live identities, preserving failure counts, incident deduplication, resolution and identity correlation after credential changes.
