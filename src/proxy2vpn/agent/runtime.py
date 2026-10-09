@@ -354,7 +354,9 @@ class AgentWatchdog:
         incident = next((item for item in incidents if item.id == incident_id), None)
         if incident is None:
             raise KeyError(f"Incident '{incident_id}' not found")
-        if self._is_external_endpoint(incident.service_name):
+        if incident.source == "external_proxy" or self._is_external_endpoint(
+            incident.service_name
+        ):
             require_supported_operation(EgressCapabilities(), "replace_endpoint")
         decision = self._recovery_policy.manual_rotation(incident, approved=True)
         state = self.store.read_state() or self.empty_state()
@@ -521,6 +523,13 @@ class AgentWatchdog:
             endpoint.name == service_name for endpoint in self._external_endpoints()
         ):
             return True
+        # Current Compose identity takes precedence over another source's history.
+        # Approval of an old external incident is guarded by its own source above.
+        if self.compose_file.exists() and any(
+            service.name == service_name
+            for service in ComposeManager(self.compose_file).list_services()
+        ):
+            return False
         if any(
             incident.service_name == service_name
             and incident.source == "external_proxy"

@@ -56,7 +56,7 @@ Verify mixed inventory preserves Compose content and Gluetun checks, while watch
 
 ## Historical Unsupported Actions
 
-Verify external incidents retain source after a successful cycle removes their snapshots, including legacy records and name reuse by Compose; investigation and manual/fleet actions never fall back to Docker or resolve across sources.
+Verify external incidents retain their source after removal and Compose name reuse; investigation and approval remain external, and removed endpoints without a current Compose identity cannot enter fleet execution.
 
 ## Batch Cancellation
 
@@ -77,3 +77,7 @@ Verify snapshots discard failure counts, degradation age, and prior action field
 ## New Gluetun First Cycle
 
 Verify a Gluetun service reusing an external endpoint name gets its normal first-cycle restart without stale restoration/rotation, while the external incident remains separate.
+
+## Gluetun Rotation After Source Reuse
+
+Verify current Gluetun services can rotate automatically and by approval despite open, resolved, or dismissed external incidents with the same name, while approval of those historical external incidents remains blocked.

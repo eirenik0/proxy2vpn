@@ -747,8 +747,9 @@ def test_removed_external_endpoint_cannot_fall_back_to_docker(
         assert stored.id == incident.id
         with pytest.raises(UnsupportedEgressOperation):
             await watchdog.approve_incident(incident.id)
-        with pytest.raises(UnsupportedEgressOperation):
-            await watchdog._rotate_service_via_fleet(incident.service_name)
+        if history != "name_reused":
+            with pytest.raises(UnsupportedEgressOperation):
+                await watchdog._rotate_service_via_fleet(incident.service_name)
         investigated = await watchdog.investigate_incident(incident.id)
         assert "no longer configured" in " ".join(investigated.investigation.findings)
 
@@ -959,3 +960,117 @@ def test_reused_external_name_gets_normal_gluetun_first_cycle(
         and stored.source == "external_proxy"
         and stored.status == "open"
     )
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#Gluetun Rotation After Source Reuse]]
+@pytest.mark.parametrize("operation", ["automatic", "approved"])
+@pytest.mark.parametrize("historical_status", ["open", "resolved", "dismissed"])
+def test_current_gluetun_rotation_ignores_external_incident_history(
+    tmp_path, monkeypatch, fake_gluetun_runtime, operation, historical_status
+):
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from proxy2vpn.agent.models import ActionRecord, AgentIncident
+    from proxy2vpn.core.egress import EgressObservation
+
+    path = write_config(tmp_path, [endpoint()])
+    monkeypatch.setattr(
+        ExternalProxyAdapter,
+        "observe",
+        AsyncMock(
+            return_value=EgressObservation(0, "connectivity", connectivity=False)
+        ),
+    )
+    compose = tmp_path / "compose.yml"
+    watchdog = AgentWatchdog(compose, runtime=fake_gluetun_runtime)
+    asyncio.run(watchdog.run_once())
+    historical = watchdog.store.load_incidents()[0]
+    historical.status = historical_status
+    historical.recommended_action = "rotate"
+    watchdog.store.append_incident(historical)
+    path.unlink()
+    compose.write_text(
+        "services:\n  office-proxy:\n    image: qmcgaw/gluetun\n    ports: []\n"
+    )
+    fake_gluetun_runtime.inspect.return_value = RuntimeInspection(
+        "running",
+        [
+            DiagnosticResult(
+                check="connectivity", passed=True, message="healthy", recommendation=""
+            )
+        ],
+        control_api_reachable=True,
+    )
+    state = asyncio.run(watchdog.run_once())
+    now = datetime.now(timezone.utc)
+    state.services[0].consecutive_failures = 2
+    state.services[0].degraded_since = now - timedelta(hours=2)
+    state.actions.append(
+        ActionRecord(
+            ts=now,
+            service_name=historical.service_name,
+            action="restore",
+            trigger="automatic_remediation",
+            result="failed",
+        )
+    )
+    watchdog.store.write_state(state)
+    fake_gluetun_runtime.inspect.return_value = RuntimeInspection(
+        "running",
+        [
+            DiagnosticResult(
+                check="connectivity",
+                passed=False,
+                message="unhealthy",
+                recommendation="",
+            )
+        ],
+        control_api_reachable=True,
+    )
+    fleet = SimpleNamespace(
+        rotate_service=AsyncMock(
+            return_value=SimpleNamespace(success=True, errors=[], rotation_changes=[])
+        ),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr("proxy2vpn.agent.runtime.FleetStateManager", lambda path: fleet)
+
+    async def exercise():
+        with pytest.raises(UnsupportedEgressOperation):
+            await watchdog.approve_incident(historical.id)
+        if operation == "automatic":
+            updated = await watchdog.run_once()
+            assert updated.actions[-1].action == "rotate"
+            assert updated.actions[-1].trigger == "automatic_remediation"
+            assert updated.actions[-1].result == "success"
+        else:
+            current = AgentIncident(
+                id="current-gluetun-rotation",
+                service_name=historical.service_name,
+                source="gluetun",
+                type="rotation_exhausted",
+                severity="medium",
+                created_at=now,
+                updated_at=now,
+                summary="Current VPN needs rotation",
+                recommended_action="rotate",
+                approval_required=True,
+            )
+            watchdog.store.append_incident(current)
+            approved = await watchdog.approve_incident(current.id)
+            assert approved.source == "gluetun" and approved.status == "resolved"
+        retained = next(
+            item for item in watchdog.store.load_incidents() if item.id == historical.id
+        )
+        assert (
+            retained.source == "external_proxy" and retained.status == historical_status
+        )
+        with pytest.raises(UnsupportedEgressOperation):
+            await watchdog.approve_incident(historical.id)
+
+    asyncio.run(exercise())
+    fleet.rotate_service.assert_awaited_once()
+    assert fleet.rotate_service.await_args.args[0] == historical.service_name
+    fleet.close.assert_awaited_once()
+    fake_gluetun_runtime.restart_tunnel.assert_not_awaited()
+    fake_gluetun_runtime.restore.assert_not_awaited()
