@@ -49,3 +49,11 @@ Verify numeric, boolean and floating-point Compose credentials use the runtime s
 ## Stable Service Identity Aliases
 
 Verify credential-overlapping endpoint names use stable stored aliases while configuration restores live identities, preserving failure counts, incident deduplication, resolution and identity correlation after credential changes.
+
+## Compose Credential Interpolation
+
+Verify braced and unbraced credentials from shell and project dotenv values, precedence, defaults, alternatives, requirements, nested expressions and dollar escapes are redacted with their encodings at every evidence boundary.
+
+## Interpolation Source Semantics
+
+Verify quoted and multiline dotenv parsing, empty-versus-unset behavior, interpolated env-file paths, opaque shell values, and safe failure for unsupported or missing required expressions.

@@ -15,6 +15,7 @@ from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 from ruamel.yaml import YAML
 
+from proxy2vpn.agent.interpolation import dotenv_variables, interpolate
 from proxy2vpn.agent.models import DaemonMode, IncidentSeverity, IncidentStatus
 from proxy2vpn.core import config
 from proxy2vpn.core.security import CLIENT_AUTH_FILE
@@ -198,6 +199,7 @@ class EvidenceSanitizer:
     def __init__(self, secrets: list[str] | None = None) -> None:
         self._values: set[str] = set()
         self._identity_names: dict[str, str] = {}
+        self._interpolation_variables: dict[str, str] = dict(os.environ)
         for secret in secrets or []:
             self.add_secret(secret)
 
@@ -252,7 +254,9 @@ class EvidenceSanitizer:
             }
         )
 
-    def collect(self, value: Any, *, depth: int = 0) -> None:
+    def collect(
+        self, value: Any, *, depth: int = 0, interpolate_values: bool = False
+    ) -> None:
         if depth > 20:
             return
         if isinstance(value, Mapping):
@@ -268,11 +272,21 @@ class EvidenceSanitizer:
                     or str(key).upper().endswith(("_USER", "_USERNAME"))
                 ) and isinstance(item, (str, int, float, bool)):
                     self.add_secret(str(item))
-                self.collect(item, depth=depth + 1)
+                    if interpolate_values and isinstance(item, str):
+                        self.add_secret(
+                            interpolate(item, self._interpolation_variables)
+                        )
+                self.collect(
+                    item, depth=depth + 1, interpolate_values=interpolate_values
+                )
         elif isinstance(value, list):
             for item in value:
-                self.collect(item, depth=depth + 1)
+                self.collect(
+                    item, depth=depth + 1, interpolate_values=interpolate_values
+                )
         elif isinstance(value, str):
+            if interpolate_values:
+                value = interpolate(value, self._interpolation_variables)
             if "=" in value:
                 key, item = value.split("=", 1)
                 if (
@@ -282,6 +296,7 @@ class EvidenceSanitizer:
                 ):
                     self.add_secret(item)
                     self.add_secret(item.strip().strip("\"'"))
+
             if "://" in value:
                 try:
                     url = urlsplit(value)
@@ -302,6 +317,9 @@ class EvidenceSanitizer:
         sanitizer = cls()
         sanitizer.collect_environment()
         root = compose_file.parent
+        root_variables = dotenv_variables(root / ".env", os.environ)
+        sanitizer._interpolation_variables = {**root_variables, **os.environ}
+        sanitizer.collect(root_variables)
         inventory_path = Path(inventory_file).expanduser()
         if not inventory_path.is_absolute():
             inventory_path = root / inventory_path
@@ -315,7 +333,7 @@ class EvidenceSanitizer:
         paths.update((root / "profiles").glob("*.env"))
         if compose_file.exists():
             data = YAML(typ="safe").load(compose_file.read_text()) or {}
-            sanitizer.collect(data)
+            sanitizer.collect(data, interpolate_values=True)
             for name in data.get("services") or {}:
                 if isinstance(name, str):
                     sanitizer.register_identity(name)
@@ -326,7 +344,9 @@ class EvidenceSanitizer:
                 for item in env_files:
                     path = item.get("path") if isinstance(item, dict) else item
                     if path:
-                        paths.add(root / path)
+                        paths.add(
+                            root / interpolate(path, sanitizer._interpolation_variables)
+                        )
         for path in paths:
             if not path.is_file():
                 continue
@@ -344,6 +364,10 @@ class EvidenceSanitizer:
                             sanitizer.register_identity(endpoint["id"])
             else:
                 sanitizer.collect(text.splitlines())
+                if path != root / config.CONTROL_AUTH_CONFIG_FILE:
+                    sanitizer.collect(
+                        dotenv_variables(path, sanitizer._interpolation_variables)
+                    )
         return sanitizer
 
     @staticmethod

@@ -744,3 +744,163 @@ def test_aliases_preserve_service_identity_across_cycles(tmp_path, monkeypatch):
     assert watchdog.store.load_incidents()[0].status == "resolved"
     assert "office" not in watchdog.store.state_file.read_text()
     assert "office" not in watchdog.store.incidents_file.read_text()
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Compose Credential Interpolation]]
+@pytest.mark.parametrize(
+    "expression,source,expected",
+    [
+        ("${LOGIN_KEY}", "shell", "shell-value-138"),
+        ("$LOGIN_KEY", "dotenv", "dotenv-value-138"),
+        ("prefix-${LOGIN_KEY}-suffix", "shell", "prefix-shell-value-138-suffix"),
+        ("${LOGIN_KEY:-fallback-value-138}", "missing", "fallback-value-138"),
+        ("${LOGIN_KEY-fallback-value-138}", "missing", "fallback-value-138"),
+        ("${LOGIN_KEY:+alternative-value-138}", "shell", "alternative-value-138"),
+        ("${LOGIN_KEY+alternative-value-138}", "shell", "alternative-value-138"),
+        ("${LOGIN_KEY:?required}", "shell", "shell-value-138"),
+        ("${LOGIN_KEY?required}", "shell", "shell-value-138"),
+        ("${LOGIN_KEY:-${OTHER_KEY:-nested-value-138}}", "missing", "nested-value-138"),
+        ("$$LOGIN_KEY", "shell", "$LOGIN_KEY"),
+        ("${LOGIN_KEY}", "single_literal", "literal-$OTHER_KEY"),
+        ("${LOGIN_KEY}", "shell_literal", "literal-${UNKNOWN?not-an-expression}"),
+    ],
+)
+def test_interpolated_credentials_cover_storage_and_llm_boundaries(
+    tmp_path, monkeypatch, expression, source, expected
+):
+    monkeypatch.delenv("LOGIN_KEY", raising=False)
+    monkeypatch.delenv("OTHER_KEY", raising=False)
+    if source.startswith("shell"):
+        monkeypatch.setenv(
+            "LOGIN_KEY", "shell-value-138" if source == "shell" else expected
+        )
+        (tmp_path / ".env").write_text("LOGIN_KEY=dotenv-value-138\n")
+    elif source == "dotenv":
+        (tmp_path / ".env").write_text('LOGIN_KEY="dotenv-value-138" # comment\n')
+    elif source == "single_literal":
+        (tmp_path / ".env").write_text("LOGIN_KEY='literal-$OTHER_KEY'\n")
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        "services:\n  vpn-a:\n    environment:\n      HTTPPROXY_PASSWORD: "
+        + json.dumps(expression)
+        + "\n"
+    )
+    store = AgentStateStore(compose)
+    encodings = [
+        expected,
+        quote(expected, safe=""),
+        quote_plus(expected),
+        base64.b64encode(expected.encode()).decode(),
+        base64.urlsafe_b64encode(expected.encode()).decode(),
+    ]
+    narrative = " ".join(encodings)
+    now = utc_now()
+    incident = AgentIncident(
+        id="interpolation138",
+        service_name="vpn-a",
+        type="auth_config_failure",
+        severity="high",
+        created_at=now,
+        updated_at=now,
+        summary=narrative,
+        recommended_action="investigate",
+    )
+    state = AgentState(
+        status=AgentStatus(compose_path=str(compose), interval_seconds=60),
+        actions=[
+            ActionRecord(
+                ts=now,
+                service_name="vpn-a",
+                action="restore",
+                trigger="manual",
+                result="failed",
+                details={"profile": narrative},
+            )
+        ],
+    )
+    store.ensure_dir()
+    store.incidents_file.write_text(incident.model_dump_json() + "\n")
+    store.state_file.write_text(state.model_dump_json())
+    store.load_incidents()
+    store.read_state()
+    store.append_incident(incident)
+    store.write_state(state)
+    captured = []
+
+    def parse(**kwargs):
+        captured.append(kwargs["input"])
+        return SimpleNamespace(
+            output_parsed=(
+                IncidentEnrichment(summary=narrative, human_explanation=narrative)
+                if kwargs["text_format"] is IncidentEnrichment
+                else InvestigationPlan(
+                    summary=narrative, findings=[narrative], action_plan=[narrative]
+                )
+            )
+        )
+
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    enrichment = OpenAIIncidentEnricher(
+        client=client, sanitizer=store.sanitizer()
+    ).enrich(context().model_copy(update={"fallback_summary": narrative, "issues": []}))
+    plan = OpenAIIncidentInvestigator(
+        client=client, sanitizer=store.sanitizer()
+    ).investigate(
+        investigation_context().model_copy(update={"incident_summary": narrative})
+    )
+    outputs = (
+        store.state_file.read_text()
+        + store.incidents_file.read_text()
+        + json.dumps(captured)
+        + enrichment.model_dump_json()
+        + plan.model_dump_json()
+    )
+    for secret in encodings:
+        assert secret not in outputs
+    assert expected not in store.sanitizer().text(expected)
+    assert expression in compose.read_text()
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Interpolation Source Semantics]]
+def test_interpolation_sources_and_errors_fail_closed(tmp_path, monkeypatch):
+    from proxy2vpn.agent.interpolation import dotenv_variables, interpolate
+
+    path = tmp_path / ".env"
+    path.write_text(
+        "FIRST: \"dotenv-value-138\"\nSECOND=${FIRST}\nLITERAL='${FIRST}'\nMULTILINE='first\nsecond'\nESCAPED=\"first\\nsecond\"\n"
+    )
+    values = dotenv_variables(path, {"FIRST": "shell-value-138"})
+    assert values["SECOND"] == "shell-value-138"
+    assert values["LITERAL"] == "${FIRST}"
+    assert values["MULTILINE"] == values["ESCAPED"] == "first\nsecond"
+    assert interpolate("${KEY-default}", {"KEY": ""}) == ""
+    assert interpolate("${KEY:-default}", {"KEY": ""}) == "default"
+    assert interpolate("${KEY+present}", {"KEY": ""}) == "present"
+    assert interpolate("${KEY:+present}", {"KEY": ""}) == ""
+    assert interpolate("${KEY?required}", {"KEY": ""}) == ""
+    for expression in (
+        "${KEY:?must not expose this}",
+        "${KEY?must not expose this}",
+        "${KEY",
+        "${KEY/unsupported}",
+    ):
+        with pytest.raises(ValueError) as error:
+            interpolate(expression, {})
+        assert "must not expose" not in str(error.value)
+    path.unlink()
+    monkeypatch.delenv("FIRST", raising=False)
+    monkeypatch.setenv("FILE_KEY", "env.custom")
+    (tmp_path / "env.custom").write_text(
+        "HTTPPROXY_PASSWORD=${FIRST:-file-value-138}\n"
+    )
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services:\n  vpn-a:\n    env_file: ${FILE_KEY}\n")
+    assert "file-value-138" not in EvidenceSanitizer.from_compose(compose).text(
+        "file-value-138"
+    )
+    compose.write_text(
+        "services:\n  vpn-a:\n    environment:\n      HTTPPROXY_PASSWORD: ${MISSING_REQUIRED:?sensitive error}\n"
+    )
+    monkeypatch.delenv("MISSING_REQUIRED", raising=False)
+    with pytest.raises(ValueError, match="required credential interpolation"):
+        EvidenceSanitizer.from_compose(compose)
