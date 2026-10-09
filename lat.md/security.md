@@ -33,3 +33,9 @@ The system security command prepares backed-up deployment files and tells the op
 Recreate services with `vpn update --all` after preparing the files. Existing clients must use the selected host address; choosing localhost removes remote access after recreation. Restore the Compose and both authentication backups together to roll back, then recreate services again. Initialization's `--force` affects Compose creation, not credential rotation.
 
 This milestone protects local control authentication and publication defaults. It does not add TLS to client proxy traffic, redact incident/LLM payloads, or change external HTTP CONNECT behavior. See [[lat.md/security-tests#Deployment Security Tests]] for validation.
+
+## Live Release Validation
+
+Digest-pinned, isolated Docker tests verify real control roles, host publication, migration, recreation and rollback before release acceptance.
+
+See [[live-security-tests#Live Security Tests]] and `docs/live-security.md`. Ordinary CI reports opt-in skips; the manually dispatched live-security workflow uses strict prerequisites and a dedicated VPN profile. The separate bridge probe targets the real host address and requires positive calibration before accepting localhost exclusion. Mac releases additionally require a LAN device or VM check. Recreation uses unique Compose projects, avoiding the SDK's shared network on existing fleets.

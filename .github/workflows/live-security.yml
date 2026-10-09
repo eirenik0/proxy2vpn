@@ -1,0 +1,49 @@
+name: Live Security Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-security-validation
+  cancel-in-progress: false
+
+jobs:
+  live-security:
+    runs-on: ubuntu-latest
+    environment: live-security
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.11'
+      - name: Prepare private test input
+        env:
+          VPN_PROFILE: ${{ secrets.VPN_PROFILE }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          profile = os.environ.get("VPN_PROFILE", "")
+          if not profile.strip():
+              raise SystemExit("Required live-security VPN_PROFILE secret is missing")
+          root = Path(os.environ["RUNNER_TEMP"]) / "p2v-live-input"
+          root.mkdir(mode=0o700)
+          path = root / "vpn.env"
+          path.write_text(profile)
+          path.chmod(0o600)
+          route = json.loads(subprocess.check_output(["ip", "-j", "route", "get", "1.1.1.1"]))[0]
+          with open(os.environ["GITHUB_ENV"], "a") as stream:
+              stream.write(f"PROXY2VPN_LIVE_PROFILE={path}\n")
+              stream.write(f"PROXY2VPN_LIVE_PRIVATE_IP={route['prefsrc']}\n")
+          PY
+      - name: Require complete live validation
+        run: make test-live-security
+      - name: Remove private test input
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/p2v-live-input"

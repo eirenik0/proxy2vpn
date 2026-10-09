@@ -624,3 +624,7 @@ Join developers who've eliminated VPN configuration headaches and built reliable
 ## License
 
 MIT
+
+### Live security validation
+
+The opt-in, digest-pinned Gluetun suite and strict release workflow validate actual authentication, publication, migration and rollback in isolated Docker resources. See [the live-security runbook](docs/live-security.md) for explicit prerequisites, execution, downtime and rollback. Ordinary unit CI skips these cases and does not establish live acceptance.
