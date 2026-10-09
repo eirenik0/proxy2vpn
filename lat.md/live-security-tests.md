@@ -16,7 +16,9 @@ A separate bridge client calibrates private-address proxied HTTPS reachability, 
 
 ## Migration Recreation And Rollback
 
-Legacy and custom auth remain live until explicit migration and recreation; backups and reruns preserve all three files, recreated services authenticate and proxy, and rollback restores prior auth, exposure and absent-file state.
+Legacy and custom auth remain live until recreation; backups and reruns preserve all three files, secured services authenticate and proxy, and rollback restores prior auth, exposure and absent-file state.
+
+Legacy unauthenticated roles ignore supplied Basic credentials before recreation and after rollback. Custom basic roles reject generated credentials in those states; both modes reject old access after secure recreation.
 
 ## Harness Failure And Isolation Guards
 

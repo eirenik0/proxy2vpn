@@ -501,9 +501,11 @@ def test_live_migration_recreation_and_rollback(labs, custom):
         "Live security assertion failed",
     )
     monitor, _operator = lab.generated()
+    # An unauthenticated legacy role ignores supplied Basic credentials.
+    legacy_monitor_statuses = (401, 403) if custom else (200,)
     require(
-        lab.raw("GET", "/v1/vpn/status", monitor) in (401, 403),
-        "Live security assertion failed",
+        lab.raw("GET", "/v1/vpn/status", monitor) in legacy_monitor_statuses,
+        "Pre-recreation legacy authentication mismatch",
     )
     generated = {name: (lab.root / name).read_bytes() for name in AUTH_NAMES}
     backups = {
@@ -551,7 +553,7 @@ def test_live_migration_recreation_and_rollback(labs, custom):
     lab.recreate()
     lab.ready(old_auth)
     require(
-        lab.raw("GET", "/v1/vpn/status", monitor) in (401, 403),
-        "Live security assertion failed",
+        lab.raw("GET", "/v1/vpn/status", monitor) in legacy_monitor_statuses,
+        "Rollback legacy authentication mismatch",
     )
     lab.proxy(lab.address, remote=True)
