@@ -1114,3 +1114,29 @@ def test_interpolated_raw_format_and_investigation_live_identity(tmp_path, monke
     assert "office" not in result.investigation.model_dump_json()
     assert "office" not in watchdog.store.incidents_file.read_text()
     assert watchdog.store.load_incidents()[0].service_name == "office"
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Env Declaration Boundaries]]
+def test_env_file_discovery_ignores_nested_data_keys(tmp_path):
+    (tmp_path / "unrelated.data").write_text("this is not valid dotenv content\n")
+    (tmp_path / "env.service").write_text("OPENVPN_PASSWORD=service-secret-138\n")
+    (tmp_path / "env.profile").write_text("OPENVPN_PASSWORD=profile-secret-138\n")
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        "x-arbitrary:\n  env_file: unrelated.data\n"
+        "x-vpn-base-prod:\n  env_file: env.profile\n"
+        "  environment:\n    env_file: unrelated.data\n"
+        "services:\n  vpn-a:\n    env_file: env.service\n"
+        "    environment:\n      env_file: unrelated.data\n"
+        "    labels:\n      env_file: unrelated.data\n"
+    )
+    sanitizer = EvidenceSanitizer.from_compose(compose)
+    assert (
+        sanitizer.text("service-secret-138 profile-secret-138")
+        == "[REDACTED] [REDACTED]"
+    )
+    store = AgentStateStore(compose)
+    store.write_state(
+        AgentState(status=AgentStatus(compose_path=str(compose), interval_seconds=60))
+    )
+    assert store.read_state() is not None

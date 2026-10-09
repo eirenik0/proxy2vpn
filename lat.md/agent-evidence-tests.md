@@ -69,3 +69,7 @@ Verify aliases resist unkeyed dictionary lookup, remain stable across processes,
 ## Interpolated Env Formats And Live Investigation Identities
 
 Verify env-file format expressions select raw parsing and investigation returns restore configured identities while stored and transmitted copies retain keyed aliases.
+
+## Env Declaration Boundaries
+
+Verify nested environment, label and arbitrary extension keys named env_file do not trigger file reads, while actual service and supported profile declarations still collect credentials.

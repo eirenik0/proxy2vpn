@@ -183,18 +183,23 @@ rotation_result reason message_count purpose""".split()
 )
 
 
-def _env_mappings(value: Any, depth: int = 0):
-    """Discover env-file references in services and shared Compose profile anchors."""
-    if depth > 20:
+def _env_mappings(value: Any):
+    """Discover declarations on services and supported profile anchors only."""
+    if not isinstance(value, Mapping):
         return
-    if isinstance(value, Mapping):
-        if "env_file" in value:
-            yield value
-        for item in value.values():
-            yield from _env_mappings(item, depth + 1)
-    elif isinstance(value, list):
-        for item in value:
-            yield from _env_mappings(item, depth + 1)
+    services = value.get("services")
+    if isinstance(services, Mapping):
+        for service in services.values():
+            if isinstance(service, Mapping) and "env_file" in service:
+                yield service
+    for name, profile in value.items():
+        if (
+            isinstance(name, str)
+            and name.startswith("x-vpn-base-")
+            and isinstance(profile, Mapping)
+            and "env_file" in profile
+        ):
+            yield profile
 
 
 def _identity_key(root: Path) -> bytes:
