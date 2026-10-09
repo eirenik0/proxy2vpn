@@ -1867,6 +1867,7 @@ class AgentWatchdog:
                 item
                 for item in state.services
                 if item.service_name == incident.service_name
+                and item.source == incident.source
             ),
             None,
         )
@@ -1878,19 +1879,15 @@ class AgentWatchdog:
             )
         ]
 
-        external = next(
-            (
-                endpoint
-                for endpoint in self._external_endpoints()
-                if endpoint.name == incident.service_name
-            ),
-            None,
-        )
-        if (
-            external is not None
-            or incident.source == "external_proxy"
-            or (snapshot is not None and snapshot.source == "external_proxy")
-        ):
+        if incident.source == "external_proxy":
+            external = next(
+                (
+                    endpoint
+                    for endpoint in self._external_endpoints()
+                    if endpoint.name == incident.service_name
+                ),
+                None,
+            )
             assessment = (
                 await self._health_assessor.assess_service(external)
                 if external is not None

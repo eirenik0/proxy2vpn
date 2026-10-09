@@ -1074,3 +1074,68 @@ def test_current_gluetun_rotation_ignores_external_incident_history(
     fleet.close.assert_awaited_once()
     fake_gluetun_runtime.restart_tunnel.assert_not_awaited()
     fake_gluetun_runtime.restore.assert_not_awaited()
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#Investigation Uses Persisted Source]]
+@pytest.mark.parametrize(
+    "replacement", ["configured", "configured_snapshot", "snapshot_only"]
+)
+def test_gluetun_incident_investigation_ignores_external_name_reuse(
+    tmp_path, monkeypatch, fake_gluetun_runtime, replacement
+):
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        "services:\n  office-proxy:\n    image: qmcgaw/gluetun\n    ports: []\n"
+    )
+    fake_gluetun_runtime.inspect.return_value = RuntimeInspection(
+        "running",
+        [
+            DiagnosticResult(
+                check="config_error",
+                passed=False,
+                message="Invalid Gluetun configuration",
+                recommendation="Repair the VPN profile",
+                persistent=True,
+            )
+        ],
+        control_api_reachable=True,
+    )
+    watchdog = AgentWatchdog(compose, runtime=fake_gluetun_runtime)
+    state = asyncio.run(watchdog.run_once())
+    incident = watchdog.store.load_incidents()[0]
+    assert incident.source == "gluetun"
+    compose.write_text("services: {}\n")
+    if replacement != "snapshot_only":
+        write_config(tmp_path, [endpoint()])
+    if replacement != "configured":
+        state.services[0] = state.services[0].model_copy(
+            update={
+                "source": "external_proxy",
+                "container_status": "not_applicable",
+                "health_score": 100,
+            }
+        )
+    else:
+        state.services = []
+    watchdog.store.write_state(state)
+    observe = AsyncMock(
+        side_effect=AssertionError("The unrelated external proxy must not be probed")
+    )
+    monkeypatch.setattr(ExternalProxyAdapter, "observe", observe)
+
+    async def exercise():
+        context = await watchdog._build_investigation_context(incident)
+        assert context.provider is None
+        assert context.container_status == "missing"
+        assert context.health_score is None and context.control_api_reachable is None
+        investigated = await watchdog.investigate_incident(incident.id)
+        assert investigated.source == "gluetun" and investigated.status == "open"
+        assert investigated.investigation is not None
+        assert "External endpoint" not in " ".join(investigated.investigation.findings)
+
+    asyncio.run(exercise())
+    observe.assert_not_awaited()
+    assert fake_gluetun_runtime.collect_evidence.await_count == 2
+    fake_gluetun_runtime.control_status.assert_not_awaited()
+    fake_gluetun_runtime.restart_tunnel.assert_not_awaited()
+    fake_gluetun_runtime.restore.assert_not_awaited()

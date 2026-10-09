@@ -81,3 +81,7 @@ Verify a Gluetun service reusing an external endpoint name gets its normal first
 ## Gluetun Rotation After Source Reuse
 
 Verify current Gluetun services can rotate automatically and by approval despite open, resolved, or dismissed external incidents with the same name, while approval of those historical external incidents remains blocked.
+
+## Investigation Uses Persisted Source
+
+Verify historical Gluetun incidents keep their investigation backend when an external endpoint or snapshot reuses the name, without probing the unrelated proxy or borrowing its health evidence.
