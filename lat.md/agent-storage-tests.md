@@ -97,3 +97,27 @@ Canonically equivalent Unicode filenames, including case variants, are rejected 
 ## Approval CLI Outcome Separation
 
 The approval CLI reports preserved final incident status separately from execution evidence, so concurrent dismissal or resolution cannot invent a rotation outcome.
+
+## Dedicated Directory Validation
+
+Selecting an unrelated project directory fails before any directory or file permissions change, including when known-looking files precede unknown entries.
+
+## Identity Directory Validation
+
+Direct evidence-sanitizer identity setup validates the dedicated storage directory before creating locks, keys, or changing permissions of unrelated files.
+
+## Crash Temporary Permission Repair
+
+Recognized current and legacy crash temporaries become private without deletion, preserving files that another process may still be using.
+
+## Custom Artifact Directory Validation
+
+Configured storage filenames remain usable when identity setup validates the shared directory and both persistence paths perform sanitization.
+
+## Windows Reserved Components
+
+Windows devices, extended console names, alternate-stream delimiters, forbidden characters, and controls are rejected in both directory and file settings on all platforms.
+
+## Alternate Storage Identity Compatibility
+
+An alternate state directory with custom filenames can coexist with populated canonical storage while retaining the same identity key and leaving both histories usable.

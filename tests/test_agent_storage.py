@@ -597,3 +597,148 @@ def test_canonically_equivalent_storage_names_are_rejected(left, right):
 
     with pytest.raises(ValueError, match="distinct"):
         AgentSettings(state_file=left, incidents_file=right)
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Dedicated Directory Validation]]
+@pytest.mark.parametrize("unrelated_entry", ["file", "directory"])
+def test_unrelated_configured_directory_is_rejected_before_permission_changes(
+    tmp_path, unrelated_entry
+):
+    from proxy2vpn.agent.config import AgentSettings
+
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services: {}\n")
+    directory = tmp_path / "profiles"
+    directory.mkdir(mode=0o755)
+    known = directory / "state.json"
+    known.write_text("unrelated project data")
+    known.chmod(0o644)
+    other = directory / "unrelated"
+    if unrelated_entry == "directory":
+        other.mkdir(mode=0o755)
+    else:
+        other.write_text("preserve me")
+        other.chmod(0o644)
+    modes = {path: path.stat().st_mode for path in (directory, known, other)}
+    with pytest.raises(StorageError, match="unrelated"):
+        AgentStateStore(compose, AgentSettings(state_dirname="profiles"))
+    assert all(path.stat().st_mode == mode for path, mode in modes.items())
+    assert known.read_text() == "unrelated project data"
+    assert not (directory / "evidence.lock").exists()
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Identity Directory Validation]]
+def test_direct_identity_setup_rejects_unrelated_files_before_chmod(tmp_path):
+    from proxy2vpn.agent.evidence import EvidenceSanitizer
+
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services: {}\n")
+    directory = tmp_path / ".proxy2vpn-agent"
+    directory.mkdir(mode=0o755)
+    unrelated = directory / "notes.txt"
+    unrelated.write_text("do not alter")
+    unrelated.chmod(0o644)
+    modes = directory.stat().st_mode, unrelated.stat().st_mode
+    with pytest.raises(StorageError, match="unrelated"):
+        EvidenceSanitizer.from_compose(compose)
+    assert (directory.stat().st_mode, unrelated.stat().st_mode) == modes
+    assert not (directory / "identity.key").exists()
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Crash Temporary Permission Repair]]
+def test_known_crash_temporaries_remain_private_without_deletion(store):
+    names = [
+        "state.jsonabcdefgh.tmp",
+        "identity.key12345678.tmp",
+        "identity.abcdefgh",
+        "state.tmp",
+    ]
+    for name in names:
+        artifact = store.agent_dir / name
+        artifact.write_text("private unfinished data")
+        artifact.chmod(0o666)
+    store.ensure_dir()
+    for name in names:
+        artifact = store.agent_dir / name
+        assert artifact.read_text() == "private unfinished data"
+        if os.name == "posix":
+            assert artifact.stat().st_mode & 0o777 == 0o600
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Custom Artifact Directory Validation]]
+def test_custom_storage_names_work_with_identity_setup(tmp_path):
+    from proxy2vpn.agent.config import AgentSettings
+
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services: {}\n")
+    settings = AgentSettings(
+        state_file="custom-state.json",
+        incidents_file="custom-history.jsonl",
+        daemon_log_file="custom.log",
+    )
+    store = AgentStateStore(compose, settings)
+    store.write_state(_state(store))
+    store.append_incident(_incident())
+    assert store.read_state().revision == 1
+    assert len(store.load_incidents()) == 1
+    assert (store.agent_dir / "identity.key").exists()
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Windows Reserved Components]]
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CON",
+        "nul.log",
+        "COM1.log",
+        "lpt9",
+        "COM¹.log",
+        "LPT³",
+        "CONIN$",
+        "CONOUT$",
+        "state.json:secret",
+        'bad"name',
+        "bad|name",
+        "bad*name",
+        "bad?name",
+        "bad<name",
+        "bad>name",
+        "bad\x00name",
+        "bad\x1fname",
+    ],
+)
+@pytest.mark.parametrize("field", ["state_dirname", "state_file"])
+def test_windows_reserved_components_are_rejected_on_every_platform(name, field):
+    from proxy2vpn.agent.config import AgentSettings
+
+    with pytest.raises(ValueError):
+        AgentSettings(**{field: name})
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Alternate Storage Identity Compatibility]]
+def test_alternate_state_directory_preserves_populated_default_identity_root(tmp_path):
+    import hashlib
+    from proxy2vpn.agent.config import AgentSettings
+
+    compose = tmp_path / "compose.yml"
+    compose.write_text("services: {}\n")
+    original = AgentStateStore(compose)
+    original.write_state(_state(original))
+    original.append_incident(_incident())
+    key = original.agent_dir / "identity.key"
+    original_digest = hashlib.sha256(key.read_bytes()).hexdigest()
+    alternate = AgentStateStore(
+        compose,
+        AgentSettings(
+            state_dirname=".alternate-agent",
+            state_file="alternate.json",
+            incidents_file="alternate-history.jsonl",
+        ),
+    )
+    alternate.write_state(_state(alternate))
+    alternate.append_incident(_incident("abcdef012345"))
+    assert alternate.read_state().revision == 1
+    assert len(alternate.load_incidents()) == 1
+    assert hashlib.sha256(key.read_bytes()).hexdigest() == original_digest
+    assert original.read_state().revision == 1
+    assert len(original.load_incidents()) == 1

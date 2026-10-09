@@ -17,8 +17,7 @@ from proxy2vpn.agent.models import ActionRecord, AgentIncident, AgentState, Agen
 from proxy2vpn.core.private_storage import (
     StorageError,
     atomic_write,
-    private_directory,
-    private_file,
+    managed_directory,
     private_lock,
     sync_directory,
 )
@@ -50,12 +49,11 @@ class AgentStateStore:
         self.daemon_pid_path = self.agent_dir / self.settings.daemon_pid_file
         self.daemon_log_path = self.agent_dir / self.settings.daemon_log_file
         self.journal_path = self.agent_dir / "transaction.json"
+        self.ensure_dir()
         self._lock = private_lock(self.agent_dir / "evidence.lock")
 
     def ensure_dir(self) -> None:
-        private_directory(self.agent_dir)
-        for path in self.agent_dir.iterdir():
-            private_file(path)
+        managed_directory(self.agent_dir, self.settings.storage_artifact_names)
 
     def runtime_lock(self) -> BaseFileLock:
         self.ensure_dir()
@@ -114,7 +112,9 @@ class AgentStateStore:
 
     def sanitizer(self) -> EvidenceSanitizer:
         return EvidenceSanitizer.from_compose(
-            self.compose_file, self.settings.external_proxies_file
+            self.compose_file,
+            self.settings.external_proxies_file,
+            storage_names=self.settings.storage_artifact_names,
         )
 
     @contextmanager

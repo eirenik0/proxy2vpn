@@ -16,12 +16,13 @@ from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 from proxy2vpn.core.private_storage import (
     atomic_write,
-    private_directory,
+    managed_directory,
     private_file,
     private_lock,
 )
 from ruamel.yaml import YAML
 
+from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.interpolation import dotenv_variables, interpolate
 from proxy2vpn.agent.models import DaemonMode, IncidentSeverity, IncidentStatus
 from proxy2vpn.core import config
@@ -208,10 +209,17 @@ def _env_mappings(value: Any):
             yield profile
 
 
-def _identity_key(root: Path) -> bytes:
+def _identity_key(root: Path, storage_names: frozenset[str] | None = None) -> bytes:
     """Keep alias HMAC keys local, private, and stable across processes."""
     directory = root / ".proxy2vpn-agent"
-    private_directory(directory)
+    # Identity keys stay in the canonical directory even when state moves.
+    canonical_names = AgentSettings.model_construct().storage_artifact_names
+    configured_names = (
+        storage_names
+        if storage_names is not None
+        else AgentSettings().storage_artifact_names
+    )
+    managed_directory(directory, canonical_names | configured_names)
     path = directory / "identity.key"
     with private_lock(directory / "identity.lock"):
         private_file(path)
@@ -350,10 +358,14 @@ class EvidenceSanitizer:
 
     @classmethod
     def from_compose(
-        cls, compose_file: Path, inventory_file: str = "external-proxies.json"
+        cls,
+        compose_file: Path,
+        inventory_file: str = "external-proxies.json",
+        *,
+        storage_names: frozenset[str] | None = None,
     ) -> EvidenceSanitizer:
         root = compose_file.parent
-        sanitizer = cls(identity_key=_identity_key(root))
+        sanitizer = cls(identity_key=_identity_key(root, storage_names))
         sanitizer.collect_environment()
         root_variables = dotenv_variables(root / ".env", os.environ)
         sanitizer._interpolation_variables = {**root_variables, **os.environ}
