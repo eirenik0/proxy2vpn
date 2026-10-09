@@ -56,7 +56,7 @@ Verify mixed inventory preserves Compose content and Gluetun checks, while watch
 
 ## Historical Unsupported Actions
 
-Verify a removed endpoint's persisted identity still blocks manual/fleet replacement and investigation never falls back to Docker evidence.
+Verify external incidents retain source after a successful cycle removes their snapshots, including legacy records and name reuse by Compose; investigation and manual/fleet actions never fall back to Docker or resolve across sources.
 
 ## Batch Cancellation
 

@@ -688,8 +688,11 @@ def test_mixed_inventory_preserves_compose_and_blocks_collisions(
 
 
 # @lat: [[lat.md/egress-tests#External Egress Tests#Historical Unsupported Actions]]
+@pytest.mark.parametrize(
+    "history", ["snapshot_removed", "name_reused", "legacy_incident"]
+)
 def test_removed_external_endpoint_cannot_fall_back_to_docker(
-    tmp_path, monkeypatch, fake_gluetun_runtime
+    tmp_path, monkeypatch, fake_gluetun_runtime, history
 ):
     from proxy2vpn.core.egress import EgressObservation
 
@@ -707,8 +710,35 @@ def test_removed_external_endpoint_cannot_fall_back_to_docker(
     incident.recommended_action = "rotate"
     watchdog.store.append_incident(incident)
     path.unlink()
+    compose = tmp_path / "compose.yml"
+    if history == "name_reused":
+        compose.write_text(
+            "services:\n  office-proxy:\n    image: qmcgaw/gluetun\n    ports: []\n"
+        )
+        fake_gluetun_runtime.inspect.return_value = RuntimeInspection(
+            "running",
+            [
+                DiagnosticResult(
+                    check="connectivity",
+                    passed=True,
+                    message="healthy",
+                    recommendation="",
+                )
+            ],
+        )
+    else:
+        compose.write_text("services: {}\n")
+    if history == "legacy_incident":
+        payload = incident.model_dump(mode="json")
+        del payload["source"]
+        watchdog.store.incidents_file.write_text(json.dumps(payload) + "\n")
 
     async def exercise():
+        state = await watchdog.run_once()
+        assert all(item.source != "external_proxy" for item in state.services)
+        stored = watchdog.store.load_incidents()[0]
+        assert stored.source == "external_proxy" and stored.status == "open"
+        assert stored.id == incident.id
         with pytest.raises(UnsupportedEgressOperation):
             await watchdog.approve_incident(incident.id)
         with pytest.raises(UnsupportedEgressOperation):

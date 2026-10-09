@@ -521,6 +521,12 @@ class AgentWatchdog:
             endpoint.name == service_name for endpoint in self._external_endpoints()
         ):
             return True
+        if any(
+            incident.service_name == service_name
+            and incident.source == "external_proxy"
+            for incident in self.store.load_incidents()
+        ):
+            return True
         state = self.store.read_state()
         return bool(
             state
@@ -629,7 +635,9 @@ class AgentWatchdog:
             context = replace(context, actions=state.actions)
             decision = self._recovery_policy.decide(context, utc_now())
             if decision.action == "resolve":
-                self._resolve_active_incidents(snapshot.service_name, incidents)
+                self._resolve_active_incidents(
+                    snapshot.service_name, incidents, source=assessment.source
+                )
                 return snapshot
             if decision.action == "wait":
                 logger.info(
@@ -828,6 +836,7 @@ class AgentWatchdog:
                 human_explanation,
                 recommended_action,
                 snapshot.consecutive_failures,
+                source=snapshot.source,
             )
         else:
             assert isinstance(service, VPNService)
@@ -906,11 +915,16 @@ class AgentWatchdog:
         if final_service_name != service.name:
             self._migrate_active_incidents(service.name, final_service_name)
             for incident in incidents:
-                if incident.service_name == service.name and incident.status not in {
-                    "resolved",
-                    "dismissed",
-                    "failed",
-                }:
+                if (
+                    incident.source == "gluetun"
+                    and incident.service_name == service.name
+                    and incident.status
+                    not in {
+                        "resolved",
+                        "dismissed",
+                        "failed",
+                    }
+                ):
                     incident.service_name = final_service_name
         if rotate_result.success:
             self._resolve_active_incidents(snapshot.service_name, incidents)
@@ -1863,8 +1877,10 @@ class AgentWatchdog:
             ),
             None,
         )
-        if external is not None or (
-            snapshot is not None and snapshot.source == "external_proxy"
+        if (
+            external is not None
+            or incident.source == "external_proxy"
+            or (snapshot is not None and snapshot.source == "external_proxy")
         ):
             assessment = (
                 await self._health_assessor.assess_service(external)
@@ -1885,7 +1901,7 @@ class AgentWatchdog:
                 health_score=assessment.health_score
                 if assessment is not None
                 else snapshot.health_score
-                if snapshot is not None
+                if snapshot is not None and snapshot.source == "external_proxy"
                 else None,
                 control_api_reachable=None,
                 profile_validation_errors=[],
@@ -2473,6 +2489,8 @@ class AgentWatchdog:
         human_explanation: str | None,
         recommended_action: str,
         failure_count: int,
+        *,
+        source: str = "gluetun",
     ) -> AgentIncident | None:
         now = utc_now()
         if self._is_recently_dismissed(incidents, service_name, incident_type, now):
@@ -2482,6 +2500,7 @@ class AgentWatchdog:
         if existing is not None:
             updated = existing.model_copy(
                 update={
+                    "source": source,
                     "severity": severity,
                     "summary": summary,
                     "human_explanation": human_explanation,
@@ -2500,6 +2519,7 @@ class AgentWatchdog:
             return updated
 
         incident = AgentIncident(
+            source=source,
             id=uuid4().hex[:12],
             service_name=service_name,
             type=incident_type,
@@ -2521,11 +2541,15 @@ class AgentWatchdog:
         return incident
 
     def _resolve_active_incidents(
-        self, service_name: str, incidents: list[AgentIncident]
+        self,
+        service_name: str,
+        incidents: list[AgentIncident],
+        *,
+        source: str = "gluetun",
     ) -> None:
         now = utc_now()
         for incident in list(incidents):
-            if incident.service_name != service_name:
+            if incident.service_name != service_name or incident.source != source:
                 continue
             if incident.status in {"resolved", "dismissed"}:
                 continue
@@ -2551,7 +2575,10 @@ class AgentWatchdog:
         for incident in incidents:
             if incident.id in exclude_ids:
                 continue
-            if incident.service_name != old_service_name:
+            if (
+                incident.service_name != old_service_name
+                or incident.source != "gluetun"
+            ):
                 continue
             if incident.status in {"resolved", "dismissed", "failed"}:
                 continue
