@@ -6,11 +6,11 @@ Diagnostics combine recent log evidence with live proxy connectivity so recovery
 
 # Health Assessment
 
-Health assessment wraps diagnostics with container state, control API reachability, and peer evidence so higher-level workflows get one normalized result object.
+Health assessment combines source-appropriate egress evidence and same-profile peers into one normalized result for watchdog and fleet workflows.
 
 [[src/proxy2vpn/core/services/health_assessment.py#HealthAssessmentService]] turns one [[src/proxy2vpn/core/models.py#VPNService]] into a [[src/proxy2vpn/core/services/health_assessment.py#HealthAssessment]] by checking container presence, log diagnostics, control API status, and current egress IP. Batch assessment enriches each result with same-profile peer evidence so the watchdog can distinguish isolated auth failures from broader provider issues.
 
-The assessment receives observed inputs from [[lat.md/gluetun-runtime#Gluetun Runtime]] and owns scoring, classification, and peer evidence. Injecting runtime results lets assessment tests run without Docker objects or control clients.
+The assessment uses [[egress#Shared Egress Interface]] for [[egress#Gluetun Adapter]] and [[egress#External Proxy Adapter]]. Adapters own source-specific scoring and classification; the assessor enriches peer evidence and preserves legacy Gluetun fields. External endpoints have no profile peers, no container requirement, and unknown control/direct-IP evidence. Batch cancellation joins outstanding probe tasks.
 
 # Provider-Scoped Rotation Memory
 

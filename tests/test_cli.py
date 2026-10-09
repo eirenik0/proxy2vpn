@@ -34,7 +34,9 @@ def test_system_diagnose_specific_container(monkeypatch):
         diagnostics.DiagnosticAnalyzer, "health_score", lambda self, results: 100
     )
     monkeypatch.setattr(
-        diagnostics.DiagnosticAnalyzer, "control_api_checks", lambda self, base_url: []
+        diagnostics.DiagnosticAnalyzer,
+        "control_api_checks",
+        lambda self, base_url, **kwargs: [],
     )
     monkeypatch.setattr(
         docker_ops,

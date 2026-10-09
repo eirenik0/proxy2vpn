@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 from proxy2vpn.agent.models import ActionRecord, AgentIncident, ServiceSnapshot
+from proxy2vpn.core.egress import EgressCapabilities, GLUETUN_CAPABILITIES
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
 from proxy2vpn.core.services.health_assessment import HealthAssessment
 
@@ -22,6 +23,9 @@ class ServiceIdentity:
     profile: str
     provider: str
     country: str
+    capabilities: EgressCapabilities = field(
+        default_factory=lambda: GLUETUN_CAPABILITIES
+    )
 
 
 @dataclass(frozen=True)
@@ -153,6 +157,8 @@ class RecoveryPolicy:
         previous: ServiceSnapshot | None,
         now: datetime,
     ) -> ServiceSnapshot:
+        if previous is not None and previous.source != assessment.source:
+            previous = None
         healthy = assessment.health_score >= self.settings.health_threshold
         return ServiceSnapshot(
             service_name=service_name,
@@ -167,6 +173,14 @@ class RecoveryPolicy:
                 previous.degraded_since if previous and previous.degraded_since else now
             ),
             last_check_at=now,
+            source=assessment.source,
+            capabilities=assessment.capabilities,
+            health_class=assessment.health_class,
+            failing_checks=assessment.failing_checks,
+            current_egress_ip=assessment.current_egress_ip,
+            connectivity=assessment.connectivity,
+            authentication=assessment.authentication,
+            latency_ms=assessment.latency_ms,
             last_action=previous.last_action if previous else None,
             last_action_result=previous.last_action_result if previous else None,
         )
@@ -175,6 +189,19 @@ class RecoveryPolicy:
         snapshot, assessment = context.snapshot, context.assessment
         if snapshot.health_score >= self.settings.health_threshold:
             return RecoveryDecision("resolve", "Connectivity is healthy.")
+
+        capabilities = context.service.capabilities
+        if not (
+            capabilities.restart_tunnel
+            or capabilities.restore
+            or capabilities.replace_endpoint
+        ):
+            return self._incident(
+                context,
+                "endpoint_unhealthy",
+                "Endpoint requires operator investigation; automated recovery operations are unsupported.",
+                now,
+            )
 
         if persistent_auth_or_config_failure(context.results):
             if context.progress.phase == "observed" and self._isolated_auth_restart(
@@ -190,9 +217,10 @@ class RecoveryPolicy:
 
         if (
             context.progress.phase == "observed"
-            and snapshot.container_status == "running"
+            and assessment.available is True
+            and capabilities.restart_tunnel
             and snapshot.consecutive_failures == 1
-            and assessment.control_api_reachable
+            and assessment.restart_ready
         ):
             return self._restart("first_unhealthy_cycle")
 
@@ -206,7 +234,8 @@ class RecoveryPolicy:
             and self._restored_since_degraded(context)
         )
         if (
-            context.progress.phase != "restored"
+            capabilities.restore
+            and context.progress.phase != "restored"
             and not force_rotation
             and self.can_restore(context.service.name, context.actions, now)
         ):
@@ -229,6 +258,13 @@ class RecoveryPolicy:
         if block:
             reason, incident_type = block
             return self._incident(context, incident_type, reason, now)
+        if not capabilities.replace_endpoint:
+            return self._incident(
+                context,
+                "endpoint_unhealthy",
+                "Endpoint replacement is unsupported; investigate the endpoint.",
+                now,
+            )
         return RecoveryDecision(
             "rotate",
             "Recovery remains unhealthy after bounded remediation.",
@@ -401,7 +437,8 @@ class RecoveryPolicy:
         ):
             return False
         return bool(
-            assessment.control_api_reachable
+            context.service.capabilities.restart_tunnel
+            and assessment.restart_ready
             and not any(
                 i.service_name == context.service.name
                 and i.type == "auth_config_failure"

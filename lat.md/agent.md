@@ -8,8 +8,12 @@ Cycle, service, action, and incident events follow [[lat.md/logging#Operational 
 
 Runtime inspection, incident evidence, control requests, restoration, and orphan cleanup use [[lat.md/gluetun-runtime#Gluetun Runtime]]. The watchdog retains recovery execution, rechecks, timing, and action history; deterministic decisions use [[recovery-policy#Recovery Policy]]; its shared assessor receives the same injected runtime instance.
 
+[[egress#Watchdog And Fleet Workflows]] adds external endpoint inventory and investigation-only incidents. External-only roots need no Docker or Compose file. Capabilities block unsupported recovery before execution, while existing Gluetun actions and state remain compatible.
+
 # Incidents And State
 
 Agent state is stored next to the compose file so watchdog status, daemon metadata, and incident history move with the workspace.
 
 [[src/proxy2vpn/agent/state.py#AgentStateStore]] persists the current watchdog status, service snapshots, and append-only incident records under the compose root. This keeps `agent status`, daemon supervision, and post-incident investigations aligned with the exact compose file the watchdog was monitoring.
+
+Incident records persist their endpoint source independently of transient snapshots. Historical external incidents cannot gain Gluetun capabilities after removal or name reuse; healthy evidence and rename migration preserve source boundaries.

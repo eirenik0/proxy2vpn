@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -11,6 +12,7 @@ from proxy2vpn.adapters import docker_ops, ip_utils
 from proxy2vpn.adapters.compose_manager import ComposeManager
 from proxy2vpn.adapters.http_client import GluetunControlClient
 from proxy2vpn.core.models import Profile, VPNService
+from proxy2vpn.core import config
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 
 
@@ -212,6 +214,11 @@ class GluetunRuntime:
                 f"http://localhost:{service.control_port}/v1",
                 timeout=self.control_api_timeout,
                 retry_attempts=self.control_api_retry_attempts,
+                compose_file=Path(
+                    service.labels.get(
+                        config.COMPOSE_FILE_LABEL, str(config.COMPOSE_FILE)
+                    )
+                ),
             ) as client:
                 if restart:
                     await client.restart_tunnel()

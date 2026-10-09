@@ -51,6 +51,8 @@ def build_proxy_url(
     password: str | None = None,
 ) -> str:
     """Build an HTTP proxy URL, including credentials when both are present."""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
     if username and password:
         credentials = f"{username}:{password}@"
         return f"http://{credentials}{host}:{int(port)}"
@@ -58,17 +60,39 @@ def build_proxy_url(
 
 
 def build_proxy_urls(
-    port: str | int, username: str | None = None, password: str | None = None
+    port: str | int,
+    username: str | None = None,
+    password: str | None = None,
+    *,
+    host: str = "localhost",
 ) -> dict[str, str]:
     """Build both http and https proxy URLs."""
-    url = build_proxy_url(port=port, username=username, password=password)
+    url = build_proxy_url(port=port, username=username, password=password, host=host)
     return {"http": url, "https": url}
 
 
+def proxy_host_from_container(container: Any) -> str:
+    """Select a reachable probe address from the published proxy binding."""
+    host = "localhost"
+    bindings = (
+        container.attrs.get("NetworkSettings", {}).get("Ports", {}).get("8888/tcp")
+        or []
+    )
+    if bindings:
+        host = bindings[0].get("HostIp") or host
+        host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+    return host
+
+
 def build_proxy_urls_from_container(container: Any, port: str | int) -> dict[str, str]:
-    """Build proxy URLs from container environment credentials."""
+    """Build proxy URLs from container environment credentials and binding."""
     username, password = extract_proxy_credentials_from_container(container)
-    return build_proxy_urls(port, username=username, password=password)
+    return build_proxy_urls(
+        port,
+        username=username,
+        password=password,
+        host=proxy_host_from_container(container),
+    )
 
 
 def redact_proxy_url(url: str) -> str:

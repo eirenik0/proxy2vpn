@@ -123,7 +123,7 @@ def test_add_service_after_init(tmp_path):
     compose_text = compose_path.read_text()
     # Check that service contains the profile configuration (merged)
     assert "image: qmcgaw/gluetun" in compose_text  # from profile
-    assert "0.0.0.0:12345:8888/tcp" in compose_text  # from service
+    assert "127.0.0.1:12345:8888/tcp" in compose_text  # from service
     assert "127.0.0.1:30003:8000/tcp" in compose_text  # from service
     assert (
         f"./{config.CONTROL_AUTH_CONFIG_FILE.as_posix()}:/gluetun/auth/config.toml:ro"

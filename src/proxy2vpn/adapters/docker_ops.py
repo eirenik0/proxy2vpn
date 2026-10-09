@@ -9,11 +9,13 @@ from typing import Any, Iterable, Iterator
 from proxy2vpn.core.services.diagnostics import DiagnosticAnalyzer, DiagnosticResult
 from proxy2vpn.core.models import Profile, VPNService
 from proxy2vpn.core import config
+from proxy2vpn.core.security import validate_bind_address
 from .compose_manager import ComposeManager
 from .display_utils import console
 from .logging_utils import get_logger
 from .proxy_utils import (
     build_proxy_urls_from_container,
+    proxy_host_from_container,
     extract_proxy_credentials_from_env,
 )
 from . import ip_utils
@@ -150,6 +152,9 @@ def ensure_network(recreate: bool = False) -> None:
 def create_vpn_container(service: VPNService, profile: Profile) -> Container:
     """Create a container for a VPN service using its profile."""
 
+    # Docker SDK cannot interpolate Compose expressions. Validate before any
+    # removal or image pull so unresolved bindings cannot disrupt a deployment.
+    bind_address = validate_bind_address(service.proxy_bind_address)
     client = _client()
     try:
         # Remove any existing container with the same name to avoid conflicts
@@ -167,7 +172,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
         env.update(service.environment)
         ensure_network()
         port_bindings = {
-            "8888/tcp": service.port,
+            "8888/tcp": (bind_address, service.port),
             "8000/tcp": ("127.0.0.1", service.control_port),
         }
         auth_config = config.resolve_control_auth_config(compose_root=profile._base_dir)
@@ -212,6 +217,7 @@ def create_vpn_container(service: VPNService, profile: Profile) -> Container:
 def recreate_vpn_container(service: VPNService, profile: Profile) -> Container:
     """Recreate a container for a VPN service."""
 
+    validate_bind_address(service.proxy_bind_address)
     try:
         remove_container(service.name)
     except RuntimeError:
@@ -641,6 +647,7 @@ def analyze_container_logs(
             proxy_password=proxy_password,
             timeout=timeout,
             direct_ip=direct_ip,
+            proxy_host=proxy_host_from_container(container),
         )
     except DockerException as exc:
         raise RuntimeError(f"Failed to analyze logs for {name}: {exc}") from exc
@@ -785,6 +792,17 @@ async def collect_proxy_info(include_credentials: bool = True) -> list[dict[str,
 
         status = "active" if container.status == "running" else "stopped"
         host = host_ip if container.status == "running" else ""
+        bindings = (
+            _container_attrs(container)
+            .get("NetworkSettings", {})
+            .get("Ports", {})
+            .get("8888/tcp")
+            or []
+        )
+        if container.status == "running" and bindings:
+            published_address = bindings[0].get("HostIp")
+            if published_address and published_address not in {"0.0.0.0", "::"}:
+                host = published_address
 
         results.append(
             {

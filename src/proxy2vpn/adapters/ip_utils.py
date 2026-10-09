@@ -16,6 +16,14 @@ IP_SERVICES = ("https://ipinfo.io/ip", "https://ifconfig.me/ip")
 IP_REGEX = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}")
 
 
+def parse_ip_literal(text: str) -> str | None:
+    """Validate a complete IP-only response without extracting unrelated text."""
+    try:
+        return str(ipaddress.ip_address(text.strip()))
+    except ValueError:
+        return None
+
+
 def _parse_ip(text: str) -> str:
     """Extract a valid IP address from arbitrary text."""
     candidate = text.strip()
@@ -56,6 +64,8 @@ def _curl_proxy_args(proxy: str) -> list[str]:
         return []
 
     netloc = parsed.hostname
+    if ":" in netloc:
+        netloc = f"[{netloc}]"
     if parsed.port is not None:
         netloc = f"{netloc}:{parsed.port}"
 

@@ -69,8 +69,9 @@ def test_vpn_status_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_client(base_url):
+    def fake_client(base_url, **kwargs):
         called["base_url"] = base_url
+        called["compose_file"] = kwargs["compose_file"]
         return DummyClient(base_url)
 
     monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
@@ -80,14 +81,16 @@ def test_vpn_status_uses_localhost(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
+    assert called["compose_file"] == COMPOSE_FILE
 
 
 def test_vpn_public_ip_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_client(base_url):
+    def fake_client(base_url, **kwargs):
         called["base_url"] = base_url
+        called["compose_file"] = kwargs["compose_file"]
         return DummyClient(base_url)
 
     monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
@@ -98,14 +101,16 @@ def test_vpn_public_ip_uses_localhost(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
+    assert called["compose_file"] == COMPOSE_FILE
 
 
 def test_vpn_restart_tunnel_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_client(base_url):
+    def fake_client(base_url, **kwargs):
         called["base_url"] = base_url
+        called["compose_file"] = kwargs["compose_file"]
         return DummyClient(base_url)
 
     monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
@@ -116,14 +121,16 @@ def test_vpn_restart_tunnel_uses_localhost(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
+    assert called["compose_file"] == COMPOSE_FILE
 
 
 def test_vpn_dns_status_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_client(base_url):
+    def fake_client(base_url, **kwargs):
         called["base_url"] = base_url
+        called["compose_file"] = kwargs["compose_file"]
         return DummyClient(base_url)
 
     monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
@@ -134,14 +141,16 @@ def test_vpn_dns_status_uses_localhost(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
+    assert called["compose_file"] == COMPOSE_FILE
 
 
 def test_vpn_updater_status_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_client(base_url):
+    def fake_client(base_url, **kwargs):
         called["base_url"] = base_url
+        called["compose_file"] = kwargs["compose_file"]
         return DummyClient(base_url)
 
     monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
@@ -152,14 +161,16 @@ def test_vpn_updater_status_uses_localhost(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
+    assert called["compose_file"] == COMPOSE_FILE
 
 
 def test_vpn_port_forwarded_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}
 
-    def fake_client(base_url):
+    def fake_client(base_url, **kwargs):
         called["base_url"] = base_url
+        called["compose_file"] = kwargs["compose_file"]
         return DummyClient(base_url)
 
     monkeypatch.setattr(http_client, "GluetunControlClient", fake_client)
@@ -176,3 +187,4 @@ def test_vpn_port_forwarded_uses_localhost(monkeypatch):
     )
     assert result.exit_code == 0
     assert called["base_url"] == "http://localhost:30000/v1"
+    assert called["compose_file"] == COMPOSE_FILE

@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from proxy2vpn.core.egress import EgressCapabilities, GLUETUN_CAPABILITIES
 
 
 IncidentSeverity = Literal["low", "medium", "high"]
@@ -42,6 +43,16 @@ class ServiceSnapshot(BaseModel):
     consecutive_failures: int = 0
     degraded_since: datetime | None = None
     last_check_at: datetime
+    source: str = "gluetun"
+    capabilities: EgressCapabilities = Field(
+        default_factory=lambda: GLUETUN_CAPABILITIES
+    )
+    health_class: str | None = None
+    failing_checks: list[str] = Field(default_factory=list)
+    current_egress_ip: str | None = None
+    authentication: bool | None = None
+    connectivity: bool | None = None
+    latency_ms: float | None = None
     last_action: str | None = None
     last_action_result: str | None = None
 
@@ -63,6 +74,7 @@ class IncidentInvestigation(BaseModel):
 class AgentIncident(BaseModel):
     """Persisted incident for service failures that need attention."""
 
+    source: str = "gluetun"
     id: str
     service_name: str
     type: str
@@ -80,6 +92,18 @@ class AgentIncident(BaseModel):
     investigation: IncidentInvestigation | None = None
 
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_legacy_external_source(cls, value):
+        # The first external-only incident kind predates the explicit source field.
+        if (
+            isinstance(value, dict)
+            and "source" not in value
+            and value.get("type") == "endpoint_unhealthy"
+        ):
+            return {**value, "source": "external_proxy"}
+        return value
 
 
 class ActionRecord(BaseModel):

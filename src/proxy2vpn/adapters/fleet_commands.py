@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Mapping
+from contextlib import nullcontext
 import json
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from .display_utils import console
 from .fleet_manager import FleetConfig, FleetManager, DeploymentPlan
 from .http_client import HTTPClient, HTTPClientConfig
 from .server_monitor import ServerMonitor
+from .external_proxy import external_config_path, load_external_endpoints
+from proxy2vpn.agent.config import AgentSettings
+from proxy2vpn.core.services.health_assessment import HealthAssessmentService
 from proxy2vpn.core import config
 
 
@@ -177,23 +181,83 @@ def fleet_status(
 ):
     """Show current fleet status and profile allocation"""
 
-    fleet_manager = FleetManager(compose_file_path=_compose_file_from_ctx(ctx))
-
     try:
-        fleet_status_data = fleet_manager.get_fleet_status()
+        compose_file = _compose_file_from_ctx(ctx)
+        external = load_external_endpoints(
+            external_config_path(compose_file, AgentSettings().external_proxies_file)
+        )
+        fleet_manager = None
+        fleet_status_data: dict
+        if compose_file.exists() or not external:
+            with console.capture() if format in {"json", "yaml"} else nullcontext():
+                fleet_manager = FleetManager(compose_file_path=compose_file)
+                fleet_status_data = fleet_manager.get_fleet_status()
+        else:
+            fleet_status_data = {
+                "total_services": 0,
+                "services_by_provider": {},
+                "profile_allocation": {},
+                "country_counts": {},
+                "profile_counts": {},
+            }
+        managed_names = (
+            {service.name for service in fleet_manager.compose_manager.list_services()}
+            if external and fleet_manager is not None
+            else set()
+        )
+        if any(endpoint.name in managed_names for endpoint in external):
+            raise ValueError(
+                "External endpoint ids must not collide with compose service names"
+            )
+        if external:
+            fleet_status_data["services_by_provider"].setdefault(
+                "external_proxy", []
+            ).extend(
+                [
+                    {
+                        "name": endpoint.name,
+                        "profile": None,
+                        "location": "",
+                        "port": endpoint.connection.port,
+                        "host": endpoint.connection.host,
+                        "source": "external_proxy",
+                        "control_port": None,
+                    }
+                    for endpoint in external
+                ]
+            )
+            fleet_status_data["total_services"] += len(external)
 
-        if show_allocation:
+        if show_allocation and (not external or format == "table"):
             _display_allocation_table(fleet_status_data["profile_allocation"])
 
         if show_health:
-            console.print("\n[bold]Health Status:[/bold]")
-            http_client = HTTPClient(HTTPClientConfig(base_url="http://localhost"))
-            server_monitor = ServerMonitor(fleet_manager, http_client=http_client)
-            try:
-                health_results = asyncio.run(server_monitor.check_fleet_health())
-            finally:
-                asyncio.run(http_client.close())
-            _display_health_results(server_monitor.last_assessments or health_results)
+            if external:
+                services = (
+                    list(fleet_manager.compose_manager.list_services())
+                    if fleet_manager is not None
+                    else []
+                )
+                assessments = asyncio.run(
+                    HealthAssessmentService().assess_services(services + external)
+                )
+                fleet_status_data["health"] = {
+                    name: assessment.model_dump(mode="json")
+                    for name, assessment in assessments.items()
+                }
+                if format == "table":
+                    _display_health_results(assessments)
+            else:
+                console.print("\n[bold]Health Status:[/bold]")
+                http_client = HTTPClient(HTTPClientConfig(base_url="http://localhost"))
+                server_monitor = ServerMonitor(fleet_manager, http_client=http_client)
+                try:
+                    health_results = asyncio.run(server_monitor.check_fleet_health())
+                finally:
+                    asyncio.run(http_client.close())
+                _display_health_results(
+                    server_monitor.last_assessments or health_results
+                )
 
         _display_fleet_services(fleet_status_data, format)
 
@@ -434,9 +498,8 @@ def _display_health_results(health_results: Mapping[str, object]) -> None:
         for name, assessment in health_results.items():
             score = getattr(assessment, "health_score", 0)
             class_name = getattr(assessment, "health_class", "unknown")
-            control_api = (
-                "yes" if getattr(assessment, "control_api_reachable", False) else "no"
-            )
+            control = getattr(assessment, "control_api_reachable", None)
+            control_api = "unknown" if control is None else "yes" if control else "no"
             egress_ip = getattr(assessment, "current_egress_ip", None) or "-"
             peer_evidence = getattr(assessment, "peer_evidence", None)
             peers = []
@@ -473,7 +536,7 @@ def _display_fleet_services(fleet_status: dict, format: str):
     """Display fleet services in specified format"""
 
     if format == "json":
-        console.print(json.dumps(fleet_status, indent=2))
+        typer.echo(json.dumps(fleet_status, indent=2))
     elif format == "yaml":
         yaml = YAML()
         yaml.default_flow_style = False
@@ -481,7 +544,7 @@ def _display_fleet_services(fleet_status: dict, format: str):
 
         string_stream = io.StringIO()
         yaml.dump(fleet_status, string_stream)
-        console.print(string_stream.getvalue())
+        typer.echo(string_stream.getvalue())
     else:
         # Table format
         console.print(

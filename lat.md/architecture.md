@@ -34,6 +34,8 @@ The compose file is the source of truth for reusable profiles, concrete VPN serv
 
 The compose root also owns generated support artifacts such as the control-server auth file described in [[lat.md/agent#Watchdog Cycle]] and used by container creation paths in [[src/proxy2vpn/adapters/docker_ops.py#create_vpn_container]].
 
+[[lat.md/security#Deployment Security]] defines authenticated control credentials, proxy publication defaults, and explicit migration for existing workspaces.
+
 [[lat.md/gluetun-runtime#Gluetun Runtime]] consumes profiles resolved from this root and executes runtime requests. It stores no desired state and leaves compose mutation, fleet planning, and rotation with their existing owners.
 
 # Profile And Service Models
@@ -41,6 +43,8 @@ The compose root also owns generated support artifacts such as the control-serve
 Profiles define reusable container defaults, while VPN services add the per-container ports, location metadata, and effective environment overrides.
 
 [[src/proxy2vpn/core/models.py#Profile]] models the profile anchor stored in compose. [[src/proxy2vpn/core/models.py#VPNService]] models the concrete service that is materialized into compose, Docker labels, and container environment variables. The service model is responsible for derived mutations such as renaming, updating location metadata, and projecting the effective state back to compose-compatible structures.
+
+External endpoints use [[egress#External Endpoint Configuration]] instead of fabricating VPN containers or Compose definitions. The [[egress#Shared Egress Interface]] unifies common health evidence while retaining backend-specific models.
 
 # Server Catalog
 

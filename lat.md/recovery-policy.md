@@ -35,3 +35,11 @@ The watchdog owns runtime calls, delayed rechecks, fleet mutation, progress, inc
 Interrupted actions propagate cancellation, record failed attempts, retain current unhealthy observations and incidents, and clear active cycle progress. A cancelled or failed restart recheck marks its action failed while retaining the runtime request outcome in details. Known persistent auth evidence still persists an investigation incident. Interrupted attempt history prevents another isolated restart in the same degradation episode even when dismissal suppresses that incident; a later episode may restart again. Rotation progress follows both candidate rename and rollback identity. When failed results omit rotation metadata, the latest live progress name supplies final action identity and incident migration for both automatic and approved rotations. Failed or interrupted rotations retain known requested/final names without marking a service healthy or resolving its incidents. Successful rotation migrates incidents before resolving them under the final name. Manual approval retains its existing terminal incident history and migrates other active incidents.
 
 [[src/proxy2vpn/agent/models.py#AgentState]], [[src/proxy2vpn/agent/models.py#ActionRecord]], and [[src/proxy2vpn/agent/models.py#AgentIncident]] retain their persisted schemas; extra rotation details use the existing string map. Tests are specified in [[recovery-policy-tests#Recovery Policy Tests]].
+
+# Egress Capabilities
+
+Recovery decisions use explicit supported operations and normalized readiness so endpoint health does not imply Docker or control-server availability.
+
+[[egress#Shared Egress Interface]] supplies capabilities through resolved service identity. Unhealthy endpoints with no supported repair operation produce investigation incidents rather than restart, restore, or rotation. Backend-specific readiness is normalized by adapters outside the pure policy; existing Gluetun limits and action order remain intact.
+
+Snapshot episode history is retained only when the prior snapshot source matches current assessment source. A source change starts fresh failure timing and action fields, preserving first-cycle Gluetun recovery even when names are reused.

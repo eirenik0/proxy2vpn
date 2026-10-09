@@ -227,20 +227,105 @@ This makes the workspace portable and avoids cwd-dependent behavior.
 
 ### Control server authentication
 
-`proxy2vpn system init` generates `control-server-auth.toml` next to the active compose file and mounts it into each container automatically. The generated role uses `auth = "none"` for the localhost-bound control routes that `proxy2vpn` calls, so no extra manual setup is required for the built-in control commands.
+`proxy2vpn system init` generates `control-server-auth.toml` and
+`control-client-auth.json` next to the active Compose file. Both use owner-only
+permissions. Separate random credentials authorize monitoring reads and recovery
+writes; the CLI and watchdog discover them automatically from the Compose root.
+Keep both files together when moving a workspace. Neither role exposes settings
+that may contain credentials.
 
-If you need stricter access control, replace that generated file with your own Gluetun auth configuration such as:
+Existing custom and legacy authentication files are preserved, including when
+initializing with `--force`. For custom auth, continue to configure
+`GLUETUN_CONTROL_AUTH=user:password`. Do not edit files carrying the generated
+header independently: clients verify that the server/client pair matches.
 
-```toml
-[[roles]]
-name = "qbittorrent"
-routes = ["GET /v1/openvpn/portforwarded"]
-auth = "basic"
-username = "myusername"
-password = "mypassword"
+New VPN proxies bind to `127.0.0.1` by default. Select an explicit private or public
+interface with `vpn add --proxy-bind-address ADDRESS`; fleet configuration files
+and saved deployment plans accept `proxy_bind_address` too. Existing Compose
+bindings are preserved when loading, updating, restoring, or rotating services.
+Remote clients need a reachable selected interface; an authenticated proxy still
+needs a protected client-to-proxy network connection.
+
+To explicitly migrate an existing workspace:
+
+```bash
+proxy2vpn --compose-file state/compose.yml system secure --replace-control-auth
+proxy2vpn --compose-file state/compose.yml vpn update --all
 ```
 
-After editing the file, run `proxy2vpn vpn update NAME` to recreate the container with the new auth configuration.
+The first command backs up authentication files and Compose, prepares generated
+authentication, and changes proxy bindings to localhost. It does not modify live
+containers. The second recreates VPN containers to apply the files and interrupts
+existing connections. Choose `--proxy-bind-address YOUR_PRIVATE_HOST_IP` on the
+first command if remote private clients need access, or explicitly choose
+`0.0.0.0` to publish on all IPv4 interfaces.
+
+Without `--replace-control-auth`, the command preserves existing authentication.
+Repeating migration preserves valid generated credentials. To roll back, restore
+`compose.yml.bak`, `control-server-auth.toml.bak`, and (if one existed)
+`control-client-auth.json.bak` together, then recreate the services. When rolling
+back to legacy/custom auth that had no client file, remove the newly generated
+client file. Backups contain credentials and must stay private.
+
+## External HTTP CONNECT proxies
+
+External endpoints can join health checks and watchdog incidents without a local
+Docker container. Save `external-proxies.json` next to the active Compose path:
+
+```json
+{
+  "version": 1,
+  "endpoints": [{
+    "id": "office-proxy",
+    "connection": {
+      "protocol": "http_connect",
+      "host": "proxy.example.com",
+      "port": 3128
+    },
+    "credentials": {
+      "username_env": "OFFICE_PROXY_USER",
+      "password_env": "OFFICE_PROXY_PASSWORD"
+    },
+    "expected_egress_ips": ["203.0.113.10"]
+  }]
+}
+```
+
+Set those credential variables in the watchdog environment. Omit `credentials`
+for anonymous proxies; only variable names belong in the JSON file. Endpoint ids
+must be unique and must not collide with Compose service names. Existing Compose
+files need no changes. An external-only workspace can omit the Compose file:
+its selected path still determines the configuration and `.proxy2vpn-agent/` root.
+
+```bash
+proxy2vpn -f /path/to/workspace/compose.yml agent run --once
+proxy2vpn -f /path/to/workspace/compose.yml agent status --json --live
+proxy2vpn -f /path/to/workspace/compose.yml agent incidents --json
+proxy2vpn -f /path/to/workspace/compose.yml fleet status --show-health --format json --no-show-allocation
+```
+
+`PROXY2VPN_AGENT_EXTERNAL_PROXIES_FILE` overrides the JSON path for watchdog and
+fleet status; relative paths resolve next to the selected Compose path. Optional
+`probe_urls` overrides the default HTTPS IP reflectors (`ipinfo.io/ip` and
+`ifconfig.me/ip`). Each probe must return a complete IP literal. TLS certificates
+are verified, redirects are disabled, and failed requests never fall back to a
+direct host connection. The proxy hostname resolves locally; CONNECT sends the
+target hostname for proxy-side DNS. The proxy hop itself uses HTTP; the target
+connection uses TLS. Ambient proxy variables and netrc are ignored.
+
+Health requires request connectivity and observed IP evidence. Missing evidence
+is unknown; HTTP 407 during CONNECT means rejected proxy authentication. The optional
+`expected_egress_ips` allowlist checks egress identity. Without it, a successful
+probe confirms the configured proxy route, without claiming geography, anonymity,
+or vendor identity. Sharing the host's public IP is allowed. Credentials,
+response bodies, and raw request exceptions are excluded from diagnostics.
+
+The first adapter offers health and investigation only. It cannot restart,
+restore, replace endpoints/sessions, or request an exit-IP change. Unhealthy
+endpoints create operator-investigation incidents; healthy observations resolve
+them using the same configured id. Each assessment opens a new client session,
+with no sticky-session or stable-exit-IP guarantee. Compose deployment, allocation,
+and rotation commands continue to manage Gluetun services.
 
 ## Enterprise Fleet Management
 
@@ -490,7 +575,7 @@ Recent highlights (see CHANGELOG.md for details):
 - `vpn add` is the single compose-only service-definition command.
 - `vpn update` is the explicit recreate-and-refresh command for VPN containers.
 - Profile lifecycle split: `profile remove` (from compose) and `profile delete` (delete env file).
-- Control server auth config is created during `system init`, mounted automatically, and defaults to `auth = "none"` for localhost-bound control routes.
+- Control authentication is generated during `system init`, mounted automatically, and uses separate monitor/operator credentials for localhost-bound controls.
 - Default health analysis in `vpn list`; removed `--diagnose`/`--ips-only` flags.
 
 ---
