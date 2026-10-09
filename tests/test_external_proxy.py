@@ -845,3 +845,117 @@ def test_target_http_failures_do_not_blame_proxy_credentials(
             assert not any(r.check == "auth_failure" for r in result.results)
 
     asyncio.run(exercise())
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#Source Change Resets Recovery History]]
+@pytest.mark.parametrize("source", ["gluetun", "external_proxy"])
+def test_source_change_starts_a_fresh_recovery_episode(source):
+    from datetime import timedelta
+    from proxy2vpn.core.egress import GLUETUN_CAPABILITIES
+    from proxy2vpn.core.services.health_assessment import HealthAssessment
+
+    now = datetime.now(timezone.utc)
+    policy = RecoveryPolicy(RecoverySettings(60, 15, 300, 600, 1800))
+    assessment = HealthAssessment(
+        service_name="reused",
+        source=source,
+        assessed_at=now,
+        container_status="running" if source == "gluetun" else "not_applicable",
+        control_api_reachable=source == "gluetun",
+        capabilities=GLUETUN_CAPABILITIES
+        if source == "gluetun"
+        else EgressCapabilities(),
+        health_score=0,
+        health_class="connectivity",
+    )
+    previous = policy.snapshot("reused", assessment, None, now)
+    previous.source = "external_proxy" if source == "gluetun" else "gluetun"
+    previous.consecutive_failures = 8
+    previous.degraded_since = now - timedelta(hours=2)
+    previous.last_action = "restore"
+    previous.last_action_result = "failed"
+    snapshot = policy.snapshot("reused", assessment, previous, now)
+    assert snapshot.consecutive_failures == 1
+    assert snapshot.degraded_since == now
+    assert snapshot.last_action is None and snapshot.last_action_result is None
+    identity = ServiceIdentity("reused", "", "", "", assessment.capabilities)
+    context = RecoveryContext(identity, assessment, snapshot, [], [], [], {}, {})
+    assert policy.decide(context, now).action == (
+        "restart_tunnel" if source == "gluetun" else "incident"
+    )
+    retained = policy.snapshot("reused", assessment, snapshot, now)
+    assert retained.consecutive_failures == 2
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#New Gluetun First Cycle]]
+def test_reused_external_name_gets_normal_gluetun_first_cycle(
+    tmp_path, monkeypatch, fake_gluetun_runtime
+):
+    from datetime import timedelta
+    from proxy2vpn.core.egress import EgressObservation
+
+    path = write_config(tmp_path, [endpoint()])
+    monkeypatch.setattr(
+        ExternalProxyAdapter,
+        "observe",
+        AsyncMock(
+            return_value=EgressObservation(0, "connectivity", connectivity=False)
+        ),
+    )
+    compose = tmp_path / "compose.yml"
+    watchdog = AgentWatchdog(
+        compose,
+        runtime=fake_gluetun_runtime,
+        settings=AgentSettings(recheck_delay_seconds=0),
+    )
+    state = asyncio.run(watchdog.run_once())
+    state.services[0].consecutive_failures = 8
+    state.services[0].degraded_since -= timedelta(hours=2)
+    state.services[0].last_action = "restore"
+    state.services[0].last_action_result = "failed"
+    watchdog.store.write_state(state)
+    incident = watchdog.store.load_incidents()[0]
+    path.unlink()
+    compose.write_text(
+        "services:\n  office-proxy:\n    image: qmcgaw/gluetun\n    ports: []\n"
+    )
+    fake_gluetun_runtime.inspect.side_effect = [
+        RuntimeInspection(
+            "running",
+            [
+                DiagnosticResult(
+                    check="connectivity",
+                    passed=False,
+                    message="unhealthy",
+                    recommendation="",
+                )
+            ],
+            control_api_reachable=True,
+        ),
+        RuntimeInspection(
+            "running",
+            [
+                DiagnosticResult(
+                    check="connectivity",
+                    passed=True,
+                    message="healthy",
+                    recommendation="",
+                )
+            ],
+            control_api_reachable=True,
+        ),
+    ]
+    state = asyncio.run(watchdog.run_once())
+    fake_gluetun_runtime.restart_tunnel.assert_awaited_once()
+    fake_gluetun_runtime.restore.assert_not_awaited()
+    assert [action.action for action in state.actions] == ["restart_tunnel"]
+    assert state.actions[0].trigger == "first_unhealthy_cycle"
+    assert (
+        state.services[0].source == "gluetun" and state.services[0].health_score == 100
+    )
+    stored = watchdog.store.load_incidents()[0]
+    assert (
+        stored.id == incident.id
+        and stored.source == "external_proxy"
+        and stored.status == "open"
+    )

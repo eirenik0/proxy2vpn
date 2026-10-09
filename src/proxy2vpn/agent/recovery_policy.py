@@ -157,6 +157,8 @@ class RecoveryPolicy:
         previous: ServiceSnapshot | None,
         now: datetime,
     ) -> ServiceSnapshot:
+        if previous is not None and previous.source != assessment.source:
+            previous = None
         healthy = assessment.health_score >= self.settings.health_threshold
         return ServiceSnapshot(
             service_name=service_name,

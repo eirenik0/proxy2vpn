@@ -69,3 +69,11 @@ Verify a real controlled proxy rejection flows through shared assessment into a 
 ## Upstream HTTP Failures
 
 Verify HTTP failures inside the target TLS connection do not become proxy-authentication failures or erase the evidence that CONNECT accepted the configured credentials.
+
+## Source Change Resets Recovery History
+
+Verify snapshots discard failure counts, degradation age, and prior action fields when endpoint source changes, while same-source observations retain their episode history.
+
+## New Gluetun First Cycle
+
+Verify a Gluetun service reusing an external endpoint name gets its normal first-cycle restart without stale restoration/rotation, while the external incident remains separate.

@@ -41,3 +41,5 @@ Interrupted actions propagate cancellation, record failed attempts, retain curre
 Recovery decisions use explicit supported operations and normalized readiness so endpoint health does not imply Docker or control-server availability.
 
 [[egress#Shared Egress Interface]] supplies capabilities through resolved service identity. Unhealthy endpoints with no supported repair operation produce investigation incidents rather than restart, restore, or rotation. Backend-specific readiness is normalized by adapters outside the pure policy; existing Gluetun limits and action order remain intact.
+
+Snapshot episode history is retained only when the prior snapshot source matches current assessment source. A source change starts fresh failure timing and action fields, preserving first-cycle Gluetun recovery even when names are reused.
