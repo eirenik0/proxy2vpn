@@ -46,6 +46,7 @@ def test_live_harness_preserves_backups_and_attempts_all_cleanup(tmp_path, monke
     assert any(args[1:3] == ["network", "rm"] for args in calls)
 
 
+# @lat: [[live-security-tests#Live Security Tests#Strict Prerequisites And Private Failures]]
 def test_live_strict_prerequisite_fails_and_subprocess_output_is_private(monkeypatch):
     monkeypatch.setenv("PROXY2VPN_LIVE_STRICT", "1")
     with pytest.raises(pytest.fail.Exception, match="Required live prerequisite unmet"):
@@ -60,3 +61,39 @@ def test_live_strict_prerequisite_fails_and_subprocess_output_is_private(monkeyp
     with pytest.raises(pytest.fail.Exception) as error:
         live.command(["docker", "compose"], stage="test stage")
     assert str(error.value) == "Live operation failed: test stage"
+
+
+# @lat: [[live-security-tests#Live Security Tests#Cleanup Failures Erase Private Inputs]]
+@pytest.mark.parametrize("delete_fails", [False, True])
+def test_cleanup_failure_attempts_every_lab_and_erases_private_inputs(
+    tmp_path, monkeypatch, delete_fails
+):
+    root = tmp_path / "private"
+    root.mkdir()
+    (root / "vpn.env").write_text("private-input")
+    attempted = []
+
+    def close(project, fail):
+        attempted.append(project)
+        if fail:
+            pytest.fail("injected resource failure", pytrace=False)
+
+    labs = [
+        SimpleNamespace(project="second", close=lambda: close("second", False)),
+        SimpleNamespace(project="first", close=lambda: close("first", True)),
+    ]
+    if delete_fails:
+
+        def refuse_delete(path):
+            raise OSError("sensitive OS error")
+
+        monkeypatch.setattr(live.shutil, "rmtree", refuse_delete)
+    with pytest.raises(pytest.fail.Exception) as error:
+        live.cleanup_labs(labs, root)
+    assert attempted == ["first", "second"]
+    assert "resources for first" in str(error.value)
+    assert "sensitive" not in str(error.value)
+    if delete_fails:
+        assert "private scratch cleanup failed" in str(error.value)
+    else:
+        assert not root.exists()

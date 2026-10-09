@@ -20,4 +20,12 @@ Legacy and custom auth remain live until explicit migration and recreation; back
 
 ## Harness Failure And Isolation Guards
 
-Credential-free checks ensure scratch migration preserves its original backup on rerun and failed Compose teardown still removes owned containers and networks, while strict prerequisites and subprocess failures expose no captured sensitive output.
+Credential-free checks ensure scratch migration preserves its original backup on rerun and failed Compose teardown still attempts removal of owned containers and networks.
+
+## Strict Prerequisites And Private Failures
+
+Strict execution fails unmet live prerequisites, and subprocess failures report only a fixed stage message without exposing captured credentials, logs or response bodies.
+
+## Cleanup Failures Erase Private Inputs
+
+Resource cleanup attempts every lab despite failures, removes private scratch inputs afterward, and reports both resource and sanitized file-deletion failures without losing either diagnostic.

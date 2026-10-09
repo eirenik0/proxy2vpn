@@ -299,6 +299,23 @@ class Lab:
         ), security.load_control_auth(self.compose, "operator")
 
 
+def cleanup_labs(created, root):
+    failures = []
+    try:
+        for lab in reversed(created):
+            try:
+                lab.close()
+            except (pytest.fail.Exception, OSError):
+                failures.append("resources for " + lab.project)
+    finally:
+        try:
+            shutil.rmtree(root)
+        except OSError:
+            failures.append("private scratch cleanup failed")
+    if failures:
+        pytest.fail("Cleanup failed: " + "; ".join(failures), pytrace=False)
+
+
 @pytest.fixture
 def labs(tmp_path_factory, record_property):
     if os.environ.get("PROXY2VPN_LIVE_SECURITY") != "1":
@@ -350,18 +367,7 @@ def labs(tmp_path_factory, record_property):
     try:
         yield factory
     finally:
-        failures = []
-        for lab in reversed(created):
-            try:
-                lab.close()
-            except pytest.fail.Exception:
-                failures.append(lab.project)
-        if failures:
-            pytest.fail(
-                "Cleanup failed for isolated projects: " + ", ".join(failures),
-                pytrace=False,
-            )
-        shutil.rmtree(root)
+        cleanup_labs(created, root)
 
 
 # @lat: [[live-security-tests#Live Security Tests#Generated Roles And Compose Scoping]]
