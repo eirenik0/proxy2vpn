@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import unicodedata
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -60,7 +61,9 @@ class AgentSettings(BaseSettings):
             "identity.key",
             "transaction.json",
         ]
-        if len({name.casefold() for name in files}) != len(files):
+        if len(
+            {unicodedata.normalize("NFC", name).casefold() for name in files}
+        ) != len(files):
             raise ValueError("Agent storage filenames must be distinct")
         return self
 

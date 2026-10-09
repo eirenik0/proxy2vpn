@@ -427,3 +427,173 @@ def test_storage_filename_aliases_are_rejected(overrides):
 
     with pytest.raises(ValueError):
         AgentSettings(**overrides)
+
+
+def _approval_writer(compose, barrier, entered, release, counter, results):
+    from types import SimpleNamespace
+
+    watchdog = AgentWatchdog(Path(compose))
+
+    def synchronize(name):
+        barrier.wait(15)
+        return False
+
+    async def rotate(name, *, state):
+        with counter.get_lock():
+            counter.value += 1
+        entered.set()
+        await asyncio.to_thread(release.wait, 15)
+        return SimpleNamespace(
+            success=True, errors=[], rotation_changes=[], rotation_attempts=[]
+        )
+
+    watchdog._is_external_endpoint = synchronize
+    watchdog._rotate_service_via_fleet = rotate
+    try:
+        asyncio.run(watchdog.approve_incident("012345abcdef"))
+    except (StorageConflict, RuntimeError):
+        results.put("rejected")
+    else:
+        results.put("completed")
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Concurrent Approval Claims]]
+def test_multiprocess_approvals_claim_before_network(store):
+    store.write_state(_state(store))
+    store.append_incident(_incident())
+    context = multiprocessing.get_context("spawn")
+    barrier = context.Barrier(2)
+    entered, release = context.Event(), context.Event()
+    counter = context.Value("i", 0)
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_approval_writer,
+            args=(str(store.compose_file), barrier, entered, release, counter, results),
+        )
+        for _ in range(2)
+    ]
+    try:
+        for process in processes:
+            process.start()
+        assert entered.wait(15)
+        # The winner's network operation is suspended, but storage stays available.
+        with store.transaction():
+            claimed = store.load_incidents()[0]
+            assert claimed.approved_at is not None and claimed.status == "open"
+        assert results.get(timeout=15) == "rejected"
+        release.set()
+        assert results.get(timeout=15) == "completed"
+        assert counter.value == 1
+    finally:
+        release.set()
+        for process in processes:
+            process.join(15)
+            if process.is_alive():
+                process.terminate()
+                process.join()
+    assert all(process.exitcode == 0 for process in processes)
+    assert store.load_incidents()[0].status == "resolved"
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Interrupted Approval Claim]]
+def test_cancelled_approval_keeps_claim_and_rejects_retry(store, monkeypatch):
+    store.write_state(_state(store))
+    store.append_incident(_incident())
+    watchdog = AgentWatchdog(store.compose_file, store=store)
+    calls = []
+
+    async def rotate(name, *, state):
+        calls.append(name)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(watchdog, "_rotate_service_via_fleet", rotate)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(watchdog.approve_incident("012345abcdef"))
+    incident = store.load_incidents()[0]
+    assert incident.status == "open" and incident.approved_at is not None
+    with pytest.raises(RuntimeError, match="already claimed"):
+        asyncio.run(watchdog.approve_incident(incident.id))
+    assert calls == ["vpn"]
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Approval Completion Merge]]
+@pytest.mark.parametrize("concurrent_status", ["open", "dismissed", "resolved"])
+def test_approval_completion_preserves_concurrent_incident_updates(
+    store, monkeypatch, concurrent_status
+):
+    from types import SimpleNamespace
+
+    store.write_state(_state(store))
+    store.append_incident(_incident())
+    watchdog = AgentWatchdog(store.compose_file, store=store)
+
+    async def rotate(name, *, state):
+        other = AgentStateStore(store.compose_file)
+        fresh = other.load_incidents()[0]
+        fresh.status = concurrent_status
+        fresh.failure_count = 7
+        fresh.human_explanation = "New operator evidence"
+        other.append_incident(fresh)
+        return SimpleNamespace(
+            success=True, errors=[], rotation_changes=[], rotation_attempts=[]
+        )
+
+    monkeypatch.setattr(watchdog, "_rotate_service_via_fleet", rotate)
+    result = asyncio.run(watchdog.approve_incident("012345abcdef"))
+    assert result.status == (
+        "resolved" if concurrent_status == "open" else concurrent_status
+    )
+    assert result.failure_count == 7
+    assert result.human_explanation == "New operator evidence"
+    assert result.approved_at is not None
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Daemon Startup Conflict]]
+def test_daemon_retries_initial_state_conflict(store, monkeypatch):
+    store.write_state(_state(store))
+    watchdog = AgentWatchdog(store.compose_file, store=store)
+    original_write = store.write_state
+    writes = 0
+    cycles = []
+    sleeps = []
+
+    def conflict_once(state):
+        nonlocal writes
+        writes += 1
+        if writes == 1:
+            other = AgentStateStore(store.compose_file)
+            current = other.read_state()
+            current.status.service_count = 8
+            other.write_state(current)
+        original_write(state)
+
+    async def cycle(state):
+        cycles.append(state)
+        assert state.status.service_count == 8
+        assert state.status.daemon_mode == "foreground"
+        return state
+
+    async def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(store, "write_state", conflict_once)
+    monkeypatch.setattr(watchdog, "run_cycle", cycle)
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(watchdog.run_forever())
+    assert writes == 2 and len(cycles) == 1
+    assert sleeps == [watchdog.interval_seconds] * 2
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Unicode Filename Isolation]]
+@pytest.mark.parametrize(
+    "left,right", [("é.json", "e\u0301.json"), ("É.json", "e\u0301.JSON")]
+)
+def test_canonically_equivalent_storage_names_are_rejected(left, right):
+    from proxy2vpn.agent.config import AgentSettings
+
+    with pytest.raises(ValueError, match="distinct"):
+        AgentSettings(state_file=left, incidents_file=right)

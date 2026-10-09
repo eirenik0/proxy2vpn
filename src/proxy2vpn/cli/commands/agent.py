@@ -415,15 +415,13 @@ async def approve(
     except RuntimeError as exc:
         abort(str(exc))
 
-    if incident.status == "resolved":
-        console.print(
-            f"[green]✓[/green] Approved incident '{incident_id}' and completed the rotation."
-        )
-    else:
-        abort(
-            f"Approved incident '{incident_id}', but the rotation failed.",
-            incident.summary,
-        )
+    console.print(
+        f"Manual rotation request processed for incident '{incident_id}'. "
+        f"Final incident status: {incident.status}."
+    )
+    console.print(
+        "See `proxy2vpn agent status --json` for the recorded rotation result."
+    )
 
 
 @app.command("dismiss")

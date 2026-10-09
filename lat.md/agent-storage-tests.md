@@ -73,3 +73,27 @@ A reset between initial approval validation and endpoint checks cannot make an o
 ## Portable Filename Isolation
 
 Case-insensitive aliases, reserved-name aliases, traversal paths, absolute paths and trailing-dot filenames are rejected before lock acquisition can truncate evidence.
+
+## Concurrent Approval Claims
+
+Two processes loading the same incident before approval perform exactly one rotation, with its claim persisted before network work and no storage lock held while waiting.
+
+## Interrupted Approval Claim
+
+Cancellation retains an open incident and its persistent execution claim, so another approval cannot blindly duplicate an operation with an uncertain outcome.
+
+## Approval Completion Merge
+
+Approval completion preserves newer incident evidence and closed states while resolving a still-open claimed incident after concurrent watchdog updates.
+
+## Daemon Startup Conflict
+
+A revision conflict during initial daemon state publication reloads on the next interval and reaches monitoring without losing a concurrent update.
+
+## Unicode Filename Isolation
+
+Canonically equivalent Unicode filenames, including case variants, are rejected before state and history can overwrite the same path on normalization-insensitive filesystems.
+
+## Approval CLI Outcome Separation
+
+The approval CLI reports preserved final incident status separately from execution evidence, so concurrent dismissal or resolution cannot invent a rotation outcome.

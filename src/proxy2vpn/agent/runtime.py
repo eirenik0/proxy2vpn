@@ -154,13 +154,19 @@ class AgentWatchdog:
     async def run_forever(self, daemon_mode: DaemonMode = "foreground") -> AgentState:
         """Run until interrupted."""
 
-        state = self._load_state(daemon_mode, refresh_started_at=True)
-        self.store.write_state(state)
+        state: AgentState | None = None
+        initialized = False
         while True:
             try:
+                if state is None:
+                    state = self._load_state(
+                        daemon_mode, refresh_started_at=not initialized
+                    )
+                    self.store.write_state(state)
+                    initialized = True
                 state = await self.run_cycle(state)
             except StorageConflict:
-                state = self._load_state(daemon_mode, refresh_started_at=False)
+                state = None
             await asyncio.sleep(self.interval_seconds)
 
     async def run_once(self) -> AgentState:
@@ -371,7 +377,28 @@ class AgentWatchdog:
                 incident.service_name
             ):
                 require_supported_operation(EgressCapabilities(), "replace_endpoint")
-            decision = self._recovery_policy.manual_rotation(incident, approved=True)
+            with self.store.transaction():
+                self.store.check_generation(incident.generation)
+                latest = next(
+                    (
+                        item
+                        for item in self.store.load_incidents()
+                        if item.id == incident.id
+                    ),
+                    None,
+                )
+                if latest is None or latest.revision != incident.revision:
+                    raise StorageConflict("Incident changed; refresh before retrying")
+                decision = self._recovery_policy.manual_rotation(latest, approved=True)
+                if latest.approved_at is not None:
+                    raise RuntimeError(
+                        "Incident rotation is already claimed; inspect the previous operation before retrying"
+                    )
+                incident = latest.model_copy(
+                    update={"approved_at": utc_now(), "updated_at": utc_now()}
+                )
+                self.store.append_incident(incident)
+                state = self.store.read_state() or self.empty_state()
             self._inflight_service_names.pop(incident.service_name, None)
             try:
                 result = await self._rotate_service_via_fleet(
@@ -456,8 +483,43 @@ class AgentWatchdog:
                     or incident.human_explanation,
                 }
             )
-            self.store.append_incident(terminal)
-            return terminal
+            with self.store.transaction():
+                self.store.check_generation(incident.generation)
+                latest = next(
+                    (
+                        item
+                        for item in self.store.load_incidents()
+                        if item.id == incident.id
+                    ),
+                    None,
+                )
+                if (
+                    latest is None
+                    or latest.approved_at != incident.approved_at
+                    or latest.generation != incident.generation
+                ):
+                    raise StorageConflict(
+                        "Incident execution claim changed; refresh before retrying"
+                    )
+                if latest.status in {"dismissed", "resolved"}:
+                    return latest
+                terminal = latest.model_copy(
+                    update={
+                        "status": terminal.status,
+                        "resolved_at": terminal.resolved_at,
+                        "updated_at": terminal.updated_at,
+                        "summary": terminal.summary
+                        if latest.summary == incident.summary
+                        else latest.summary,
+                        "human_explanation": (
+                            latest.human_explanation
+                            if latest.human_explanation != incident.human_explanation
+                            else terminal.human_explanation or latest.human_explanation
+                        ),
+                    }
+                )
+                self.store.append_incident(terminal)
+                return terminal
 
     def dismiss_incident(self, incident_id: str) -> AgentIncident:
         """Dismiss one incident and suppress re-opening it for a cooldown window."""

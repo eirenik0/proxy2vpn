@@ -594,3 +594,32 @@ def test_daemon_child_writes_structured_logs_without_console_output(
     assert record["cycle_id"] == "daemon-cycle"
     assert record["password"] == "[REDACTED]"
     assert store.read_daemon_pid() is None
+
+
+# @lat: [[agent-storage-tests#Agent Storage Tests#Approval CLI Outcome Separation]]
+@pytest.mark.parametrize("status", ["dismissed", "resolved", "failed"])
+def test_approval_cli_reports_incident_status_without_inventing_rotation_outcome(
+    tmp_path, monkeypatch, status
+):
+    from proxy2vpn.cli.commands import agent as agent_commands
+    from types import SimpleNamespace
+
+    compose = _write_agent_compose(tmp_path)
+
+    class Watchdog:
+        def __init__(self, compose_file):
+            pass
+
+        async def approve_incident(self, incident_id):
+            return SimpleNamespace(status=status)
+
+    monkeypatch.setattr(agent_commands, "AgentWatchdog", Watchdog)
+    result = CliRunner().invoke(
+        app, ["--compose-file", str(compose), "agent", "approve", "012345abcdef"]
+    )
+    assert result.exit_code == 0
+    output = " ".join(result.output.split())
+    assert f"Final incident status: {status}" in output
+    assert "recorded rotation result" in output
+    assert "completed the rotation" not in output
+    assert "the rotation failed" not in output
