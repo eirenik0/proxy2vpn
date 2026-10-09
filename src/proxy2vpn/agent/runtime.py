@@ -2595,12 +2595,16 @@ class AgentWatchdog:
     ) -> None:
         exclude_ids = exclude_incident_ids or set()
         now = utc_now()
+        old_identities = {
+            old_service_name,
+            self.store.sanitizer().identity_alias(old_service_name),
+        }
         incidents = self.store.load_incidents()
         for incident in incidents:
             if incident.id in exclude_ids:
                 continue
             if (
-                incident.service_name != old_service_name
+                incident.service_name not in old_identities
                 or incident.source != "gluetun"
             ):
                 continue

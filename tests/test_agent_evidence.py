@@ -1140,3 +1140,77 @@ def test_env_file_discovery_ignores_nested_data_keys(tmp_path):
         AgentState(status=AgentStatus(compose_path=str(compose), interval_seconds=60))
     )
     assert store.read_state() is not None
+
+
+# @lat: [[agent-evidence-tests#Agent Evidence Tests#Exact Marker Credentials And Renamed Identities]]
+@pytest.mark.parametrize("secret", ["[REDACTED]", "[TRUNCATED]"])
+def test_exact_marker_encodings_and_renamed_incidents(tmp_path, secret):
+    compose = tmp_path / "compose.yml"
+    compose.write_text(
+        "services:\n  office:\n    environment:\n      OPENVPN_PASSWORD: office\n"
+    )
+    (tmp_path / ".env").write_text("HTTPPROXY_PASSWORD=" + secret + "\n")
+    store = AgentStateStore(compose)
+    sanitizer = store.sanitizer()
+    variants = {
+        quote(secret, safe=""),
+        quote_plus(secret),
+        base64.b64encode(secret.encode()).decode(),
+        base64.urlsafe_b64encode(secret.encode()).decode(),
+    }
+    narrative = " ".join(variants)
+    safe = sanitizer.text(narrative)
+    assert safe == sanitizer.text(safe)
+    assert sanitizer.text("[REDACTED]") == "[REDACTED]"
+    assert all(value not in safe for value in variants)
+    now = utc_now()
+    for identifier, status in [
+        ("active138", "open"),
+        ("closed138", "resolved"),
+        ("exclude138", "open"),
+    ]:
+        store.append_incident(
+            AgentIncident(
+                id=identifier,
+                service_name="office",
+                type="auth_config_failure",
+                severity="high",
+                status=status,
+                created_at=now,
+                updated_at=now,
+                summary=narrative,
+                recommended_action="investigate",
+            )
+        )
+    # Compose is rewritten before rotation migrates other incidents.
+    compose.write_text(
+        "services:\n  new-office:\n    environment:\n      OPENVPN_PASSWORD: office\n"
+    )
+    watchdog = AgentWatchdog(compose, llm_mode="disabled")
+    watchdog._migrate_active_incidents("office", "new-office", {"exclude138"})
+    records = {record.id: record for record in store.load_incidents()}
+    assert records["active138"].service_name == "new-office"
+    assert records["closed138"].service_name == records["exclude138"].service_name
+    assert records["closed138"].service_name.startswith("[SERVICE:v2:")
+    assert all(value not in store.incidents_file.read_text() for value in variants)
+    captured = []
+
+    def parse(**kwargs):
+        captured.append(kwargs["input"])
+        return SimpleNamespace(
+            output_parsed=kwargs["text_format"](
+                summary=narrative,
+                human_explanation=narrative,
+                findings=[narrative],
+                action_plan=[narrative],
+            )
+        )
+
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    OpenAIIncidentEnricher(client=client, sanitizer=sanitizer).enrich(
+        context().model_copy(update={"fallback_summary": narrative})
+    )
+    OpenAIIncidentInvestigator(client=client, sanitizer=sanitizer).investigate(
+        investigation_context().model_copy(update={"incident_summary": narrative})
+    )
+    assert all(value not in json.dumps(captured) for value in variants)

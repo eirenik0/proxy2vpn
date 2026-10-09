@@ -244,7 +244,7 @@ class EvidenceSanitizer:
             self.add_secret(secret)
 
     def add_secret(self, secret: str) -> None:
-        if not secret or secret in {REDACTED, "[TRUNCATED]"}:
+        if not secret:
             return
         # Explicitly supported one-layer encodings; no heuristic decoding of text.
         raw = secret.encode()

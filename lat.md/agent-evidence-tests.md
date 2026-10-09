@@ -73,3 +73,7 @@ Verify env-file format expressions select raw parsing and investigation returns 
 ## Env Declaration Boundaries
 
 Verify nested environment, label and arbitrary extension keys named env_file do not trigger file reads, while actual service and supported profile declarations still collect credentials.
+
+## Exact Marker Credentials And Renamed Identities
+
+Verify exact marker credentials have their reversible encodings masked and active incidents migrate after Compose removes the old credential-overlapping service name.
