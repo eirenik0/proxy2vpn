@@ -125,3 +125,7 @@ An alternate state directory with custom filenames can coexist with populated ca
 ## Recovery Persistence Conflicts
 
 A concurrent state update during a tunnel restart preserves the actual action outcome once and aborts the stale cycle without recording storage conflicts as failed external operations.
+
+## Pending Auth Restart Observation
+
+An isolated-auth restart whose successful request races with another state writer retains a pending observation, preventing a second restart on the next cycle while preserving the actual request result.

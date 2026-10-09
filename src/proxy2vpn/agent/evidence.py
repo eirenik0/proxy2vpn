@@ -128,6 +128,7 @@ for _field in ("action", "last_action", "recommended_action"):
     _CLASSIFICATIONS[_field] = _ACTIONS
 for _field in ("result", "last_action_result", "runtime_request_result", "observation"):
     _CLASSIFICATIONS[_field] = _RESULTS
+_CLASSIFICATIONS["observation"] = _RESULTS | {"pending"}
 _INCIDENT_TYPES = frozenset(
     {
         "auth_config_failure",

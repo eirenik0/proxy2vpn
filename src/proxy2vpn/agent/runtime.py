@@ -821,6 +821,8 @@ class AgentWatchdog:
                             snapshot.consecutive_failures,
                         )
                     raise
+                if request_action is not None:
+                    request_action.details.pop("observation", None)
                 self._persist_cycle_progress(
                     state,
                     service_name=service.name,
@@ -1113,7 +1115,11 @@ class AgentWatchdog:
                 action="restart_tunnel",
                 trigger=trigger,
                 result="success",
-                details={"control_port": str(service.control_port)},
+                details={
+                    "control_port": str(service.control_port),
+                    "runtime_request_result": "success",
+                    "observation": "pending",
+                },
             )
             self._persist_cycle_progress(
                 state,
@@ -1144,7 +1150,11 @@ class AgentWatchdog:
                 action="restart_tunnel",
                 trigger=trigger,
                 result="failed",
-                details={"error": str(exc)},
+                details={
+                    "error": str(exc),
+                    "runtime_request_result": "failed",
+                    "observation": "pending",
+                },
             )
             self._persist_cycle_progress(
                 state,

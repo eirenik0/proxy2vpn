@@ -95,11 +95,14 @@ def assert_clean(value):
 
 # @lat: [[agent-evidence-tests#Agent Evidence Tests#Bounded Copied Diagnostics]]
 def test_sanitizer_is_bounded_idempotent_and_preserves_classifications():
-    sanitizer = EvidenceSanitizer([SECRET, "RED", "ACT"])
+    sanitizer = EvidenceSanitizer([SECRET, "RED", "ACT", "pending"])
     original = investigation_context().model_dump()
     safe = sanitizer.sanitize(original)
     assert_clean(safe)
     assert safe == sanitizer.sanitize(safe)
+    assert sanitizer.sanitize({"details": {"observation": "pending"}}) == {
+        "details": {"observation": "pending"}
+    }
     assert safe["issues"][0]["check"] == "auth_failure"
     assert safe["issues"][0]["persistent"] is True
     assert safe["log_evidence"] == ["AUTH_FAILED"]

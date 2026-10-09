@@ -431,7 +431,8 @@ class RecoveryPolicy:
             and action.ts >= context.snapshot.degraded_since
             and (
                 action.details.get("cancelled") == "true"
-                or action.details.get("observation") in {"interrupted", "failed"}
+                or action.details.get("observation")
+                in {"pending", "interrupted", "failed"}
             )
             for action in context.actions
         ):
