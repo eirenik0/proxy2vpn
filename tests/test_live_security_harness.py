@@ -97,3 +97,43 @@ def test_cleanup_failure_attempts_every_lab_and_erases_private_inputs(
         assert "private scratch cleanup failed" in str(error.value)
     else:
         assert not root.exists()
+
+
+# @lat: [[live-security-tests#Live Security Tests#Independent Cleanup Stages]]
+@pytest.mark.parametrize(
+    "failed_stage",
+    [
+        "find owned test containers",
+        "remove owned test containers",
+        "find owned Compose networks",
+        "find owned probe bridges",
+    ],
+)
+def test_cleanup_continues_after_each_discovery_or_removal_failure(
+    tmp_path, monkeypatch, failed_stage
+):
+    ports = iter((28000, 28001))
+    monkeypatch.setattr(live, "free_port", lambda: next(ports))
+    profile = tmp_path / "vpn.env"
+    profile.write_text("VPN_SERVICE_PROVIDER=protonvpn\n")
+    lab = live.Lab(tmp_path / "lab", profile, "192.168.1.20")
+    stages = []
+
+    def command(args, *, stage, **kwargs):
+        stages.append(stage)
+        if stage == failed_stage:
+            pytest.fail("injected discovery/removal failure", pytrace=False)
+        if stage == "find owned test containers":
+            return "owned-container"
+        if stage == "find owned Compose networks":
+            return "compose-network"
+        if stage == "find owned probe bridges":
+            return "probe-network"
+        return ""
+
+    monkeypatch.setattr(live, "command", command)
+    with pytest.raises(pytest.fail.Exception, match=failed_stage):
+        lab.close()
+    assert "find owned Compose networks" in stages
+    assert "find owned probe bridges" in stages
+    assert "remove isolated network" in stages

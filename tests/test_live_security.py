@@ -143,20 +143,26 @@ class Lab:
 
     def close(self):
         failures = []
+
+        def attempt(args, stage):
+            try:
+                return command(args, stage=stage)
+            except (pytest.fail.Exception, OSError):
+                failures.append(stage)
+                return ""
+
         try:
             self.compose_command("down", "--volumes", "--remove-orphans")
-        except pytest.fail.Exception:
+        except (pytest.fail.Exception, OSError):
             failures.append("Compose down")
-        # A timed-out docker run client can leave its daemon-side probe alive.
-        owned = command(
+        # Discovery/removal failure must not suppress independent cleanup phases.
+        owned = attempt(
             ["docker", "ps", "-aq", "--filter", f"label=proxy2vpn.live={self.project}"],
-            stage="find owned test containers",
+            "find owned test containers",
         ).split()
         if owned:
-            command(
-                ["docker", "rm", "-f", *owned], stage="remove owned test containers"
-            )
-        networks = command(
+            attempt(["docker", "rm", "-f", *owned], "remove owned test containers")
+        networks = attempt(
             [
                 "docker",
                 "network",
@@ -165,9 +171,9 @@ class Lab:
                 "--filter",
                 f"label=com.docker.compose.project={self.project}",
             ],
-            stage="find owned Compose networks",
+            "find owned Compose networks",
         ).split()
-        probes = command(
+        probes = attempt(
             [
                 "docker",
                 "network",
@@ -176,17 +182,13 @@ class Lab:
                 "--filter",
                 f"label=proxy2vpn.live={self.project}",
             ],
-            stage="find owned probe bridges",
+            "find owned probe bridges",
         ).split()
-        for network in networks + probes:
-            try:
-                command(
-                    ["docker", "network", "rm", network],
-                    stage="remove isolated network",
-                )
-            except pytest.fail.Exception:
-                failures.append("network removal")
-        require(not failures, "Isolated resource cleanup failed")
+        for network in dict.fromkeys(networks + probes):
+            attempt(["docker", "network", "rm", network], "remove isolated network")
+        require(
+            not failures, "Isolated resource cleanup failed: " + "; ".join(failures)
+        )
 
     def raw(self, method, route, auth=None, payload=None):
         headers = {}

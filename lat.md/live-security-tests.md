@@ -29,3 +29,7 @@ Strict execution fails unmet live prerequisites, and subprocess failures report 
 ## Cleanup Failures Erase Private Inputs
 
 Resource cleanup attempts every lab despite failures, removes private scratch inputs afterward, and reports both resource and sanitized file-deletion failures without losing either diagnostic.
+
+## Independent Cleanup Stages
+
+Container discovery, forced removal and each network-discovery failure are reported without skipping remaining independent cleanup phases, limiting leftover resources during daemon instability.
