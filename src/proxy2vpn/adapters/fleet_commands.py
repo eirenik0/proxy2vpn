@@ -222,7 +222,7 @@ def fleet_status(
             ]
             fleet_status_data["total_services"] += len(external)
 
-        if show_allocation:
+        if show_allocation and (not external or format == "table"):
             _display_allocation_table(fleet_status_data["profile_allocation"])
 
         if show_health:
@@ -530,7 +530,7 @@ def _display_fleet_services(fleet_status: dict, format: str):
     """Display fleet services in specified format"""
 
     if format == "json":
-        console.print(json.dumps(fleet_status, indent=2))
+        typer.echo(json.dumps(fleet_status, indent=2))
     elif format == "yaml":
         yaml = YAML()
         yaml.default_flow_style = False
@@ -538,7 +538,7 @@ def _display_fleet_services(fleet_status: dict, format: str):
 
         string_stream = io.StringIO()
         yaml.dump(fleet_status, string_stream)
-        console.print(string_stream.getvalue())
+        typer.echo(string_stream.getvalue())
     else:
         # Table format
         console.print(

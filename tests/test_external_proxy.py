@@ -601,12 +601,17 @@ def test_external_watchdog_persists_incidents_and_recovers_without_docker(
 
 
 # @lat: [[lat.md/egress-tests#External Egress Tests#Fleet And Status CLI]]
-def test_external_fleet_status_and_agent_status_json(tmp_path, monkeypatch):
+@pytest.mark.parametrize("probe_result", ["healthy", "auth_config"])
+def test_external_fleet_status_and_agent_status_json(
+    tmp_path, monkeypatch, probe_result
+):
     from proxy2vpn.core.egress import EgressObservation
 
     write_config(tmp_path, [endpoint()])
 
     async def observe(self, **kwargs):
+        if probe_result == "auth_config":
+            return ExternalProxyAdapter._authentication_failure()
         return EgressObservation(
             100,
             "healthy",
@@ -627,15 +632,16 @@ def test_external_fleet_status_and_agent_status_json(tmp_path, monkeypatch):
             "status",
             "--format",
             "json",
-            "--no-show-allocation",
             "--show-health",
         ],
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["total_services"] == 1
-    assert payload["health"]["office-proxy"]["health_class"] == "healthy"
-    assert payload["health"]["office-proxy"]["authentication"] is None
+    assert payload["health"]["office-proxy"]["health_class"] == probe_result
+    assert payload["health"]["office-proxy"]["authentication"] is (
+        None if probe_result == "healthy" else False
+    )
     result = runner.invoke(app, ["-f", str(compose), "agent", "run", "--once"])
     assert result.exit_code == 0, result.output
     result = runner.invoke(app, ["-f", str(compose), "agent", "status", "--json"])
@@ -807,3 +813,35 @@ def test_real_proxy_rejection_reaches_watchdog_without_backend_operations(
     fake_gluetun_runtime.restart_tunnel.assert_not_awaited()
     fake_gluetun_runtime.restore.assert_not_awaited()
     fake_gluetun_runtime.cleanup_orphans.assert_not_awaited()
+
+
+# @lat: [[lat.md/egress-tests#External Egress Tests#Upstream HTTP Failures]]
+@pytest.mark.parametrize("status", [401, 407, 500, 302])
+def test_target_http_failures_do_not_blame_proxy_credentials(
+    tls_material, monkeypatch, status
+):
+    monkeypatch.setenv("PROXY_USERNAME", "operator")
+    monkeypatch.setenv("PROXY_PASSWORD", "secret-value")
+
+    async def exercise():
+        async with controlled_proxy(
+            tls_material, credentials="operator:secret-value", upstream_status=status
+        ) as (item, tls, state, _):
+            item = item.model_copy(
+                update={
+                    "credentials": endpoint(
+                        credentials={
+                            "username_env": "PROXY_USERNAME",
+                            "password_env": "PROXY_PASSWORD",
+                        }
+                    ).credentials
+                }
+            )
+            result = await ExternalProxyAdapter(item, tls_context=tls).observe()
+            assert result.health_class == "connectivity"
+            assert result.authentication is True
+            assert result.connectivity is False and result.current_egress_ip is None
+            assert len(state["requests"]) == 1
+            assert not any(r.check == "auth_failure" for r in result.results)
+
+    asyncio.run(exercise())

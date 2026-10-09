@@ -48,7 +48,7 @@ Verify external-only watchdog cycles persist stable identity, update/investigate
 
 ## Fleet And Status CLI
 
-Verify external-only fleet JSON includes source-appropriate health and agent run/status JSON persists endpoint source without creating Compose services.
+Verify external-only fleet JSON remains parseable with default allocation options and long authentication diagnostics, while agent run/status JSON persists endpoint source without creating Compose services.
 
 ## Mixed Inventory And Identity Collisions
 
@@ -65,3 +65,7 @@ Verify cancelling a batch cancels and joins outstanding external probes so their
 ## Real Watchdog Authentication Incident
 
 Verify a real controlled proxy rejection flows through shared assessment into a watchdog investigation incident without Gluetun operations.
+
+## Upstream HTTP Failures
+
+Verify HTTP failures inside the target TLS connection do not become proxy-authentication failures or erase the evidence that CONNECT accepted the configured credentials.

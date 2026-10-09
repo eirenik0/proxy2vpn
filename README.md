@@ -289,7 +289,7 @@ target hostname for proxy-side DNS. The proxy hop itself uses HTTP; the target
 connection uses TLS. Ambient proxy variables and netrc are ignored.
 
 Health requires request connectivity and observed IP evidence. Missing evidence
-is unknown; HTTP 407 means rejected proxy authentication. The optional
+is unknown; HTTP 407 during CONNECT means rejected proxy authentication. The optional
 `expected_egress_ips` allowlist checks egress identity. Without it, a successful
 probe confirms the configured proxy route, without claiming geography, anonymity,
 or vendor identity. Sharing the host's public IP is allowed. Credentials,

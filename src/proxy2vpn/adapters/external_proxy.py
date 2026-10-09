@@ -147,8 +147,6 @@ class ExternalProxyAdapter:
                         allow_redirects=False,
                         ssl=self._tls_context or True,
                     ) as response:
-                        if response.status == 407:
-                            return self._authentication_failure()
                         authentication = True if auth is not None else None
                         if response.status != 200:
                             continue
