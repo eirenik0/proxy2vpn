@@ -705,5 +705,9 @@ state; it does not mount or operate an existing VPN installation.
 
 The [IPRoyal dedicated-mobile discovery contract](docs/providers/iproyal-mobile.md)
 records the first vendor scope, verified official documentation, unknowns and a
-local sandbox. It proposes one manual IP-change request with independent
-verification; it does not enable vendor operations or provision paid resources.
+local sandbox. Explicitly configured dedicated-mobile endpoints support
+`endpoint request-exit-ip NAME --confirm-disruption`, with durable cooldowns and
+independent request/IP/authentication/connectivity outcomes. See the contract's
+manual runbook for provider references, status and probe-only reconciliation.
+The watchdog keeps external recovery manual; the client does not provision paid
+resources or renew subscriptions.

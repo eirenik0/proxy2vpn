@@ -16,7 +16,9 @@ CycleOutcome = Literal[
     "conflict",
     "interrupted",
 ]
-RecoveryAction = Literal["restart_tunnel", "restore", "rotate", "other"]
+RecoveryAction = Literal[
+    "restart_tunnel", "restore", "rotate", "request_different_exit_ip", "other"
+]
 RecoveryResult = Literal[
     "success", "failed", "accepted", "rejected", "unsupported", "unknown"
 ]
@@ -103,7 +105,8 @@ class AgentMetrics(BaseModel):
         source = action.source
         kind = (
             action.action
-            if action.action in {"restart_tunnel", "restore", "rotate"}
+            if action.action
+            in {"restart_tunnel", "restore", "rotate", "request_different_exit_ip"}
             else "other"
         )
         result = action.details.get("runtime_request_result", action.result)

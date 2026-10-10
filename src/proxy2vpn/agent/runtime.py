@@ -2434,7 +2434,7 @@ class AgentWatchdog:
                 action_plan=[
                     "Verify the configured proxy address and credential environment variables.",
                     "Check upstream availability and any configured exit-IP allowlist with the endpoint operator.",
-                    "Reassess the endpoint after repair. Restart, replacement, session renewal, and exit-IP change are unsupported by this adapter.",
+                    "Reassess the endpoint after repair. Restart, replacement and session renewal are unsupported. An explicitly configured mobile provider may offer a manual exit-IP request; automatic external recovery remains disabled.",
                 ],
             )
         findings: list[str] = []

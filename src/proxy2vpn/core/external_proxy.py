@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from proxy2vpn.core.egress import EndpointIdentity
+from proxy2vpn.core.iproyal import IPRoyalMobileConfig
 
 
 class CredentialReference(BaseModel):
@@ -63,6 +64,7 @@ class ExternalProxyEndpoint(BaseModel):
     id: str
     connection: ProxyConnection
     credentials: CredentialReference | None = None
+    mobile_provider: IPRoyalMobileConfig | None = None
     expected_egress_ips: list[str] = Field(default_factory=list)
     probe_urls: list[str] = Field(
         default_factory=lambda: [

@@ -30,7 +30,7 @@ Dispatch selects the configured source and exact provider before checking capabi
 
 Before POST, validate credential references and reserve a private operation record under the existing stable evidence transaction lock. The record binds a local operation ID to an opaque HMAC endpoint identity, provider-resource fingerprint and configuration fingerprint. Resource identity must include the rotation key, so aliases cannot bypass a same-resource claim. Never persist the raw key or token. Release the lock before HTTP or probes.
 
-Keep operation claims/cooldowns in a private, atomically replaced provider-operation artifact that ordinary monitoring reset does not clear. Start every dispatched claim with a conservative 30-minute uncertainty guard. A completed HTTP acknowledgement may reduce the guard to the configured minimum only after durable outcome persistence; timeout, cancellation, process death and indeterminate responses preserve uncertainty. Rejected requests retain at least the configured guard, with a valid bounded Retry-After extending it. Concurrent commands cannot dispatch twice against a claimed resource. A restart cannot silently retry. An explicit later operator decision is required for another request; local fencing cannot guarantee provider-side exactly-once behavior.
+Keep operation claims/cooldowns in the private AgentState provider-operation ledger that ordinary monitoring reset does not clear. Start every dispatched claim with at least a 30-minute uncertainty guard or the longer configured cooldown, measured from durable intent. Completed outcome cooldowns start from outcome persistence. A completed HTTP acknowledgement may reduce the guard to the configured minimum only after durable outcome persistence; timeout, cancellation, process death and indeterminate responses preserve uncertainty. Rejected requests retain at least the configured guard, with a valid bounded Retry-After extending it. Concurrent commands cannot dispatch twice against a claimed resource. A restart cannot silently retry. An explicit later operator decision is required for another request; local fencing cannot guarantee provider-side exactly-once behavior.
 
 Use a fixed HTTPS API origin, a validated and percent-encoded rotation-key path component, certificate verification, no redirects, no ambient HTTP proxy settings and no automatic POST retries. Never include raw vendor responses, exception messages, request URLs or headers in logs, incidents or action evidence. The key is secret even though it occupies a URL path.
 
@@ -49,3 +49,33 @@ Run `uv run --locked pytest tests/test_iproyal_discovery.py -q`. The sandbox use
 #145 must extend the real adapter sandbox to concurrent claims, cooldown persistence across process/store restart and monitoring reset, cancellation, auth rejection, rate limits, malformed responses, redirects, expiry, configuration changes and unsupported dispatch. Acceptance must assert no Docker/Gluetun mutations and credential-free storage/logs. The sandbox itself must not introduce production control-origin overrides.
 
 A separately authorized live check requires an operator-provided dedicated order with capacity for disruption, proxy credential references, token/key references, confirmed plan/location cooldown and spending approval for any purchase. Do not purchase, extend or rotate implicitly. Record same-endpoint baseline and post-request observations over the provider's actual allocation window; stop rather than retry a request with unknown outcome. Actual price, eligibility, rate limits, account-specific response envelopes and connection survival remain live validation items, not claims from the local simulator.
+
+
+## Manual operation runbook
+
+Configure an external endpoint with an optional provider block containing references, never credential values:
+
+```json
+"mobile_provider": {
+  "provider": "iproyal_mobile",
+  "access_token_env": "IPROYAL_ACCESS_TOKEN",
+  "rotation_key_env": "IPROYAL_ROTATION_KEY",
+  "cooldown_seconds": 360
+}
+```
+
+The normal connection, proxy credential references, probe URLs and expected-IP constraints remain the external endpoint schema. An optional ISO-8601 `expires_at` blocks requests after an operator-supplied expiry; it is not inferred from HTTP 404. Set a longer cooldown if required by the order. No provider capability enables automatic watchdog recovery.
+
+Run `proxy2vpn -f compose.yml endpoint request-exit-ip NAME --confirm-disruption` only when connection disruption is acceptable. The JSON result reports HTTP request outcome separately from exit change, authentication, connectivity and verification state. Accepted does not establish carrier allocation or session replacement. Two valid same-family baseline/post IPs establish only observed change, not causation or an immediate allocation guarantee. Expected-IP constraints are never rewritten.
+
+Inspect `endpoint provider-status NAME` before considering another request. It contacts no provider. A pending intent after process death remains guarded; after the guard, `endpoint reconcile NAME` can commit unknown request evidence and probe the proxy without POST. Reconciliation never retries, repairs an account or infers a changed IP without the original baseline. It may extend the conservative guard from durable reconciliation. Unknown outcomes require an explicit later operator decision; no command silently retries.
+
+The private state file retains at most one claim per provider resource and rejects a new resource at 1,000 claims. Monitoring reset preserves claims and counters. Do not delete state or the identity key, or downgrade to a release that discards the ledger, while operations are pending: these actions destroy local fencing. Claims coordinate only one compose root; separate roots or hosts using the same rotation key require operator coordination. External configuration cannot be locked atomically with provider HTTP effects; the client snapshots credentials, checks configuration before dispatch, and fences late verification.
+
+All checked-in acceptance tests use local synthetic control servers and authenticated CONNECT/TLS proxies. They exercise the actual adapter with test-only transport interception; production exposes no control-origin override. No real order has been rotated by these tests.
+
+Reconciliation selects a retained operation by service name; if key changes have left multiple records, pass `--operation-id ID` from provider-status. It requires neither a token nor a rotation key, and can terminally audit a removed endpoint. Missing proxy credentials prevent a probe. Missing control credentials make the original full configuration fingerprint unverifiable, so verification remains changed/unknown even if the current proxy can be probed. Guard expiry and dispatched/reserved classification are checked together under the current claim lock.
+
+Malformed inventory JSON prevents the shared secret-discovery/storage boundary from operating safely. Repair that file before reconciliation; the client retains dispatch uncertainty and does not bypass sanitization. An invalid provider schema with syntactically valid JSON, or endpoint removal, can be recorded as changed configuration.
+
+Non-standard JSON constants such as NaN and infinity are rejected. HTTP response JSON requires UTF-8 and is limited to 64 KiB and nesting depth 64 across Python versions. Valid ASCII Retry-After delta-seconds, including very large values, clamp to the documented local maximum of 86,400 seconds; HTTP-date Retry-After is unsupported.

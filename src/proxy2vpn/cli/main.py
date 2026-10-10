@@ -7,7 +7,7 @@ from proxy2vpn.core import config
 from proxy2vpn.adapters.validators import sanitize_path
 from proxy2vpn.adapters.logging_utils import configure_logging
 from .typer_ext import HelpfulTyper
-from .commands import agent, profile, vpn, servers, system, fleet
+from .commands import agent, profile, vpn, servers, system, fleet, endpoint
 
 app = HelpfulTyper(help="proxy2vpn command line interface")
 
@@ -18,6 +18,7 @@ app.add_typer(servers.app, name="servers")
 app.add_typer(system.app, name="system")
 app.add_typer(fleet.app, name="fleet")
 app.add_typer(agent.app, name="agent")
+app.add_typer(endpoint.app, name="endpoint")
 
 
 # @lat: [[lat.md/architecture#CLI Surface]]
