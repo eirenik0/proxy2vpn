@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 from proxy2vpn.agent.models import ActionRecord, AgentIncident, ServiceSnapshot
+from proxy2vpn.agent.retention import incident_age
 from proxy2vpn.core.egress import EgressCapabilities, GLUETUN_CAPABILITIES
 from proxy2vpn.core.services.diagnostics import DiagnosticResult
 from proxy2vpn.core.services.health_assessment import HealthAssessment
@@ -138,7 +139,7 @@ def recently_dismissed(
         i.service_name == service_name
         and i.type == incident_type
         and i.status == "dismissed"
-        and i.updated_at >= now - timedelta(seconds=cooldown_seconds)
+        and incident_age(i, now) <= max(0, cooldown_seconds)
         for i in incidents
     )
 

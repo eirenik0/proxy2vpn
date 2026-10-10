@@ -213,6 +213,7 @@ class AgentWatchdog:
         cycle_error: Exception | None = None
         storage_conflict = False
         try:
+            self.store.compact_incidents(now=progress_at)
             manager, services = self._inventory()
             # External-only workspaces require no Docker daemon.
             cleanup = None

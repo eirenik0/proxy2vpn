@@ -194,7 +194,7 @@ def test_marker_credentials_are_redacted_at_all_boundaries(tmp_path, secret):
     store.state_file.write_text(state.model_dump_json())
     store.incidents_file.write_text(incident.model_dump_json() + "\n")
     store.read_state()
-    store.load_incidents()
+    incident.revision = store.load_incidents()[0].revision
     store.write_state(state)
     store.append_incident(incident)
     captured = []
@@ -322,7 +322,9 @@ def test_storage_scrubs_all_history_and_state_without_mutating_inputs(tmp_path):
         incident.model_dump_json() + "\n" + incident.model_dump_json() + "\n"
     )
     assert_clean(store.read_state().model_dump())
-    assert_clean([record.model_dump() for record in store.load_incidents()])
+    loaded = store.load_incidents()
+    assert_clean([record.model_dump() for record in loaded])
+    incident.revision = loaded[0].revision
     assert len(store.incidents_file.read_text().splitlines()) == 2
     assert_clean(store.state_file.read_text())
     assert_clean(store.incidents_file.read_text())
@@ -464,7 +466,7 @@ def test_arbitrary_external_environment_references_are_scrubbed(tmp_path, monkey
     store.state_file.write_text(state.model_dump_json())
     store.incidents_file.write_text(incident.model_dump_json() + "\n")
     store.read_state()
-    store.load_incidents()
+    incident.revision = store.load_incidents()[0].revision
     store.write_state(state)
     store.append_incident(incident)
     captured = []
@@ -629,7 +631,9 @@ def test_scalar_compose_credentials_use_runtime_string_representation(tmp_path, 
     store.ensure_dir()
     store.state_file.write_text(state.model_dump_json())
     store.incidents_file.write_text(incident.model_dump_json() + "\n")
-    assert runtime_value not in store.load_incidents()[0].summary
+    loaded = store.load_incidents()[0]
+    assert runtime_value not in loaded.summary
+    incident.revision = loaded.revision
     assert runtime_value not in store.read_state().actions[0].details["profile"]
     store.write_state(state)
     store.append_incident(incident)
@@ -826,7 +830,7 @@ def test_interpolated_credentials_cover_storage_and_llm_boundaries(
     store.ensure_dir()
     store.incidents_file.write_text(incident.model_dump_json() + "\n")
     store.state_file.write_text(state.model_dump_json())
-    store.load_incidents()
+    incident.revision = store.load_incidents()[0].revision
     store.read_state()
     store.append_incident(incident)
     store.write_state(state)

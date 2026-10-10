@@ -19,6 +19,8 @@ from rich.table import Table
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.runtime import AgentWatchdog
 from proxy2vpn.agent.state import AgentStateStore
+from proxy2vpn.agent.retention import preview_compaction
+from proxy2vpn.core.private_storage import StorageError
 from proxy2vpn.adapters.display_utils import console
 from proxy2vpn.cli.typer_ext import HelpfulTyper, run_async
 from proxy2vpn.common import abort
@@ -282,6 +284,46 @@ def status(
             console.print(
                 f"- {action.ts}: {action.service_name} {action.action} [{action.result}]"
             )
+
+
+@app.command("compact-incidents")
+def compact_incidents(
+    ctx: typer.Context,
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview counts without changing evidence"
+    ),
+    retention_days: int | None = typer.Option(
+        None,
+        "--retention-days",
+        min=0,
+        help="Override terminal retention (default: configured 30 days)",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON counts"),
+):
+    """Keep latest evidence and prune expired resolved/dismissed incidents."""
+    compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    settings = AgentSettings()
+    if retention_days is not None:
+        settings = settings.model_copy(
+            update={"incident_retention_seconds": retention_days * 86400}
+        )
+    try:
+        report = (
+            preview_compaction(compose_file, settings)
+            if dry_run
+            else AgentStateStore(compose_file, settings).compact_incidents()
+        )
+    except StorageError as exc:
+        abort(str(exc))
+    if json_output:
+        typer.echo(report.model_dump_json())
+    else:
+        label = "Planned" if dry_run else "Completed"
+        console.print(
+            f"{label}: {report.records_before} records → {report.records_after}; "
+            f"{report.superseded_versions} superseded versions, "
+            f"{report.expired_incidents} expired incidents."
+        )
 
 
 @app.command("incidents")

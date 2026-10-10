@@ -28,3 +28,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[agent-storage-tests]]: Private storage, concurrency, reset fencing, and interruption specifications.
 
 - [[live-security-tests]]: Pinned live Gluetun authentication, publication and migration release validation.
+
+- [[incident-retention-tests]]: Retention boundaries, preview purity, concurrent compaction and interruption specifications.
