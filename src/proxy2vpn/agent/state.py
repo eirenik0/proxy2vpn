@@ -14,6 +14,12 @@ import psutil
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.evidence import EvidenceSanitizer
 from proxy2vpn.agent.models import ActionRecord, AgentIncident, AgentState, AgentStatus
+from proxy2vpn.agent.retention import (
+    CompactionReport,
+    as_utc,
+    parse_history,
+    plan_compaction,
+)
 from proxy2vpn.core.private_storage import (
     StorageError,
     atomic_write,
@@ -278,25 +284,15 @@ class AgentStateStore:
             return []
         original = self.incidents_file.read_text()
         sanitizer = self.sanitizer()
-        records = []
-        lines = original.splitlines(keepends=True)
-        for index, line in enumerate(lines):
-            if not line.strip():
-                continue
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                if index == len(lines) - 1 and not line.endswith("\n"):
-                    break
-                raise StorageError(
-                    f"Corrupt agent incident history at record {index + 1}; repair is required"
-                ) from None
-            try:
-                records.append(AgentIncident.model_validate(sanitizer.sanitize(data)))
-            except ValueError:
-                raise StorageError(
-                    f"Invalid agent incident history at record {index + 1}; repair is required"
-                ) from None
+        records = parse_history(original, sanitizer)
+        # Zero denotes a never-persisted object to append_incident. Promote legacy
+        # records before exposing them, so pruning cannot turn stale copies new.
+        records = [
+            record.model_copy(update={"revision": 1})
+            if record.revision == 0
+            else record
+            for record in records
+        ]
         text = "".join(
             json.dumps(record.model_dump(mode="json")) + "\n" for record in records
         )
@@ -315,9 +311,28 @@ class AgentStateStore:
         latest_by_id = {incident.id: incident for incident in records}
         return sorted(
             latest_by_id.values(),
-            key=lambda incident: incident.updated_at,
+            key=lambda incident: as_utc(incident.updated_at),
             reverse=True,
         )
+
+    def compact_incidents(self, *, now=None) -> CompactionReport:
+        """Re-plan and atomically compact current sanitized evidence under its lock."""
+        with self.transaction():
+            session = _operation_generation.get()
+            if session is not None and session[0] == self.compose_file:
+                self.check_generation(session[1])
+            records = self._scrub_incidents()
+            report, kept = plan_compaction(records, self.settings, now=now)
+            if not self.incidents_file.exists():
+                return report
+            sanitizer = self.sanitizer()
+            text = "".join(
+                json.dumps(sanitizer.model(item).model_dump(mode="json")) + "\n"
+                for item in kept
+            )
+            if text != self.incidents_file.read_text():
+                self._atomic_write(self.incidents_file, text)
+            return report
 
     def append_incident(self, incident: AgentIncident) -> None:
         with self.transaction():

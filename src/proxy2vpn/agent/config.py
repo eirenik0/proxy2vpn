@@ -26,6 +26,7 @@ class AgentSettings(BaseSettings):
     rotation_grace_period_seconds: int = 300
     restore_cooldown_seconds: int = 600
     incident_cooldown_seconds: int = 1800
+    incident_retention_seconds: int = Field(default=30 * 86400, ge=0)
     probe_timeout_seconds: int = 3
     control_api_timeout_seconds: float = 3.0
     control_api_retry_attempts: int = 0

@@ -59,7 +59,9 @@ def private_file(path: Path, *, create: bool = False, repair: bool = True) -> No
         os.close(fd)
 
 
-def managed_directory(path: Path, names: frozenset[str]) -> None:
+def managed_directory(
+    path: Path, names: frozenset[str], *, repair: bool = True
+) -> None:
     """Validate all artifacts without mutation before repairing a dedicated root."""
     reject_symlink_components(path)
     entries = []
@@ -84,6 +86,8 @@ def managed_directory(path: Path, names: frozenset[str]) -> None:
                 "Agent storage directory contains unrelated entries; choose a dedicated directory"
             )
         private_file(artifact, repair=False)
+    if not repair:
+        return
     private_directory(path, repair_existing=True)
     for artifact in entries:
         private_file(artifact)
