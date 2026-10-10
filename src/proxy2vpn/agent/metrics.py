@@ -204,6 +204,17 @@ def _collect_metrics(
             source=source,
             **labels,
         )
+        output.emit(
+            "recovery_blocked_incidents",
+            sum(
+                item.status in {"open", "approved"}
+                and item.type == "rotation_exhausted"
+                and item.source == source
+                for item in latest.values()
+            ),
+            source=source,
+            **labels,
+        )
     return output.text()
 
 

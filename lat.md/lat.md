@@ -33,3 +33,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 
 - [[metrics]]: Persisted counters, observation freshness and read-only Prometheus collection.
 - [[metrics-tests]]: Counter durability, unknown evidence, collection purity and reset fencing.
+- [[monitoring]]: Dashboards, held alert evidence, isolated monitoring deployment and runbooks.
+- [[monitoring-tests]]: Operator contract and current blocked-recovery gauge specifications.

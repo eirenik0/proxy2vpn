@@ -1,0 +1,1272 @@
+rule_files:
+- rules.yml
+evaluation_interval: 30s
+tests:
+- name: healthy
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: never observed
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        deployment: d
+        endpoint: e
+        source: external_proxy
+        severity: warning
+      exp_annotations:
+        summary: Endpoint has never completed an observation.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-unknown
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: missing target
+  interval: 30s
+  input_series: []
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        severity: warning
+      exp_annotations: &id001
+        summary: No proxy2vpn scrape targets are configured or reporting.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#monitoring-missing
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: exporter down
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: '0x20'
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        severity: warning
+      exp_annotations:
+        summary: Metrics exporter is unreachable.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#exporter-down
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: missing exposition
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        severity: warning
+      exp_annotations:
+        summary: Reachable exporter has no collection result.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#collection-failed
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: failed collection
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: '0x20'
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        severity: warning
+      exp_annotations:
+        summary: Exporter cannot collect valid evidence.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#collection-failed
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: failed cycles stale endpoints
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        deployment: d
+        severity: warning
+      exp_annotations:
+        summary: Watchdog has no recent successfully completed cycle.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#watchdog-stale
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        deployment: d
+        endpoint: e
+        source: external_proxy
+        severity: warning
+      exp_annotations:
+        summary: Endpoint observations remain stale or incomplete.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-stale
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: alternating cycles sustained authentication
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        deployment: d
+        endpoint: e
+        source: external_proxy
+        severity: warning
+      exp_annotations:
+        summary: Endpoint has sustained confirmed authentication failure.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-failure
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: transient probe suppressed
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 0 1x20
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: recovered auth clears held failure
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 0x12 1x8
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 8m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: unknown authentication does not mean healthy
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: authentication before hold boundary
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: state missing
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: '0x20'
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        severity: warning
+      exp_annotations:
+        summary: Watchdog state is missing.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#state-missing
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: blocked recovery persists
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_recovery_blocked_incidents{job="proxy2vpn",instance="exporter:9109",deployment="d",source="gluetun"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        instance: exporter:9109
+        deployment: d
+        source: gluetun
+        severity: warning
+      exp_annotations:
+        summary: Automatic recovery requires operator intervention.
+        runbook_url:
+          https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#recovery-blocked
+- name: blocked recovery resolved
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_recovery_blocked_incidents{job="proxy2vpn",instance="exporter:9109",deployment="d",source="gluetun"}
+    values: 1x12 0x8
+  alert_rule_test:
+  - eval_time: 8m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: stale markers preserve missing semantics
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x4 stale
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x4 stale
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts:
+    - exp_labels:
+        job: proxy2vpn
+        severity: warning
+      exp_annotations: *id001
+  - eval_time: 9m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 9m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: pending failure endpoint removed
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x7 stale
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []
+- name: pending failure reset endpoint unknown
+  interval: 30s
+  input_series:
+  - series: up{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_exporter_collection_success{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series: proxy2vpn_state_present{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_metrics_initialized{job="proxy2vpn",instance="exporter:9109"}
+    values: 1x20
+  - series:
+      proxy2vpn_cycle_success_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_observation_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x7 0x12
+  - series:
+      proxy2vpn_endpoint_observation_fresh{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0
+  - series:
+      proxy2vpn_endpoint_authentication{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: '0x20'
+  - series:
+      proxy2vpn_endpoint_authentication_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  - series:
+      proxy2vpn_endpoint_connectivity_known{job="proxy2vpn",instance="exporter:9109",deployment="d",endpoint="e",source="external_proxy"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: Proxy2VPNExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMonitoringMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNExpositionMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNCollectionFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNStateMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNMetricsUninitialized
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNWatchdogStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnknown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointStale
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointUnavailable
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointAuthenticationFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNEndpointConnectivityFailed
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: Proxy2VPNRecoveryBlocked
+    exp_alerts: []

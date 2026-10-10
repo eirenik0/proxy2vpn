@@ -1,0 +1,13 @@
+route:
+  receiver: local-only
+  group_by: [ alertname, job, instance, deployment ]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: local-only
+# Configure a notification receiver explicitly; this sample sends nothing externally.
+inhibit_rules:
+  - source_matchers: [ 'alertname=~"Proxy2VPNExporterDown|Proxy2VPNCollectionFailed|Proxy2VPNExpositionMissing"' ]
+    target_matchers: [ 'alertname=~"Proxy2VPNWatchdogStale|Proxy2VPNEndpoint.*|Proxy2VPNRecoveryBlocked"' ]
+    equal: [ job, instance ]

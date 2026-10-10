@@ -696,3 +696,9 @@ All initialized producer metrics include the opaque `deployment` label; endpoint
 families additionally include `endpoint` and `source`. One-shot/watchdog process
 restarts preserve counters. An unfinished prior cycle is classified interrupted
 when monitoring next starts; scrapes leave it in progress and stale.
+
+The [monitoring example](monitoring/README.md) provisions a local Grafana fleet
+dashboard, tested Prometheus alerts and Alertmanager grouping. See the
+[operator runbooks](monitoring/RUNBOOK.md) for missing evidence, stale watchdogs,
+sustained endpoint failures and blocked recovery. The demo uses isolated synthetic
+state; it does not mount or operate an existing VPN installation.
