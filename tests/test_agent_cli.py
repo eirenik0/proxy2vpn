@@ -220,6 +220,7 @@ def test_agent_status_and_incidents_json_are_machine_readable(
         "actions",
         "daemon",
         "remediation",
+        "metrics",
     }
     assert set(status_payload["status"].keys()) == {
         "compose_path",

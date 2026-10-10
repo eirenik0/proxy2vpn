@@ -22,6 +22,7 @@ from proxy2vpn.core.private_storage import (
 )
 from ruamel.yaml import YAML
 
+from proxy2vpn.agent.metrics_models import CycleOutcome, RecoveryAction, RecoveryResult
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.interpolation import dotenv_variables, interpolate
 from proxy2vpn.agent.models import DaemonMode, IncidentSeverity, IncidentStatus
@@ -66,10 +67,13 @@ _CHECKS = frozenset(
 )
 # Only recognized typed/control facts bypass credential substring matching.
 _CLASSIFICATIONS = {
+    "cycle_outcome": frozenset(get_args(CycleOutcome)),
+    "recovery_action": frozenset(get_args(RecoveryAction)),
+    "recovery_result": frozenset(get_args(RecoveryResult)),
     "status": frozenset(get_args(IncidentStatus)),
     "severity": frozenset(get_args(IncidentSeverity)),
     "daemon_mode": frozenset(get_args(DaemonMode)),
-    "source": frozenset({"gluetun", "external_proxy"}),
+    "source": frozenset({"gluetun", "external_proxy", "unknown"}),
     "llm_mode": frozenset({"disabled", "openai"}),
     "container_status": frozenset(
         {
@@ -162,11 +166,12 @@ _IDENTITY_ALIAS = re.compile(r"\[SERVICE:v2:[0-9a-f]{64}\]")
 _LEGACY_IDENTITY_ALIAS = re.compile(r"\[SERVICE:[0-9a-f]{64}\]")
 
 _TIMESTAMPS = frozenset(
-    "started_at active_cycle_started_at last_loop_at last_progress_at degraded_since last_check_at ts created_at updated_at approved_at resolved_at investigated_at".split()
+    "initialized_at last_attempt_at last_success_at observed_at started_at active_cycle_started_at last_loop_at last_progress_at degraded_since last_check_at ts created_at updated_at approved_at resolved_at investigated_at".split()
 )
 
 # Unknown payload keys are omitted rather than trusting their serialized value.
 _FIELDS = frozenset(
+    "metrics deployment_id initialized_at cycle_run_id last_attempt_at last_success_at cycle_outcome cycles_attempted monitoring_resets cycle_counters recovery_counters endpoint_observations endpoint_id observed_at observation_complete available health_ok duration_seconds reported_latency_seconds recovery_action recovery_result metric_count "
     "revision generation "
     """status services actions compose_path daemon_mode started_at
 active_cycle_started_at active_cycle_phase active_cycle_service_name last_loop_at
@@ -442,6 +447,14 @@ class EvidenceSanitizer:
                         )
         return sanitizer
 
+    def metric_identity(self, value: str, *, domain: str) -> str:
+        """Domain-separated opaque identities for bounded metrics labels."""
+        return hmac.new(
+            self._identity_key,
+            ("metrics:" + domain + "\0" + value).encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
     def identity_alias(self, name: str) -> str:
         digest = hmac.new(self._identity_key, name.encode(), hashlib.sha256).hexdigest()
         return "[SERVICE:v2:" + digest + "]"
@@ -504,9 +517,26 @@ class EvidenceSanitizer:
                 return [fact for fact in facts if self.text(fact) == fact][:6]
             return [
                 self.sanitize(item, key=key, depth=depth + 1)
-                for item in (value if key in {"services", "actions"} else value[:64])
+                for item in (
+                    value
+                    if key
+                    in {
+                        "services",
+                        "actions",
+                        "endpoint_observations",
+                        "recovery_counters",
+                    }
+                    else value[:64]
+                )
             ]
         if isinstance(value, str):
+            if key in {"deployment_id", "endpoint_id", "cycle_run_id"}:
+                size = 32 if key == "cycle_run_id" else 64
+                return (
+                    value
+                    if re.fullmatch(r"[0-9a-f]{" + str(size) + r"}", value)
+                    else REDACTED
+                )
             if key in _IDENTITY_FIELDS:
                 if _LEGACY_IDENTITY_ALIAS.fullmatch(value):
                     name = self._legacy_identity_names.get(value)

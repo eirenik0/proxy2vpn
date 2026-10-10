@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from proxy2vpn.agent.metrics_models import AgentMetrics, MetricSource
 from proxy2vpn.core.egress import EgressCapabilities, GLUETUN_CAPABILITIES
 
 
@@ -111,6 +112,7 @@ class AgentIncident(BaseModel):
 class ActionRecord(BaseModel):
     """Audit log record for an action taken by the agent."""
 
+    source: MetricSource = "unknown"
     ts: datetime
     service_name: str
     action: str
@@ -129,5 +131,6 @@ class AgentState(BaseModel):
     status: AgentStatus
     services: list[ServiceSnapshot] = Field(default_factory=list)
     actions: list[ActionRecord] = Field(default_factory=list)
+    metrics: AgentMetrics = Field(default_factory=AgentMetrics)
 
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
