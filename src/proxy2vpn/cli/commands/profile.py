@@ -220,7 +220,10 @@ def remove(
         abort(f"Profile '{name}' not found")
     if not force:
         typer.confirm(f"Remove profile '{name}'?", abort=True)
-    manager.remove_profile(name)
+    try:
+        manager.remove_profile(name)
+    except ValueError as exc:
+        abort(str(exc))
     console.print(f"[green]✓[/green] Profile '{name}' removed from compose.")
 
 

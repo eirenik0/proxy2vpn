@@ -228,7 +228,7 @@ def fleet_status(
             )
             fleet_status_data["total_services"] += len(external)
 
-        if show_allocation and (not external or format == "table"):
+        if show_allocation and format == "table":
             _display_allocation_table(fleet_status_data["profile_allocation"])
 
         if show_health:
@@ -248,16 +248,29 @@ def fleet_status(
                 if format == "table":
                     _display_health_results(assessments)
             else:
-                console.print("\n[bold]Health Status:[/bold]")
+                if format == "table":
+                    console.print("\n[bold]Health Status:[/bold]")
                 http_client = HTTPClient(HTTPClientConfig(base_url="http://localhost"))
                 server_monitor = ServerMonitor(fleet_manager, http_client=http_client)
                 try:
-                    health_results = asyncio.run(server_monitor.check_fleet_health())
+                    with (
+                        console.capture()
+                        if format in {"json", "yaml"}
+                        else nullcontext()
+                    ):
+                        health_results = asyncio.run(
+                            server_monitor.check_fleet_health()
+                        )
                 finally:
                     asyncio.run(http_client.close())
-                _display_health_results(
-                    server_monitor.last_assessments or health_results
-                )
+                fleet_status_data["health"] = {
+                    name: assessment.model_dump(mode="json")
+                    for name, assessment in server_monitor.last_assessments.items()
+                }
+                if format == "table":
+                    _display_health_results(
+                        server_monitor.last_assessments or health_results
+                    )
 
         _display_fleet_services(fleet_status_data, format)
 

@@ -104,6 +104,24 @@ def test_vpn_public_ip_uses_localhost(monkeypatch):
     assert called["compose_file"] == COMPOSE_FILE
 
 
+# @lat: [[lat.md/cli-regression-tests#CLI Regression Matrix#Unavailable Public IP]]
+def test_vpn_public_ip_rejects_empty_address(monkeypatch):
+    class NoIPClient(DummyClient):
+        async def public_ip(self):
+            return _IP(ip="")
+
+    monkeypatch.setattr(
+        http_client,
+        "GluetunControlClient",
+        lambda base_url, **kwargs: NoIPClient(base_url),
+    )
+    result = CliRunner().invoke(
+        app, ["-f", str(COMPOSE_FILE), "vpn", "public-ip", "testvpn1"]
+    )
+    assert result.exit_code == 1
+    assert "VPN public IP is unavailable" in result.output
+
+
 def test_vpn_restart_tunnel_uses_localhost(monkeypatch):
     runner = CliRunner()
     called = {}

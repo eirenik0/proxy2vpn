@@ -32,6 +32,9 @@ def _cli_ctx(compose_path: pathlib.Path):
 
 def test_profile_remove(tmp_path):
     compose_path = _copy_compose(tmp_path)
+    manager = ComposeManager(compose_path)
+    for service in manager.list_services():
+        manager.remove_service(service.name)
     with _cli_ctx(compose_path) as ctx:
         profile_remove(ctx, "test", force=True)
     manager = ComposeManager(compose_path)
