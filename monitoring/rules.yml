@@ -1,0 +1,154 @@
+groups:
+- name: proxy2vpn
+  interval: 30s
+  rules:
+  - record: proxy2vpn:endpoint_available_failure
+    expr: (proxy2vpn_endpoint_available{job="proxy2vpn"} == bool 0) and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_available_known == 1) and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_observation_fresh == 1)
+  - record: proxy2vpn:endpoint_authentication_failure
+    expr: (proxy2vpn_endpoint_authentication{job="proxy2vpn"} == bool 0) and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_authentication_known == 1) and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_observation_fresh == 1)
+  - record: proxy2vpn:endpoint_connectivity_failure
+    expr: (proxy2vpn_endpoint_connectivity{job="proxy2vpn"} == bool 0) and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_connectivity_known == 1) and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_observation_fresh == 1)
+  - alert: Proxy2VPNExporterDown
+    expr: up{job="proxy2vpn"} == 0
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: Metrics exporter is unreachable.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#exporter-down
+  - alert: Proxy2VPNMonitoringMissing
+    expr: absent(up{job="proxy2vpn"})
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: No proxy2vpn scrape targets are configured or reporting.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#monitoring-missing
+  - alert: Proxy2VPNExpositionMissing
+    expr: up{job="proxy2vpn"} == 1 unless on(job,instance)
+      proxy2vpn_exporter_collection_success
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: Reachable exporter has no collection result.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#collection-failed
+  - alert: Proxy2VPNCollectionFailed
+    expr: proxy2vpn_exporter_collection_success{job="proxy2vpn"} == 0
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: Exporter cannot collect valid evidence.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#collection-failed
+  - alert: Proxy2VPNStateMissing
+    expr: proxy2vpn_state_present{job="proxy2vpn"} == 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Watchdog state is missing.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#state-missing
+  - alert: Proxy2VPNMetricsUninitialized
+    expr: proxy2vpn_metrics_initialized{job="proxy2vpn"} == 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Watchdog metrics are not initialized.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#state-missing
+  - alert: Proxy2VPNWatchdogStale
+    expr: proxy2vpn_cycle_success_fresh{job="proxy2vpn"} == 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Watchdog has no recent successfully completed cycle.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#watchdog-stale
+  - alert: Proxy2VPNEndpointUnknown
+    expr: proxy2vpn_endpoint_observation_known{job="proxy2vpn"} == 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Endpoint has never completed an observation.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-unknown
+  - alert: Proxy2VPNEndpointStale
+    expr: proxy2vpn_endpoint_observation_fresh{job="proxy2vpn"} == 0 and
+      on(job,instance,deployment,endpoint,source)
+      proxy2vpn_endpoint_observation_known == 1
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Endpoint observations remain stale or incomplete.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-stale
+  - alert: Proxy2VPNEndpointUnavailable
+    expr: last_over_time(proxy2vpn:endpoint_available_failure[3m]) == 1 and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_observation_known == 1) and on(job,instance)
+      (up{job="proxy2vpn"} == 1) and on(job,instance)
+      (proxy2vpn_exporter_collection_success == 1)
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Endpoint has sustained confirmed available failure.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-failure
+  - alert: Proxy2VPNEndpointAuthenticationFailed
+    expr: last_over_time(proxy2vpn:endpoint_authentication_failure[3m]) == 1 and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_observation_known == 1) and on(job,instance)
+      (up{job="proxy2vpn"} == 1) and on(job,instance)
+      (proxy2vpn_exporter_collection_success == 1)
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Endpoint has sustained confirmed authentication failure.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-failure
+  - alert: Proxy2VPNEndpointConnectivityFailed
+    expr: last_over_time(proxy2vpn:endpoint_connectivity_failure[3m]) == 1 and
+      on(job,instance,deployment,endpoint,source)
+      (proxy2vpn_endpoint_observation_known == 1) and on(job,instance)
+      (up{job="proxy2vpn"} == 1) and on(job,instance)
+      (proxy2vpn_exporter_collection_success == 1)
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Endpoint has sustained confirmed connectivity failure.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#endpoint-failure
+  - alert: Proxy2VPNRecoveryBlocked
+    expr: proxy2vpn_recovery_blocked_incidents{job="proxy2vpn"} > 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Automatic recovery requires operator intervention.
+      runbook_url:
+        https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md#recovery-blocked

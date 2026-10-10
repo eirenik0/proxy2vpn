@@ -332,3 +332,41 @@ def test_store_restart_preserves_counters_and_both_endpoint_sources(tmp_path):
     assert 'source="gluetun"' in output
     assert 'source="external_proxy"' in output
     assert "endpoint_available{" not in output
+
+
+# @lat: [[lat.md/monitoring-tests#Monitoring Tests#Current Recovery Intervention]]
+def test_recovery_blocked_gauge_counts_current_incident_evidence(tmp_path):
+    from proxy2vpn.agent.models import AgentIncident
+
+    store, state = setup(tmp_path)
+    incident = AgentIncident(
+        id="000000000001",
+        service_name="vpn",
+        source="gluetun",
+        type="rotation_exhausted",
+        severity="high",
+        status="open",
+        created_at=NOW,
+        updated_at=NOW,
+        summary="Policy blocked",
+        recommended_action="investigate",
+    )
+    store.append_incident(incident)
+    output = collect_metrics(store.compose_file, store.settings, now=NOW)
+    line = next(
+        line
+        for line in output.splitlines()
+        if line.startswith("proxy2vpn_recovery_blocked_incidents{")
+        and 'source="gluetun"' in line
+    )
+    assert line.endswith("1.0")
+    incident.status = "resolved"
+    store.append_incident(incident)
+    output = collect_metrics(store.compose_file, store.settings, now=NOW)
+    line = next(
+        line
+        for line in output.splitlines()
+        if line.startswith("proxy2vpn_recovery_blocked_incidents{")
+        and 'source="gluetun"' in line
+    )
+    assert line.endswith("0.0")

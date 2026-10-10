@@ -1,0 +1,772 @@
+{
+  "uid": "proxy2vpn-fleet",
+  "title": "Proxy2VPN fleet evidence",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "Operator runbooks",
+      "url": "https://github.com/eirenik0/proxy2vpn/blob/main/monitoring/RUNBOOK.md",
+      "type": "link"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "deployment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "proxy2vpn-prometheus"
+        },
+        "query": "label_values(proxy2vpn_cycle_attempts_total, deployment)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true
+      },
+      {
+        "name": "source",
+        "type": "custom",
+        "query": "gluetun,external_proxy",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Exporter reachability",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"proxy2vpn\"}",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Collection success",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_exporter_collection_success{job=\"proxy2vpn\"}",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Monitoring initialized",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_metrics_initialized{job=\"proxy2vpn\"}",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Successful cycle fresh",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_cycle_success_fresh{job=\"proxy2vpn\",deployment=~\"$deployment\"}",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Configured endpoints",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by(deployment,source) (proxy2vpn_endpoint_observation_known{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"})",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Never observed",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(deployment,source) (1 - proxy2vpn_endpoint_observation_known{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"})",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Fresh observations",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(deployment,source) (proxy2vpn_endpoint_observation_fresh{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"})",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Availability: fresh known only",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_endpoint_available{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"} and on(job,instance,deployment,endpoint,source) (proxy2vpn_endpoint_observation_fresh == 1)",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Known availability denominator",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by(deployment,source) (proxy2vpn_endpoint_available{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"} and on(job,instance,deployment,endpoint,source) (proxy2vpn_endpoint_observation_fresh == 1))",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Authentication evidence",
+      "type": "timeseries",
+      "description": "Completed fresh observations only; gaps mean stale or unknown evidence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_endpoint_authentication{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"} and on(job,instance,deployment,endpoint,source) (proxy2vpn_endpoint_observation_fresh == 1)",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Connectivity evidence",
+      "type": "timeseries",
+      "description": "Completed fresh observations only; gaps mean stale or unknown evidence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 24,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_endpoint_connectivity{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"} and on(job,instance,deployment,endpoint,source) (proxy2vpn_endpoint_observation_fresh == 1)",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Completed probe duration",
+      "type": "timeseries",
+      "description": "Completed fresh observations only; gaps mean stale or unknown evidence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 24,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_endpoint_duration_seconds{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"} and on(job,instance,deployment,endpoint,source) (proxy2vpn_endpoint_observation_fresh == 1)",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Adapter reported latency",
+      "type": "timeseries",
+      "description": "Completed fresh observations only; gaps mean stale or unknown evidence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_endpoint_reported_latency_seconds{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"} and on(job,instance,deployment,endpoint,source) (proxy2vpn_endpoint_observation_fresh == 1)",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Open incidents",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 32,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_open_incidents{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"}",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Blocked automatic recovery",
+      "type": "stat",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 32,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "proxy2vpn_recovery_blocked_incidents{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"}",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Committed recovery request outcomes",
+      "type": "timeseries",
+      "description": "Audit outcomes, not physical requests or recovered endpoints. Newly appearing counters need a baseline.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(deployment,source,action,result) (increase(proxy2vpn_recovery_action_outcomes_total{job=\"proxy2vpn\",deployment=~\"$deployment\",source=~\"$source\"}[$__rate_interval]))",
+          "legendFormat": "{{deployment}} {{source}} {{action}} {{result}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Cycle outcomes",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 40,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(deployment,outcome) (increase(proxy2vpn_cycle_outcomes_total{job=\"proxy2vpn\",deployment=~\"$deployment\"}[$__rate_interval]))",
+          "legendFormat": "{{deployment}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Active alerts",
+      "type": "table",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "proxy2vpn-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 40,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ALERTS{alertstate=\"firing\",alertname=~\"Proxy2VPN.*\"}",
+          "legendFormat": "{{deployment}} {{endpoint}} {{source}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "No monitoring data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    }
+  ]
+}
