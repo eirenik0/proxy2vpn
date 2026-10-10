@@ -52,7 +52,7 @@ Generic external endpoints, Gluetun names and missing endpoints cannot invoke th
 
 ## Actual HTTP Client
 
-The production HTTP client handles fragmented, oversized, contradictory, malformed, rejected and redirect responses through local listeners with no retry or secret evidence.
+The production HTTP client handles fragmented, oversized, contradictory, malformed, non-standard numeric constants, rejected and redirect responses through local listeners with no retry or secret evidence.
 
 ## Actual Proxy Verification
 

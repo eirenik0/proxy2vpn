@@ -78,4 +78,4 @@ Reconciliation selects a retained operation by service name; if key changes have
 
 Malformed inventory JSON prevents the shared secret-discovery/storage boundary from operating safely. Repair that file before reconciliation; the client retains dispatch uncertainty and does not bypass sanitization. An invalid provider schema with syntactically valid JSON, or endpoint removal, can be recorded as changed configuration.
 
-HTTP response JSON requires UTF-8 and is limited to 64 KiB and nesting depth 64 across Python versions. Valid ASCII Retry-After delta-seconds, including very large values, clamp to the documented local maximum of 86,400 seconds; HTTP-date Retry-After is unsupported.
+Non-standard JSON constants such as NaN and infinity are rejected. HTTP response JSON requires UTF-8 and is limited to 64 KiB and nesting depth 64 across Python versions. Valid ASCII Retry-After delta-seconds, including very large values, clamp to the documented local maximum of 86,400 seconds; HTTP-date Retry-After is unsupported.

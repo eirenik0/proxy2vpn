@@ -89,7 +89,7 @@ class IPRoyalMobileAdapter(ExternalProxyAdapter):
                                 request_outcome="unknown",
                                 reason_code="malformed_response",
                             )
-                        value = json.loads(text)
+                        value = json.loads(text, parse_constant=reject_json_constant)
                     except (ValueError, UnicodeDecodeError, RecursionError):
                         return ControlResult(
                             request_outcome="unknown", reason_code="malformed_response"
@@ -157,3 +157,8 @@ def bounded_json_nesting(body: bytes | bytearray | str, maximum: int = 64) -> bo
         elif character in "]}":
             depth -= 1
     return True
+
+
+def reject_json_constant(value: str):
+    """Python extensions are not valid provider JSON acknowledgments."""
+    raise ValueError("Non-standard JSON constant")
