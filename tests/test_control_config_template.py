@@ -7,6 +7,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from proxy2vpn.core import config
 
 
+# @lat: [[lat.md/cli-regression-tests#CLI Regression Matrix#Canonical Control Routes]]
 def test_control_api_endpoints_are_v1_and_correct():
     # Expected mapping pinned to current supported routes
     expected = {
@@ -16,7 +17,7 @@ def test_control_api_endpoints_are_v1_and_correct():
         "openvpn_status": "/v1/openvpn/status",
         "dns_status": "/v1/dns/status",
         "updater_status": "/v1/updater/status",
-        "port_forward": "/v1/openvpn/portforwarded",
+        "port_forward": "/v1/portforward",
     }
     assert config.CONTROL_API_ENDPOINTS == expected
 

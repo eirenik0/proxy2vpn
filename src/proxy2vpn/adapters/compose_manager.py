@@ -252,6 +252,14 @@ class ComposeManager:
         key = f"x-vpn-base-{name}"
         if key not in self.data:
             raise KeyError(f"Profile '{name}' not found")
+        users = [
+            service.name for service in self.list_services() if service.profile == name
+        ]
+        if users:
+            raise ValueError(
+                f"Profile '{name}' is used by services: {', '.join(users)}. "
+                "Delete or reassign those services first."
+            )
         del self.data[key]
         self.save()
 

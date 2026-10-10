@@ -150,6 +150,6 @@ def test_vpn_restore_reports_failed_recreate(monkeypatch):
 
     result = runner.invoke(app, ["vpn", "restore", "vpn1"])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "Restore failed" in result.stdout
     assert "Restored" not in result.stdout

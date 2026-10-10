@@ -10,6 +10,12 @@ Profile allocation spreads services across profile slot budgets so multi-account
 
 [[src/proxy2vpn/adapters/profile_allocator.py#ProfileAllocator]] tracks per-profile slot counts and chooses the next profile with remaining capacity using a lowest-utilization heuristic. This keeps allocations balanced without needing one static profile-per-country mapping.
 
+# Structured Fleet Status
+
+Fleet status keeps JSON and YAML machine-readable for managed and external endpoints, including allocation and optional health evidence without tables or probe progress on stdout.
+
+[[src/proxy2vpn/adapters/fleet_commands.py#fleet_status]] includes normalized health assessments under `health` when requested. Human-readable allocation and diagnostic displays remain limited to table output. Regression coverage is specified in [[cli-regression-tests#CLI Regression Matrix#Structured Fleet Health]].
+
 # Rotation Execution
 
 Rotation updates compose state first, then recreates the affected container so the canonical service definition remains the source of truth.

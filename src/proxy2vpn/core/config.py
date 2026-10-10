@@ -56,7 +56,7 @@ CONTROL_API_ENDPOINTS = {
     "openvpn_status": "/v1/openvpn/status",
     "dns_status": "/v1/dns/status",
     "updater_status": "/v1/updater/status",
-    "port_forward": "/v1/openvpn/portforwarded",
+    "port_forward": "/v1/portforward",
 }
 
 # Path to the control server authentication configuration mounted into

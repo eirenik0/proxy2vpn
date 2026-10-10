@@ -668,12 +668,16 @@ def restart(
         services = manager.list_services()
         from proxy2vpn.adapters.docker_ops import restart_container
 
+        failed = False
         for svc in services:
             try:
                 restart_container(svc.name)
                 console.print(format_bulk_success_message("Restarted", svc.name))
             except RuntimeError as exc:
+                failed = True
                 typer.echo(str(exc), err=True)
+        if failed:
+            raise typer.Exit(1)
         return
 
     assert name is not None
@@ -773,10 +777,16 @@ def _delete_service_containers(service_name: str):
         stop_container(service_name)
     except NotFound:
         pass
+    except RuntimeError as exc:
+        if not isinstance(exc.__cause__, NotFound):
+            raise
     try:
         remove_container(service_name)
     except NotFound:
         pass
+    except RuntimeError as exc:
+        if not isinstance(exc.__cause__, NotFound):
+            raise
 
 
 def _delete_all_services(manager: ComposeManager, force: bool):
@@ -1005,6 +1015,8 @@ async def public_ip(
         compose_file=Path((ctx.obj or {}).get("compose_file", config.COMPOSE_FILE)),
     ) as client:
         ip = await client.public_ip()
+    if not ip.ip.strip():
+        abort("VPN public IP is unavailable", "Check VPN health and authentication")
     console.print(ip.ip)
 
 
@@ -1173,6 +1185,7 @@ def restore(
         console.print("[yellow]No action needed:[/yellow] " + ", ".join(unchanged))
     if failed:
         console.print("[red]Restore failed:[/red] " + ", ".join(failed))
+        raise typer.Exit(1)
 
 
 @app.command("restart-tunnel")

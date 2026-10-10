@@ -1,0 +1,1 @@
+Correct CLI failure and cleanup behavior: return nonzero for failed restart/restoration and missing public IP, delete services whose containers are already absent, and reject removal of referenced profiles. Keep fleet JSON/YAML output parseable with health evidence, and query the canonical Gluetun port-forward endpoint without redirects.

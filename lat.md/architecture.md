@@ -6,6 +6,10 @@ The CLI accepts one active compose root per invocation and routes commands throu
 
 CLI libraries imported directly at runtime are declared as direct package dependencies. In particular, Click is not left implicit through Typer, so isolated `uvx` installations contain every module needed during CLI startup.
 
+Bulk VPN restart and restoration attempt every selected service and return a nonzero exit status if any operation fails. Successful services remain reported individually; see [[cli-regression-tests#CLI Regression Matrix#Partial Restart Failure]] and [[cli-regression-tests#CLI Regression Matrix#Failed Restoration]].
+
+An unavailable public IP is a command failure rather than an empty successful response. Port-forward queries use `/v1/portforward` directly; automatic credential-bearing redirects remain disabled. See [[cli-regression-tests#CLI Regression Matrix#Unavailable Public IP]] and [[cli-regression-tests#CLI Regression Matrix#Canonical Control Routes]].
+
 [[lat.md/logging#Operational Logging]] defines the shared file-log contract. Command result output remains separate from logs, including JSON commands and detached watchdog children.
 
 # Development Verification
@@ -31,6 +35,8 @@ Repository tests pin these workflow invariants so later CI edits cannot quietly 
 The compose file is the source of truth for reusable profiles, concrete VPN services, and generated support files that travel with one workspace.
 
 [[src/proxy2vpn/adapters/compose_manager.py#ComposeManager]] owns loading, validating, backing up, and atomically saving the compose file. It preserves profile anchors under `x-vpn-base-*`, merges service-specific overrides onto those anchors, and resolves profile env files relative to the compose file so a workspace remains portable.
+
+Service deletion tolerates absent containers, including Docker not-found errors wrapped by helpers, while preserving definitions on other Docker failures. Profile removal rejects profiles referenced by services so cleanup cannot leave dangling merges. See [[cli-regression-tests#CLI Regression Matrix#Delete Missing Containers]] and [[cli-regression-tests#CLI Regression Matrix#Referenced Profile Removal]].
 
 The compose root also owns generated support artifacts such as the control-server auth file described in [[lat.md/agent#Watchdog Cycle]] and used by container creation paths in [[src/proxy2vpn/adapters/docker_ops.py#create_vpn_container]].
 
