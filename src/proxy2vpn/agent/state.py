@@ -137,6 +137,16 @@ class AgentStateStore:
             ) from None
 
     @contextmanager
+    def provider_transaction(self) -> Generator[None]:
+        """Read fresh provider facts across reset without reviving old observations."""
+        token = _operation_generation.set(None)
+        try:
+            with self.transaction():
+                yield
+        finally:
+            _operation_generation.reset(token)
+
+    @contextmanager
     def observation_session(self, generation: int) -> Generator[None]:
         """Fence delayed async work against reset without holding a lock."""
         token = _operation_generation.set((self.compose_file, generation))
@@ -294,6 +304,9 @@ class AgentStateStore:
 
             state = AgentState(
                 status=status,
+                provider_operations=previous_state.provider_operations
+                if previous_state
+                else [],
                 metrics=(
                     previous_state.metrics.clear_monitoring()
                     if previous_state

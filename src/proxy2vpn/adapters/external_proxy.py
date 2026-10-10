@@ -79,11 +79,13 @@ class ExternalProxyAdapter:
         probe_timeout: int = 5,
         *,
         tls_context: ssl.SSLContext | None = None,
+        credential_values: tuple[str, str] | None = None,
     ):
         self.endpoint = endpoint
         self.identity = endpoint.identity
         self.probe_timeout = probe_timeout
         self._tls_context = tls_context
+        self._credential_values = credential_values
 
     async def execute(self, operation: EgressOperation) -> None:
         require_supported_operation(self.capabilities, operation)
@@ -93,8 +95,11 @@ class ExternalProxyAdapter:
     ) -> EgressObservation:
         auth = None
         if self.endpoint.credentials is not None:
-            username = os.environ.get(self.endpoint.credentials.username_env)
-            password = os.environ.get(self.endpoint.credentials.password_env)
+            if self._credential_values is None:
+                username = os.environ.get(self.endpoint.credentials.username_env)
+                password = os.environ.get(self.endpoint.credentials.password_env)
+            else:
+                username, password = self._credential_values
             if not username or not password or ":" in username:
                 return EgressObservation(
                     0,

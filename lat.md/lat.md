@@ -37,3 +37,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[monitoring-tests]]: Operator contract and current blocked-recovery gauge specifications.
 - [[iproyal-mobile]]: First dedicated-mobile provider discovery, uncertainty and scoped dispatch/storage design.
 - [[iproyal-discovery-tests]]: Reproducible local control/CONNECT contract discovery.
+
+- [[mobile-operation-tests]] — Durable manual mobile requests and isolated adapter verification.

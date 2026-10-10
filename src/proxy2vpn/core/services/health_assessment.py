@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from proxy2vpn.adapters.gluetun_runtime import GluetunRuntime, GluetunRuntimeInterface
 from proxy2vpn.adapters.logging_utils import get_event_logger, logging_context
 from proxy2vpn.adapters.egress import GluetunEgressAdapter
-from proxy2vpn.adapters.external_proxy import ExternalProxyAdapter
+from proxy2vpn.adapters.iproyal import external_adapter
 from proxy2vpn.core.egress import (
     EgressAdapter,
     EgressCapabilities,
@@ -165,7 +165,7 @@ class HealthAssessmentService:
             control_api_reachable = gluetun.inspection.control_api_reachable
             direct_ip = gluetun.inspection.direct_ip
         else:
-            adapter = ExternalProxyAdapter(service, self.probe_timeout)
+            adapter = external_adapter(service, self.probe_timeout)
             observation = await adapter.observe(lines=lines, timeout=timeout)
         failing_checks = [r.check for r in observation.results if r.passed is not True]
         if container_status == "missing":

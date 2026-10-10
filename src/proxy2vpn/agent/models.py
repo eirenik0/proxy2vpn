@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from proxy2vpn.core.iproyal import ProviderOperation
 from proxy2vpn.agent.metrics_models import AgentMetrics, MetricSource
 from proxy2vpn.core.egress import EgressCapabilities, GLUETUN_CAPABILITIES
 
@@ -132,5 +133,18 @@ class AgentState(BaseModel):
     services: list[ServiceSnapshot] = Field(default_factory=list)
     actions: list[ActionRecord] = Field(default_factory=list)
     metrics: AgentMetrics = Field(default_factory=AgentMetrics)
+    provider_operations: list[ProviderOperation] = Field(
+        default_factory=list, max_length=1000
+    )
 
     model_config = ConfigDict(validate_assignment=True, extra="ignore")
+
+    @model_validator(mode="after")
+    def unique_provider_claims(self):
+        resources = [operation.resource_id for operation in self.provider_operations]
+        operations = [operation.operation_id for operation in self.provider_operations]
+        if len(resources) != len(set(resources)) or len(operations) != len(
+            set(operations)
+        ):
+            raise ValueError("Provider operation claims must be unique")
+        return self

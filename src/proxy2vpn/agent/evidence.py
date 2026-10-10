@@ -22,6 +22,7 @@ from proxy2vpn.core.private_storage import (
 )
 from ruamel.yaml import YAML
 
+from proxy2vpn.core.iproyal import RequestOutcome, ExitChange, OperationReason
 from proxy2vpn.agent.metrics_models import CycleOutcome, RecoveryAction, RecoveryResult
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.interpolation import dotenv_variables, interpolate
@@ -67,12 +68,20 @@ _CHECKS = frozenset(
 )
 # Only recognized typed/control facts bypass credential substring matching.
 _CLASSIFICATIONS = {
+    "verification_state": frozenset(
+        {"pending", "completed", "configuration_changed", "failed"}
+    ),
+    "request_outcome": frozenset(get_args(RequestOutcome)),
+    "exit_change": frozenset(get_args(ExitChange)),
+    "reason_code": frozenset(get_args(OperationReason)),
+    "operation_phase": frozenset({"reserved", "dispatched", "completed", "unknown"}),
     "cycle_outcome": frozenset(get_args(CycleOutcome)),
     "recovery_action": frozenset(get_args(RecoveryAction)),
     "recovery_result": frozenset(get_args(RecoveryResult)),
     "status": frozenset(get_args(IncidentStatus)),
     "severity": frozenset(get_args(IncidentSeverity)),
     "daemon_mode": frozenset(get_args(DaemonMode)),
+    "provider": frozenset({"iproyal_mobile"}),
     "source": frozenset({"gluetun", "external_proxy", "unknown"}),
     "llm_mode": frozenset({"disabled", "openai"}),
     "container_status": frozenset(
@@ -129,7 +138,7 @@ _RESULTS = frozenset(
     }
 )
 for _field in ("action", "last_action", "recommended_action"):
-    _CLASSIFICATIONS[_field] = _ACTIONS
+    _CLASSIFICATIONS[_field] = _ACTIONS | {"request_different_exit_ip"}
 for _field in ("result", "last_action_result", "runtime_request_result", "observation"):
     _CLASSIFICATIONS[_field] = _RESULTS
 _CLASSIFICATIONS["observation"] = _RESULTS | {"pending"}
@@ -166,12 +175,12 @@ _IDENTITY_ALIAS = re.compile(r"\[SERVICE:v2:[0-9a-f]{64}\]")
 _LEGACY_IDENTITY_ALIAS = re.compile(r"\[SERVICE:[0-9a-f]{64}\]")
 
 _TIMESTAMPS = frozenset(
-    "initialized_at last_attempt_at last_success_at observed_at started_at active_cycle_started_at last_loop_at last_progress_at degraded_since last_check_at ts created_at updated_at approved_at resolved_at investigated_at".split()
+    "completed_at cooldown_until initialized_at last_attempt_at last_success_at observed_at started_at active_cycle_started_at last_loop_at last_progress_at degraded_since last_check_at ts created_at updated_at approved_at resolved_at investigated_at".split()
 )
 
 # Unknown payload keys are omitted rather than trusting their serialized value.
 _FIELDS = frozenset(
-    "metrics deployment_id initialized_at cycle_run_id last_attempt_at last_success_at cycle_outcome cycles_attempted monitoring_resets cycle_counters recovery_counters endpoint_observations endpoint_id observed_at observation_complete available health_ok duration_seconds reported_latency_seconds recovery_action recovery_result metric_count "
+    "provider_operations operation_id resource_id configuration_id operation_phase request_outcome exit_change session_replaced connectivity_restored cooldown_until completed_at reason_code retry_after_seconds audit_recorded verification_state metrics deployment_id initialized_at cycle_run_id last_attempt_at last_success_at cycle_outcome cycles_attempted monitoring_resets cycle_counters recovery_counters endpoint_observations endpoint_id observed_at observation_complete available health_ok duration_seconds reported_latency_seconds recovery_action recovery_result metric_count "
     "revision generation "
     """status services actions compose_path daemon_mode started_at
 active_cycle_started_at active_cycle_phase active_cycle_service_name last_loop_at
@@ -313,7 +322,12 @@ class EvidenceSanitizer:
             return
         if isinstance(value, Mapping):
             for key, item in value.items():
-                if key in {"username_env", "password_env"} and isinstance(item, str):
+                if key in {
+                    "username_env",
+                    "password_env",
+                    "access_token_env",
+                    "rotation_key_env",
+                } and isinstance(item, str):
                     credential = os.environ.get(item)
                     if credential:
                         self.add_secret(credential)
@@ -525,13 +539,21 @@ class EvidenceSanitizer:
                         "actions",
                         "endpoint_observations",
                         "recovery_counters",
+                        "provider_operations",
                     }
                     else value[:64]
                 )
             ]
         if isinstance(value, str):
-            if key in {"deployment_id", "endpoint_id", "cycle_run_id"}:
-                size = 32 if key == "cycle_run_id" else 64
+            if key in {
+                "deployment_id",
+                "endpoint_id",
+                "cycle_run_id",
+                "operation_id",
+                "resource_id",
+                "configuration_id",
+            }:
+                size = 32 if key in {"cycle_run_id", "operation_id"} else 64
                 return (
                     value
                     if re.fullmatch(r"[0-9a-f]{" + str(size) + r"}", value)

@@ -209,7 +209,9 @@ def status(
     state = watchdog.store.read_state() or watchdog.empty_state()
     daemon_data = _daemon_payload(watchdog.store)
 
-    payload = state.model_dump(mode="json", exclude={"revision", "generation"})
+    payload = state.model_dump(
+        mode="json", exclude={"revision", "generation", "provider_operations"}
+    )
     payload["daemon"] = daemon_data
     remediation = None
     if live:
