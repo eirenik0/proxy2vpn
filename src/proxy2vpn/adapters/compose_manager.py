@@ -252,12 +252,28 @@ class ComposeManager:
         key = f"x-vpn-base-{name}"
         if key not in self.data:
             raise KeyError(f"Profile '{name}' not found")
-        users = [
+        users = {
             service.name for service in self.list_services() if service.profile == name
-        ]
+        }
+        profile = self.data[key]
+        for service_name, service_data in self.data.get("services", {}).items():
+            pending = [service_data]
+            visited: set[int] = set()
+            while pending:
+                merged = pending.pop()
+                if merged is profile:
+                    users.add(service_name)
+                    break
+                if id(merged) in visited:
+                    continue
+                visited.add(id(merged))
+                pending.extend(
+                    entry[1] if isinstance(entry, tuple) else entry
+                    for entry in getattr(merged, "merge", ())
+                )
         if users:
             raise ValueError(
-                f"Profile '{name}' is used by services: {', '.join(users)}. "
+                f"Profile '{name}' is used by services: {', '.join(sorted(users))}. "
                 "Delete or reassign those services first."
             )
         del self.data[key]

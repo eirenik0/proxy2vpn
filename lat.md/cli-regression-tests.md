@@ -40,4 +40,4 @@ Deleting a service after stop has removed its container must succeed even when D
 
 ## Referenced Profile Removal
 
-Removing a profile still referenced by a service must fail without changing compose, even with confirmation bypassed, so lifecycle cleanup cannot leave dangling profile merges.
+Removing a referenced profile must fail without changing compose, even with confirmation bypassed. Usage includes YAML merge anchors when profile labels are missing or stale.

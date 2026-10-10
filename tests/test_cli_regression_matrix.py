@@ -194,11 +194,18 @@ def test_delete_handles_wrapped_docker_errors(monkeypatch, missing):
 
 
 # @lat: [[lat.md/cli-regression-tests#CLI Regression Matrix#Referenced Profile Removal]]
-def test_profile_remove_rejects_referenced_profile(tmp_path):
+@pytest.mark.parametrize("label", ["test", "other", None])
+def test_profile_remove_rejects_referenced_profile(tmp_path, label):
     from pathlib import Path
 
     compose = tmp_path / "compose.yml"
     compose.write_bytes((Path(__file__).parent / "test_compose.yml").read_bytes())
+    text = compose.read_text()
+    text = text.replace(
+        "      vpn.profile: test\n",
+        "" if label is None else f"      vpn.profile: {label}\n",
+    )
+    compose.write_text(text)
     before = compose.read_bytes()
     result = CliRunner().invoke(
         app, ["-f", str(compose), "profile", "remove", "test", "--force"]
