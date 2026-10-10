@@ -47,11 +47,7 @@ class IPRoyalMobileAdapter(ExternalProxyAdapter):
                 ) as response:
                     status = response.status
                     retry = response.headers.get("Retry-After", "")
-                    retry_after = (
-                        min(int(retry), 86400)
-                        if retry.isdecimal() and len(retry) <= 8
-                        else None
-                    )
+                    retry_after = retry_after_seconds(retry)
                     if status in {401, 403}:
                         return ControlResult(
                             request_outcome="rejected", reason_code="auth_rejected"
@@ -87,7 +83,13 @@ class IPRoyalMobileAdapter(ExternalProxyAdapter):
                             request_outcome="unknown", reason_code="malformed_response"
                         )
                     try:
-                        value = json.loads(body)
+                        text = body.decode("utf-8")
+                        if not bounded_json_nesting(text):
+                            return ControlResult(
+                                request_outcome="unknown",
+                                reason_code="malformed_response",
+                            )
+                        value = json.loads(text)
                     except (ValueError, UnicodeDecodeError, RecursionError):
                         return ControlResult(
                             request_outcome="unknown", reason_code="malformed_response"
@@ -118,3 +120,40 @@ def external_adapter(endpoint, probe_timeout=5):
         else ExternalProxyAdapter
     )
     return cls(endpoint, probe_timeout)
+
+
+def retry_after_seconds(value: str) -> int | None:
+    """Clamp arbitrary-length ASCII delta-seconds without large integer parsing."""
+    value = value.strip()
+    if not value or any(character not in "0123456789" for character in value):
+        return None
+    significant = value.lstrip("0") or "0"
+    return 86400 if len(significant) > 5 else min(int(significant), 86400)
+
+
+def bounded_json_nesting(body: bytes | bytearray | str, maximum: int = 64) -> bool:
+    """Bound structure independently of decoder recursion behavior and Python version."""
+    if not isinstance(body, str):
+        try:
+            body = body.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    depth = 0
+    quoted = escaped = False
+    for character in body:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif character == chr(92):
+                escaped = True
+            elif character == chr(34):
+                quoted = False
+        elif character == chr(34):
+            quoted = True
+        elif character in "[{":
+            depth += 1
+            if depth > maximum:
+                return False
+        elif character in "]}":
+            depth -= 1
+    return True

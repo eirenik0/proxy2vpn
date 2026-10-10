@@ -28,7 +28,7 @@ class MobileOperations:
     def __init__(self, store: AgentStateStore):
         self.store = store
 
-    def _snapshot(self, name):
+    def _snapshot(self, name, *, require_control=True):
         path = external_config_path(
             self.store.compose_file, self.store.settings.external_proxies_file
         )
@@ -55,7 +55,7 @@ class MobileOperations:
             except UnicodeEncodeError:
                 raise ProviderOperationError("Proxy credentials are invalid") from None
             credentials = (username, password)
-        if (
+        if require_control and (
             not token
             or not key
             or not valid_rotation_key(key)
@@ -65,8 +65,12 @@ class MobileOperations:
                 "Provider credential references are missing or invalid"
             )
         sanitizer = self.store.sanitizer()
-        resource = sanitizer.metric_identity(
-            "iproyal_mobile\0" + key, domain="provider_resource"
+        resource = (
+            sanitizer.metric_identity(
+                "iproyal_mobile\0" + key, domain="provider_resource"
+            )
+            if key and valid_rotation_key(key)
+            else None
         )
         fingerprint = sanitizer.metric_identity(
             json.dumps(
@@ -108,12 +112,34 @@ class MobileOperations:
             self.store.write_state(state)
             return current.model_copy(deep=True)
 
-    def _result(self, operation, result, cooldown):
+    def _result(self, operation, result, cooldown, *, recover=False):
         now = datetime.now(timezone.utc)
 
         def commit(current, state):
+            nonlocal result, cooldown
             if current.audit_recorded:
                 return
+            if recover:
+                if now < as_utc(current.cooldown_until):
+                    raise ProviderOperationError(
+                        "Pending operation remains inside its uncertainty guard"
+                    )
+                cooldown = max(
+                    360,
+                    int(
+                        (
+                            as_utc(current.cooldown_until) - as_utc(current.started_at)
+                        ).total_seconds()
+                    ),
+                )
+                result = ControlResult(
+                    request_outcome="unknown"
+                    if current.operation_phase == "dispatched"
+                    else "not_dispatched",
+                    reason_code="timeout"
+                    if current.operation_phase == "dispatched"
+                    else "cancelled",
+                )
             current.request_outcome = result.request_outcome
             current.reason_code = result.reason_code
             current.retry_after_seconds = result.retry_after_seconds
@@ -236,7 +262,7 @@ class MobileOperations:
             result = await adapter.request_exit_ip(token, key)
             operation = self._result(operation, result, provider.cooldown_seconds)
             after = await adapter.observe()
-            changed = self._snapshot(name)[4] != fingerprint
+            changed = not self._configuration_matches(name, fingerprint)
 
             def verify(current, state):
                 if changed:
@@ -298,56 +324,48 @@ class MobileOperations:
                 if o.service_name == name
             ]
 
-    async def reconcile(self, name):
-        """Observe only; a lost request is never replayed or inferred successful."""
-        endpoint, token, key, resource, fingerprint, adapter = self._snapshot(name)
+    def _configuration_matches(self, name, fingerprint):
+        try:
+            return self._snapshot(name, require_control=False)[4] == fingerprint
+        except (ValueError, ProviderOperationError):
+            return False
+
+    async def reconcile(self, name, operation_id=None):
+        """Observe only; durable facts do not require obsolete control credentials."""
         with self.store.provider_transaction():
             state = self._state()
-            operation = next(
-                (
-                    o.model_copy(deep=True)
-                    for o in state.provider_operations
-                    if o.resource_id == resource
-                ),
-                None,
-            )
-        if operation is None:
+            matches = [
+                o.model_copy(deep=True)
+                for o in state.provider_operations
+                if o.service_name == name
+                and (operation_id is None or o.operation_id == operation_id)
+            ]
+        if len(matches) != 1:
             raise ProviderOperationError(
-                "No provider operation exists for this resource"
+                "Select one durable operation by name and operation id"
             )
+        operation = matches[0]
+        try:
+            snapshot = self._snapshot(name, require_control=False)
+        except (ValueError, ProviderOperationError):
+            snapshot = None
         if not operation.audit_recorded:
-            if datetime.now(timezone.utc) < as_utc(operation.cooldown_until):
-                raise ProviderOperationError(
-                    "Pending operation remains inside its uncertainty guard"
-                )
-            provider = endpoint.mobile_provider
-            assert provider is not None
-            operation = self._result(
-                operation,
-                ControlResult(
-                    request_outcome="unknown"
-                    if operation.operation_phase == "dispatched"
-                    else "not_dispatched",
-                    reason_code="timeout"
-                    if operation.operation_phase == "dispatched"
-                    else "cancelled",
-                ),
-                provider.cooldown_seconds,
-            )
-        observation = await adapter.observe()
+            operation = self._result(operation, None, 0, recover=True)
+        observation = await snapshot[-1].observe() if snapshot is not None else None
         changed = (
-            self._snapshot(name)[4] != operation.configuration_id
-            or fingerprint != operation.configuration_id
+            snapshot is None
+            or snapshot[4] != operation.configuration_id
+            or not self._configuration_matches(name, operation.configuration_id)
         )
 
         def record(current, state):
             if changed:
                 current.verification_state = "configuration_changed"
                 return
+            assert observation is not None
             current.verification_state = "completed"
             current.authentication = observation.authentication
             current.connectivity = observation.connectivity
-            # Reconciliation has no fresh pre-request baseline. Preserve original
-            # change facts; an observed IP alone cannot attribute a request effect.
+            # No pre-request baseline: preserve original exit-change uncertainty.
 
         return self._patch(operation, record)

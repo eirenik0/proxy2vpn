@@ -419,3 +419,152 @@ def test_capability_never_allows_uncoordinated_execute(mobile):
     ):
         with pytest.raises(UnsupportedEgressOperation, match="manual coordinator"):
             asyncio.run(adapter.execute(operation))
+
+
+# @lat: [[lat.md/mobile-operation-tests#Mobile Operation Tests#Revoked Control Credentials]]
+@pytest.mark.parametrize("removed", ["token", "key", "endpoint", "proxy_credentials"])
+def test_reconcile_audits_without_obsolete_authorization(mobile, monkeypatch, removed):
+    operations, _ = mobile
+    observed = []
+
+    async def observe(self, **kwargs):
+        observed.append(True)
+        return observer()
+
+    async def request(self, token, key):
+        raise SystemExit
+
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.iproyal.IPRoyalMobileAdapter.observe", observe
+    )
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.iproyal.IPRoyalMobileAdapter.request_exit_ip", request
+    )
+    with pytest.raises(SystemExit):
+        asyncio.run(operations.request("mobile"))
+    with operations.store.provider_transaction():
+        state = operations.store.read_state()
+        state.provider_operations[0].cooldown_until = datetime.now(
+            timezone.utc
+        ) - timedelta(seconds=1)
+        operations.store.write_state(state)
+    if removed == "token":
+        monkeypatch.delenv("M_TOKEN")
+    elif removed == "key":
+        monkeypatch.delenv("M_KEY")
+    elif removed == "proxy_credentials":
+        monkeypatch.delenv("M_PASS")
+    else:
+        (operations.store.compose_root / "external-proxies.json").unlink()
+    before = len(observed)
+    result = asyncio.run(operations.reconcile("mobile"))
+    assert result.request_outcome == "unknown"
+    assert result.audit_recorded
+    assert result.verification_state == "configuration_changed"
+    assert result.authentication is None
+    assert len(observed) - before == (1 if removed in {"token", "key"} else 0)
+    assert operations.store.read_state().metrics.recovery_counters[0].metric_count == 1
+
+
+# @lat: [[lat.md/mobile-operation-tests#Mobile Operation Tests#Removed Verification Configuration]]
+@pytest.mark.parametrize("change", ["removed", "invalid"])
+def test_post_request_config_failure_is_recorded(mobile, monkeypatch, change):
+    operations, _ = mobile
+
+    async def observe(self, **kwargs):
+        return observer()
+
+    async def request(self, token, key):
+        path = operations.store.compose_root / "external-proxies.json"
+        if change == "removed":
+            path.unlink()
+        else:
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "endpoints": [
+                            {
+                                "id": "mobile",
+                                "mobile_provider": {"provider": "unsupported"},
+                            }
+                        ],
+                    }
+                )
+            )
+        return ControlResult(request_outcome="acknowledged", reason_code="acknowledged")
+
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.iproyal.IPRoyalMobileAdapter.observe", observe
+    )
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.iproyal.IPRoyalMobileAdapter.request_exit_ip", request
+    )
+    result = asyncio.run(operations.request("mobile"))
+    assert result.request_outcome == result.reason_code == "acknowledged"
+    assert result.verification_state == "configuration_changed"
+    assert result.audit_recorded
+
+
+# @lat: [[lat.md/mobile-operation-tests#Mobile Operation Tests#Reconciliation Claim Race]]
+def test_reconcile_rechecks_dispatch_and_guard_inside_audit(mobile, monkeypatch):
+    operations, _ = mobile
+
+    async def observe(self, **kwargs):
+        raise SystemExit
+
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.iproyal.IPRoyalMobileAdapter.observe", observe
+    )
+    with pytest.raises(SystemExit):
+        asyncio.run(operations.request("mobile"))
+    with operations.store.provider_transaction():
+        state = operations.store.read_state()
+        state.provider_operations[0].cooldown_until = datetime.now(
+            timezone.utc
+        ) - timedelta(seconds=1)
+        operations.store.write_state(state)
+    original = operations._result
+
+    def concurrent_dispatch(*args, **kwargs):
+        with operations.store.provider_transaction():
+            state = operations.store.read_state()
+            state.provider_operations[0].operation_phase = "dispatched"
+            state.provider_operations[0].cooldown_until = datetime.now(
+                timezone.utc
+            ) + timedelta(seconds=1800)
+            operations.store.write_state(state)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(operations, "_result", concurrent_dispatch)
+    with pytest.raises(ProviderOperationError, match="uncertainty guard"):
+        asyncio.run(operations.reconcile("mobile"))
+    state = operations.store.read_state()
+    assert not state.provider_operations[0].audit_recorded
+    assert not state.metrics.recovery_counters
+
+
+# @lat: [[lat.md/mobile-operation-tests#Mobile Operation Tests#Ambiguous Operation Names]]
+def test_reconcile_requires_id_for_ambiguous_name(mobile, monkeypatch):
+    operations, _ = mobile
+
+    async def observe(self, **kwargs):
+        return observer()
+
+    async def request(self, token, key):
+        return ControlResult(request_outcome="acknowledged", reason_code="acknowledged")
+
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.iproyal.IPRoyalMobileAdapter.observe", observe
+    )
+    monkeypatch.setattr(
+        "proxy2vpn.adapters.iproyal.IPRoyalMobileAdapter.request_exit_ip", request
+    )
+    first = asyncio.run(operations.request("mobile"))
+    monkeypatch.setenv("M_KEY", "new-resource-key")
+    asyncio.run(operations.request("mobile"))
+    with pytest.raises(ProviderOperationError, match="operation id"):
+        asyncio.run(operations.reconcile("mobile"))
+    result = asyncio.run(operations.reconcile("mobile", first.operation_id))
+    assert result.operation_id == first.operation_id
+    assert result.verification_state == "configuration_changed"

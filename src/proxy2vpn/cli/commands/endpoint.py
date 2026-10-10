@@ -54,10 +54,14 @@ def provider_status(ctx: typer.Context, name: str):
 
 
 @app.command("reconcile")
-def reconcile(ctx: typer.Context, name: str):
+def reconcile(
+    ctx: typer.Context,
+    name: str,
+    operation_id: str | None = typer.Option(None, "--operation-id"),
+):
     """Probe the configured proxy and retain uncertainty; never replay a request."""
     try:
-        record = asyncio.run(coordinator(ctx).reconcile(name))
+        record = asyncio.run(coordinator(ctx).reconcile(name, operation_id))
     except (ProviderOperationError, StorageError, ValueError):
         typer.echo(
             "Reconciliation could not complete; the provider guard remains in force."

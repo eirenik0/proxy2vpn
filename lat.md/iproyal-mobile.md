@@ -31,3 +31,9 @@ Provider claims live in AgentState independently of monitoring generation; reset
 HTTP acknowledgment, exit-IP change, authentication and connectivity are independent facts, and configuration changes prevent attributing delayed observations.
 
 One credential snapshot supplies baseline, request and post-request observations. Exit comparison requires two fresh valid IPs in the same address family; session replacement remains unknown. Reconciliation has no pre-request baseline and preserves change uncertainty. Request facts are immutable once audited. Configuration fingerprints include resolved credentials; resource claims exclude access-token changes so aliases and token changes cannot bypass cooldown. See [[mobile-operation-tests#Mobile Operation Tests]].
+
+## Reconciliation Authorization
+
+Reconciliation selects an existing unambiguous operation before observing configuration and never requires request-only credentials or creates a provider resource.
+
+Missing or invalid current endpoint configuration can terminally audit retained intent and mark verification changed. Missing proxy credentials prevent probes. Phase and guard classification happen inside the atomic audit transaction. Multiple retained resources with one service name require an operation ID. Malformed inventory JSON remains a fail-closed storage boundary until repaired.

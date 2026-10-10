@@ -70,6 +70,13 @@ def local_transport(monkeypatch, origin, calls):
     monkeypatch.setattr(aiohttp.ClientSession, "post", post)
 
 
+def encoded_nested_payload(encoding):
+    text = json.dumps(['"'])[:-1] + "," + "[" * 65 + "0" + "]" * 65 + "]"
+    payload = text.encode(encoding)
+    assert json.loads(payload)[0] == '"'
+    return payload
+
+
 @pytest.mark.parametrize(
     "status,chunks,outcome,reason",
     [
@@ -78,6 +85,18 @@ def local_transport(monkeypatch, origin, calls):
         (200, [b'{"synthetic":true}', b" " * 65536], "unknown", "malformed_response"),
         (200, [b'{"success":false}'], "unknown", "malformed_response"),
         (200, [b"[" * 2000 + b"0" + b"]" * 2000], "unknown", "malformed_response"),
+        (
+            200,
+            [encoded_nested_payload("utf-16")],
+            "unknown",
+            "malformed_response",
+        ),
+        (
+            200,
+            [encoded_nested_payload("utf-32")],
+            "unknown",
+            "malformed_response",
+        ),
         (401, [], "rejected", "auth_rejected"),
         (403, [], "rejected", "auth_rejected"),
         (404, [], "rejected", "http_rejected"),
@@ -158,3 +177,32 @@ def test_manual_real_adapter_uses_same_authenticated_proxy(
     assert result.connectivity is True
     assert result.session_replaced is None
     assert len(requests) == 1
+
+
+# @lat: [[lat.md/mobile-operation-tests#Mobile Operation Tests#Large Retry Delays]]
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("100000000", 86400),
+        ("9" * 5000, 86400),
+        ("0" * 5000 + "900", 900),
+        ("86401", 86400),
+        ("0", 0),
+        ("invalid", None),
+        ("١", None),
+    ],
+)
+def test_retry_after_clamps_without_unbounded_integer_conversion(value, expected):
+    from proxy2vpn.adapters.iproyal import retry_after_seconds
+
+    assert retry_after_seconds(value) == expected
+
+
+# @lat: [[lat.md/mobile-operation-tests#Mobile Operation Tests#Portable JSON Bound]]
+def test_json_nesting_bound_respects_quoted_and_escaped_delimiters():
+    from proxy2vpn.adapters.iproyal import bounded_json_nesting
+
+    assert bounded_json_nesting(b"[" * 64 + b"0" + b"]" * 64)
+    assert not bounded_json_nesting(b"[" * 65 + b"0" + b"]" * 65)
+    quoted = json.dumps({"brackets": "[{" * 2000 + '"\\' + "]}" * 2000}).encode()
+    assert bounded_json_nesting(quoted)

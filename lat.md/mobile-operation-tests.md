@@ -65,3 +65,27 @@ Reconciliation terminally revokes an expired reservation so a suspended baseline
 ## Durable Dispatch Required
 
 Advertising a manual provider capability never lets the generic execute entry point silently acknowledge or bypass the durable coordinator.
+
+## Revoked Control Credentials
+
+Missing tokens or keys cannot block terminal audit of an expired claim; missing proxy credentials or endpoints prevent probes and preserve unknown attribution.
+
+## Removed Verification Configuration
+
+Endpoint removal or invalid provider schema after HTTP acknowledgment records configuration_changed without rewriting immutable request facts.
+
+## Reconciliation Claim Race
+
+Reconciliation derives phase and deadline from the locked current claim so a concurrent dispatch cannot be misclassified or prematurely audited.
+
+## Ambiguous Operation Names
+
+Several resources can retain one service name after key changes; reconciliation requires an explicit operation ID instead of guessing ownership.
+
+## Large Retry Delays
+
+Arbitrary-length ASCII delta-seconds are safely clamped to the maximum guard, while invalid values are rejected and zero padding preserves numeric meaning.
+
+## Portable JSON Bound
+
+A fixed nesting limit is enforced independently of Python decoder behavior, excluding delimiters inside quoted and escaped strings.
