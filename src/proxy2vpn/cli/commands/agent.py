@@ -521,3 +521,42 @@ def stop(ctx: typer.Context):
     console.print(
         f"[green]✓[/green] Stopped agent daemon for '{compose_file}' (PID {pid})."
     )
+
+
+@app.command("metrics")
+def metrics(
+    ctx: typer.Context,
+    once: bool = typer.Option(
+        False, "--once", help="Print a read-only metrics snapshot."
+    ),
+    bind_address: str = typer.Option(
+        "127.0.0.1", help="Explicit loopback or private IPv4 bind address."
+    ),
+    port: int = typer.Option(9109, min=1, max=65535),
+    freshness_seconds: int = typer.Option(
+        120, min=1, help="Maximum age for successful cycle/probe freshness."
+    ),
+):
+    """Expose persisted watchdog evidence without running probes or recovery."""
+    from proxy2vpn.agent.metrics import collect_metrics, serve_metrics
+
+    compose_file = ctx.obj.get("compose_file", config.COMPOSE_FILE)
+    settings = AgentSettings()
+    if once:
+        typer.echo(
+            collect_metrics(
+                Path(compose_file), settings, freshness_seconds=freshness_seconds
+            ),
+            nl=False,
+        )
+        return
+    try:
+        serve_metrics(
+            Path(compose_file),
+            settings,
+            bind_address=bind_address,
+            port=port,
+            freshness_seconds=freshness_seconds,
+        )
+    except (ValueError, OSError) as exc:
+        abort(str(exc))

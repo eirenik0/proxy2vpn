@@ -30,3 +30,6 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[live-security-tests]]: Pinned live Gluetun authentication, publication and migration release validation.
 
 - [[incident-retention-tests]]: Retention boundaries, preview purity, concurrent compaction and interruption specifications.
+
+- [[metrics]]: Persisted counters, observation freshness and read-only Prometheus collection.
+- [[metrics-tests]]: Counter durability, unknown evidence, collection purity and reset fencing.

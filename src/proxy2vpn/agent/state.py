@@ -238,10 +238,30 @@ class AgentStateStore:
             self.check_generation(state.generation)
             current = self.read_state()
             if current is None or current.revision == state.revision:
-                self.write_state(state)
+                candidate = state.model_copy(deep=True)
+                candidate.metrics.count_recovery(action, candidate.services)
+                self.write_state(candidate)
+                state.metrics = candidate.metrics
+                state.revision = candidate.revision
                 return
+            current.metrics.count_recovery(action, current.services)
             current.actions.append(action)
             current.actions = current.actions[-self.settings.action_history_limit :]
+            self.write_state(current)
+
+    def finish_metric_cycle(self, generation, token, outcome) -> None:
+        """Finalize only this cycle's metrics without overwriting concurrent evidence."""
+        with self.transaction():
+            current = self.read_state()
+            if (
+                current is None
+                or current.generation != generation
+                or current.metrics.cycle_run_id != token
+            ):
+                return
+            current.metrics.count_cycle(outcome)
+            current.metrics.cycle_outcome = outcome
+            current.metrics.cycle_run_id = None
             self.write_state(current)
 
     def reset_monitoring_state(self) -> None:
@@ -274,6 +294,11 @@ class AgentStateStore:
 
             state = AgentState(
                 status=status,
+                metrics=(
+                    previous_state.metrics.clear_monitoring()
+                    if previous_state
+                    else AgentState(status=status).metrics.clear_monitoring()
+                ),
                 generation=(previous_state.generation if previous_state else 0) + 1,
                 revision=(previous_state.revision if previous_state else 0) + 1,
             )

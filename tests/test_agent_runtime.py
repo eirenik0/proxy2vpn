@@ -544,6 +544,7 @@ def test_agent_run_forever_persists_daemon_mode_immediately(
     assert persisted.status.started_at is not None
 
 
+# @lat: [[lat.md/metrics-tests#Metrics Tests#Recovery Cycle Finalization]]
 def test_agent_first_unhealthy_cycle_restarts_tunnel(
     agent_compose_file, monkeypatch, control_client_factory
 ):
@@ -571,6 +572,12 @@ def test_agent_first_unhealthy_cycle_restarts_tunnel(
     monkeypatch.setattr(watchdog, "_evaluate_health", fake_evaluate)
 
     state = asyncio.run(watchdog.run_once())
+    assert state.metrics.cycle_run_id is None
+    assert state.metrics.cycle_outcome == "success"
+    assert state.metrics.last_success_at is not None
+    persisted_metrics = watchdog.store.read_state().metrics
+    assert persisted_metrics == state.metrics
+    assert persisted_metrics.recovery_counters[0].metric_count == 1
 
     assert [action.action for action in state.actions] == ["restart_tunnel"]
     assert state.actions[0].result == "success"

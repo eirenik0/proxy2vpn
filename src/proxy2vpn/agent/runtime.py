@@ -183,7 +183,13 @@ class AgentWatchdog:
             events.info("agent_cycle_started")
             try:
                 with self.store.observation_session(state.generation):
-                    result = await self._run_cycle(state)
+                    self._health_assessor.observation_callback = lambda assessment: (
+                        self._record_metric_observation(state, assessment)
+                    )
+                    try:
+                        result = await self._run_cycle(state)
+                    finally:
+                        self._health_assessor.observation_callback = None
             except Exception as exc:
                 events.exception("agent_cycle_failed", error=str(exc))
                 raise
@@ -208,13 +214,27 @@ class AgentWatchdog:
         state.status.active_cycle_phase = "cleanup"
         state.status.active_cycle_service_name = None
         state.status.last_progress_at = progress_at
+        metrics = state.metrics
+        if metrics.cycle_run_id is not None:
+            metrics.count_cycle("interrupted")
+        metrics.cycle_run_id = uuid4().hex
+        cycle_run_id = metrics.cycle_run_id
+        metrics.initialized_at = metrics.initialized_at or progress_at
+        metrics.deployment_id = self.store.sanitizer().metric_identity(
+            str(self.compose_file), domain="deployment"
+        )
+        metrics.last_attempt_at = progress_at
+        metrics.cycles_attempted += 1
+        metrics.cycle_outcome = "running"
         self.store.write_state(state)
+        outcome = "success"
         updated_snapshots: list[ServiceSnapshot] = list(state.services)
         cycle_error: Exception | None = None
         storage_conflict = False
         try:
             self.store.compact_incidents(now=progress_at)
             manager, services = self._inventory()
+            self._record_metric_inventory(state, services)
             # External-only workspaces require no Docker daemon.
             cleanup = None
             if manager is not None and (
@@ -244,6 +264,12 @@ class AgentWatchdog:
                     service_name=service_name,
                 ),
             )
+            for assessment in assessments.values():
+                self._record_metric_observation(state, assessment)
+            if len(assessments) != len(services) or any(
+                a.health_class == "assessment_failed" for a in assessments.values()
+            ):
+                outcome = "partial"
             snapshots_by_name = {
                 snapshot.service_name: snapshot for snapshot in state.services
             }
@@ -280,17 +306,21 @@ class AgentWatchdog:
                 state.status.last_progress_at = utc_now()
                 self.store.write_state(state)
         except StorageConflict:
+            outcome = "conflict"
             storage_conflict = True
             raise
         except asyncio.CancelledError:
+            outcome = "cancelled"
             state.status.last_error = "Cycle cancelled"
             updated_snapshots = list(state.services)
             raise
         except Exception as exc:
+            outcome = "failed"
             state.status.last_error = str(exc)
             updated_snapshots = list(state.services)
             cycle_error = exc
         finally:
+            metrics = state.metrics
             final_progress_at = utc_now()
             state.status.last_loop_at = final_progress_at
             state.status.last_progress_at = final_progress_at
@@ -304,10 +334,98 @@ class AgentWatchdog:
                 if snapshot.health_score < self.settings.health_threshold
             )
             if not storage_conflict:
-                self.store.write_state(state)
+                metrics.count_cycle(outcome)
+                metrics.cycle_outcome = outcome
+                metrics.cycle_run_id = None
+                if outcome == "success":
+                    metrics.last_success_at = final_progress_at
+                try:
+                    self.store.write_state(state)
+                except StorageConflict:
+                    self.store.finish_metric_cycle(
+                        state.generation, cycle_run_id, "conflict"
+                    )
+                    raise
+            else:
+                self.store.finish_metric_cycle(
+                    state.generation, cycle_run_id, "conflict"
+                )
         if cycle_error is not None:
             raise cycle_error
         return state
+
+    def _record_metric_inventory(self, state, services) -> None:
+        from proxy2vpn.agent.metrics_models import EndpointMetrics
+
+        sanitizer = self.store.sanitizer()
+        old = {item.endpoint_id: item for item in state.metrics.endpoint_observations}
+        observations = []
+        for service in services:
+            source = (
+                "external_proxy"
+                if isinstance(service, ExternalProxyEndpoint)
+                else "gluetun"
+            )
+            identity = sanitizer.metric_identity(
+                source + ":" + service.name, domain="endpoint"
+            )
+            observations.append(
+                old.get(identity)
+                or EndpointMetrics(endpoint_id=identity, source=source)
+            )
+        state.metrics.endpoint_observations = observations
+        self.store.write_state(state)
+
+    def _rename_metric_endpoint(self, state, old_name, new_name) -> None:
+        if old_name == new_name:
+            return
+        from proxy2vpn.agent.metrics_models import EndpointMetrics
+
+        sanitizer = self.store.sanitizer()
+        old_id = sanitizer.metric_identity("gluetun:" + old_name, domain="endpoint")
+        new_id = sanitizer.metric_identity("gluetun:" + new_name, domain="endpoint")
+        if not any(
+            row.endpoint_id == old_id for row in state.metrics.endpoint_observations
+        ):
+            return
+        state.metrics.endpoint_observations = [
+            row
+            for row in state.metrics.endpoint_observations
+            if row.endpoint_id not in {old_id, new_id}
+        ]
+        state.metrics.endpoint_observations.append(
+            EndpointMetrics(endpoint_id=new_id, source="gluetun")
+        )
+
+    def _record_metric_observation(self, state, assessment) -> None:
+        identity = self.store.sanitizer().metric_identity(
+            assessment.source + ":" + assessment.service_name, domain="endpoint"
+        )
+        row = next(
+            (
+                item
+                for item in state.metrics.endpoint_observations
+                if item.endpoint_id == identity
+            ),
+            None,
+        )
+        if row is None or row.last_attempt_at == assessment.assessed_at:
+            return
+        row.last_attempt_at = assessment.assessed_at
+        row.observation_complete = assessment.health_class != "assessment_failed"
+        if row.observation_complete:
+            row.observed_at = assessment.assessed_at
+            row.available = assessment.available
+            row.authentication = assessment.authentication
+            row.connectivity = assessment.connectivity
+            row.health_ok = assessment.health_score >= self.settings.health_threshold
+            row.duration_seconds = assessment.duration_seconds
+            row.reported_latency_seconds = (
+                assessment.latency_ms / 1000
+                if assessment.latency_ms is not None
+                else None
+            )
+        self.store.write_state(state)
 
     def _persist_cycle_progress(
         self,
@@ -353,6 +471,9 @@ class AgentWatchdog:
         self._inflight_service_names[requested_service_name] = current_live_service_name
         if previous_live_name == current_live_service_name:
             return
+        self._rename_metric_endpoint(
+            state, previous_live_name, current_live_service_name
+        )
         for snapshot in state.services:
             if snapshot.service_name not in {
                 requested_service_name,
@@ -1364,6 +1485,7 @@ class AgentWatchdog:
     ) -> None:
         state.actions.append(
             ActionRecord(
+                source="gluetun" if action != "investigate" else "unknown",
                 ts=utc_now(),
                 service_name=service_name,
                 action=action,
@@ -1390,6 +1512,9 @@ class AgentWatchdog:
         previous_service_name: str,
         snapshot: ServiceSnapshot,
     ) -> None:
+        self._rename_metric_endpoint(
+            state, previous_service_name, snapshot.service_name
+        )
         merged: list[ServiceSnapshot] = []
         replaced = False
         for existing_snapshot in state.services:
@@ -1415,6 +1540,8 @@ class AgentWatchdog:
         last_action_result: str,
         new_service_name: str | None = None,
     ) -> None:
+        if new_service_name:
+            self._rename_metric_endpoint(state, service_name, new_service_name)
         for snapshot in state.services:
             if snapshot.service_name not in {service_name, new_service_name}:
                 continue

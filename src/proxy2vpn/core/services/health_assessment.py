@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from inspect import isawaitable
+from time import monotonic
+from proxy2vpn.core.private_storage import StorageError
 from typing import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -58,6 +60,7 @@ class HealthAssessment(BaseModel):
     authentication: bool | None = None
     connectivity: bool | None = None
     latency_ms: float | None = None
+    duration_seconds: float | None = None
     current_egress_ip: str | None = None
     direct_ip: str | None = None
     peer_evidence: PeerEvidence = Field(default_factory=PeerEvidence)
@@ -92,6 +95,7 @@ class HealthAssessmentService:
         control_api_retry_attempts: int = 0,
         runtime: GluetunRuntimeInterface | None = None,
     ) -> None:
+        self.observation_callback: Callable[[HealthAssessment], None] | None = None
         self.threshold = threshold
         self.probe_timeout = probe_timeout
         self.control_api_timeout = control_api_timeout
@@ -118,12 +122,17 @@ class HealthAssessmentService:
 
         with logging_context(service_name=service.name, provider=service.provider):
             logger.debug("health_assessment_started")
+            probe_started = monotonic()
             assessment = await self._assess_service(
                 service,
                 peer_assessments=peer_assessments,
                 lines=lines,
                 timeout=timeout,
             )
+            assessment.assessed_at = datetime.now(timezone.utc)
+            assessment.duration_seconds = monotonic() - probe_started
+            if self.observation_callback is not None:
+                self.observation_callback(assessment)
             logger.info(
                 "health_assessment_completed",
                 health_class=assessment.health_class,
@@ -212,6 +221,8 @@ class HealthAssessmentService:
                         timeout=timeout,
                     )
                     return service, assessment, None
+                except StorageError:
+                    raise
                 except Exception as exc:
                     logger.exception("health_assessment_failed", error=str(exc))
                     return service, None, exc
@@ -244,6 +255,9 @@ class HealthAssessmentService:
                         if isinstance(service, VPNService)
                         else EgressCapabilities(),
                     )
+
+                    if self.observation_callback is not None:
+                        self.observation_callback(assessments[service.name])
 
                 if progress_callback is not None:
                     callback_result = progress_callback(service.name)

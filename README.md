@@ -642,3 +642,57 @@ proxy2vpn --compose-file /path/to/compose.yml agent compact-incidents --retentio
 ```
 
 Preview reports counts without changing evidence, permissions or directory contents, and never creates identity keys or locks. It is an estimate from an atomic snapshot; concurrent writers can change the eventual applying result. A pending storage recovery journal must be recovered by a normal storage operation before preview can proceed. Applying compaction re-plans under the shared evidence lock, preserves latest source identities, timestamps, revisions and evidence, sanitizes retained legacy records, and atomically replaces history without changing state. Persisted legacy revision-zero records are migrated once to revision one before writer access so stale copies cannot recreate pruned incidents; preview does not perform that migration. Interruption leaves a valid old or new file, and retries are idempotent. Old binaries must be stopped because they do not honor this protocol. Retain any required historical audit exports privately before compaction; exported files and existing backups are outside automatic redaction and retention.
+
+### Watchdog metrics
+
+Run `proxy2vpn --compose-file compose.yml agent metrics` beside the watchdog to
+serve Prometheus text metrics at `http://127.0.0.1:9109/metrics`. Use `--once` to
+print a read-only snapshot, `--port` to change the port, and `--freshness-seconds`
+to set the freshness deadline (default 120 seconds; choose a value longer than
+your watchdog interval plus expected cycle duration).
+
+The exporter reads persisted evidence and never runs probes, recovery, permission
+repairs or storage migration. `proxy2vpn_exporter_collection_success` reports
+collection failure; `proxy2vpn_state_present` and `proxy2vpn_metrics_initialized`
+distinguish missing and legacy state. Prometheus `up` detects exporter failure.
+`proxy2vpn_cycle_success_fresh` detects a stalled or dead watchdog after the
+freshness deadline. In-progress, failed and partial cycles are not fresh.
+Endpoint metrics expose last completed observations, their timestamps, freshness
+and known flags; missing authentication/connectivity values remain unknown.
+
+Recovery outcome counters count committed request/audit outcomes, independently
+of bounded action history and later health rechecks. Monitoring resets preserve
+cumulative counters and clear observation freshness. Deleting/replacing state
+starts new counters; replacing the private identity key changes series identities.
+Labels use opaque HMAC deployment/endpoint identities and fixed vocabularies;
+service names, credentials, endpoint URLs and exit IPs are never labels. Renamed
+endpoints start unknown until observed. Collection rejects more than 1000 endpoints.
+
+`--bind-address` can opt into an explicit private IPv4 address. Restrict access
+with a firewall and an authenticated TLS reverse proxy for remote scraping.
+The default loopback bind requires no external network exposure. Configure
+Prometheus to scrape `/metrics` independently of the watchdog process. Metric
+names and text format follow [Prometheus naming guidance](https://prometheus.io/docs/practices/naming/)
+and [the exposition specification](https://prometheus.io/docs/instrumenting/exposition_formats/).
+
+The principal metric families are:
+
+- `proxy2vpn_cycle_attempts_total`, `proxy2vpn_cycle_outcomes_total{outcome}` and
+  `proxy2vpn_monitoring_resets_total`: durable counters.
+- `proxy2vpn_cycle_last_attempt_timestamp_seconds` and
+  `proxy2vpn_cycle_last_success_timestamp_seconds`: UTC Unix timestamps.
+- `proxy2vpn_cycle_in_progress` and `proxy2vpn_cycle_success_fresh`: boolean gauges.
+- `proxy2vpn_endpoint_observation_known`, `_complete`, `_fresh` and
+  `_timestamp_seconds`: observation presence, completion, freshness and UTC time.
+- `proxy2vpn_endpoint_available`, `_authentication`, `_connectivity`, `_health_ok`:
+  last observed boolean values; each has a corresponding `_known` gauge.
+- `proxy2vpn_endpoint_duration_seconds`: wall duration of a completed assessment;
+  `proxy2vpn_endpoint_reported_latency_seconds`: optional adapter-reported latency.
+- `proxy2vpn_open_incidents{source}`: current open incident count.
+- `proxy2vpn_recovery_action_outcomes_total{source,action,result}`: committed audit
+  outcome counters, using the original runtime request result when available.
+
+All initialized producer metrics include the opaque `deployment` label; endpoint
+families additionally include `endpoint` and `source`. One-shot/watchdog process
+restarts preserve counters. An unfinished prior cycle is classified interrupted
+when monitoring next starts; scrapes leave it in progress and stale.
