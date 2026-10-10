@@ -13,3 +13,7 @@ Each alert links to an existing runbook, uses a nonzero hold and bounded labels;
 ## Current Recovery Intervention
 
 Blocked recovery gauges count current open/approved incidents, clear after resolution and never infer numerical exhaustion from lifetime request counts.
+
+## Fresh Checkout Demo
+
+A fresh checkout must include the documented five-service Compose setup with isolated demo evidence, a read-only exporter mount, login-enabled Grafana and loopback-published ports.

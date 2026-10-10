@@ -46,3 +46,23 @@ def test_alert_runbooks_and_dashboard_queries_match_documented_contract():
         "recovery_action_outcomes_total",
     ):
         assert required in expressions
+
+
+# @lat: [[lat.md/monitoring-tests#Monitoring Tests#Fresh Checkout Demo]]
+def test_documented_compose_is_present_and_isolates_demo_evidence():
+    compose = YAML(typ="safe").load((ROOT / "monitoring/compose.yml").read_text())
+    services = compose["services"]
+    assert set(services) == {
+        "producer",
+        "exporter",
+        "prometheus",
+        "alertmanager",
+        "grafana",
+    }
+    assert services["producer"]["volumes"] == ["demo-evidence:/evidence"]
+    assert services["exporter"]["volumes"] == ["demo-evidence:/evidence:ro"]
+    assert "ports" not in services["exporter"]
+    for service in services.values():
+        assert all(port.startswith("127.0.0.1:") for port in service.get("ports", []))
+        assert all("docker.sock" not in mount for mount in service.get("volumes", []))
+    assert services["grafana"]["environment"]["GF_AUTH_ANONYMOUS_ENABLED"] == "false"

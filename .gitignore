@@ -10,6 +10,7 @@ cache/
 dist/
 .envrc
 compose.yml
+!/monitoring/compose.yml
 compose.yml.bak
 control-server-auth.toml
 control-server-auth.toml.bak
