@@ -35,3 +35,5 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[metrics-tests]]: Counter durability, unknown evidence, collection purity and reset fencing.
 - [[monitoring]]: Dashboards, held alert evidence, isolated monitoring deployment and runbooks.
 - [[monitoring-tests]]: Operator contract and current blocked-recovery gauge specifications.
+- [[iproyal-mobile]]: First dedicated-mobile provider discovery, uncertainty and scoped dispatch/storage design.
+- [[iproyal-discovery-tests]]: Reproducible local control/CONNECT contract discovery.

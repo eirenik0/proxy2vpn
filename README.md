@@ -702,3 +702,8 @@ dashboard, tested Prometheus alerts and Alertmanager grouping. See the
 [operator runbooks](monitoring/RUNBOOK.md) for missing evidence, stale watchdogs,
 sustained endpoint failures and blocked recovery. The demo uses isolated synthetic
 state; it does not mount or operate an existing VPN installation.
+
+The [IPRoyal dedicated-mobile discovery contract](docs/providers/iproyal-mobile.md)
+records the first vendor scope, verified official documentation, unknowns and a
+local sandbox. It proposes one manual IP-change request with independent
+verification; it does not enable vendor operations or provision paid resources.
