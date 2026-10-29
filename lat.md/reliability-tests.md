@@ -34,6 +34,10 @@ Scale-up with repeated cities reserves distinct names and proxy/control ports fo
 
 When a generated name collides with an existing definition, rejected scale-up preserves that definition and its bindings instead of deleting it as failed-attempt cleanup.
 
+## Scale Partial Commit Failure
+
+If the first add in a scale-up batch fails during atomic replacement, a later successful add persists only its own started definition and retains only its port reservations.
+
 ## Plan Shared Host Ports
 
 Deployment plans avoid existing bindings and reserve proxy and control ports in one host namespace, including overlapping requested ranges and unmanaged Compose mappings.

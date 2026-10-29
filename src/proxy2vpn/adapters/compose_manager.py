@@ -181,7 +181,12 @@ class ComposeManager:
         if service.name in services:
             raise ValueError(f"Service '{service.name}' already exists")
         services[service.name] = self._merged_service_config(service)
-        self.save()
+        try:
+            self.save()
+        except BaseException:
+            # A failed add must not be committed by a subsequent batch save.
+            del services[service.name]
+            raise
 
     def remove_service(self, name: str) -> None:
         services = self.data.get("services", {})
