@@ -1,0 +1,4 @@
+interface:
+  display_name: "Proxy2VPN Watchdog"
+  short_description: "Change recovery, incidents, and agent persistence"
+  default_prompt: "Use $proxy2vpn-watchdog to fix this recovery behavior."

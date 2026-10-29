@@ -1,0 +1,397 @@
+{
+  "version": 1,
+  "title": "Feature map",
+  "summary": "Proxy2VPN manages Compose-backed Gluetun VPN fleets and configured external proxies, with shared health evidence, bounded recovery, incident workflows, and operator monitoring.",
+  "scope": "The map describes implemented behavior in this checkout. Source links identify owners; coverage links identify existing regression specifications or test files. They do not imply live-provider acceptance or complete coverage.",
+  "relationships": {
+    "summary": "Profiles and server locations feed managed fleet deployment. Managed and external endpoints share health and incident workflows, while their available repair operations remain distinct.",
+    "nodes": [
+      {
+        "id": "Workspace",
+        "label": "Workspace and profiles"
+      },
+      {
+        "id": "Fleet",
+        "label": "Fleet planning and deployment"
+      },
+      {
+        "id": "Catalog",
+        "label": "Provider and location catalog"
+      },
+      {
+        "id": "Gluetun",
+        "label": "Gluetun VPN services"
+      },
+      {
+        "id": "External",
+        "label": "Configured external proxies"
+      },
+      {
+        "id": "Health",
+        "label": "Shared health assessment"
+      },
+      {
+        "id": "Watchdog",
+        "label": "Watchdog recovery policy"
+      },
+      {
+        "id": "Runtime",
+        "label": "Gluetun restart, restore, rotation"
+      },
+      {
+        "id": "Incidents",
+        "label": "Incidents and investigations"
+      },
+      {
+        "id": "Manual",
+        "label": "Explicit mobile request"
+      },
+      {
+        "id": "Mobile",
+        "label": "IPRoyal mobile operation"
+      },
+      {
+        "id": "Evidence",
+        "label": "Private operation and audit storage"
+      },
+      {
+        "id": "Metrics",
+        "label": "Read-only metrics exporter"
+      },
+      {
+        "id": "Monitoring",
+        "label": "Prometheus alerts and Grafana"
+      }
+    ],
+    "edges": [
+      {
+        "from": "Workspace",
+        "to": "Fleet"
+      },
+      {
+        "from": "Catalog",
+        "to": "Fleet"
+      },
+      {
+        "from": "Fleet",
+        "to": "Gluetun"
+      },
+      {
+        "from": "External",
+        "to": "Health"
+      },
+      {
+        "from": "Gluetun",
+        "to": "Health"
+      },
+      {
+        "from": "Health",
+        "to": "Watchdog"
+      },
+      {
+        "from": "Watchdog",
+        "to": "Runtime"
+      },
+      {
+        "from": "Runtime",
+        "to": "Gluetun"
+      },
+      {
+        "from": "Watchdog",
+        "to": "Incidents"
+      },
+      {
+        "from": "Manual",
+        "to": "Mobile"
+      },
+      {
+        "from": "Mobile",
+        "to": "External"
+      },
+      {
+        "from": "Mobile",
+        "to": "Evidence"
+      },
+      {
+        "from": "Incidents",
+        "to": "Evidence"
+      },
+      {
+        "from": "Watchdog",
+        "to": "Evidence"
+      },
+      {
+        "from": "Evidence",
+        "to": "Metrics"
+      },
+      {
+        "from": "Metrics",
+        "to": "Monitoring"
+      }
+    ],
+    "notes": "The external-proxy branch contributes observations and investigation incidents. Automatic repair remains gated by capabilities. An explicit mobile request follows its own durable guard and verification workflow."
+  },
+  "features": [
+    {
+      "id": "workspace-and-profiles",
+      "title": "Workspace and profiles",
+      "summary": "Operators initialize one compose root, register reusable VPN account profiles, and validate configuration before defining services or planning a fleet.",
+      "details": [
+        "`system init` bootstraps Compose and control-auth files, optionally refreshing the server catalog. `profile create` writes an interactive environment file; `profile add` registers an existing one. Listing, removal, and deletion manage those reusable definitions.",
+        "[[src/proxy2vpn/adapters/compose_manager.py#ComposeManager]] owns desired definitions and atomic saves. [[src/proxy2vpn/core/models.py#Profile]] owns profile values and validation. Support paths resolve from the selected Compose root; referenced profiles cannot be removed. See [[architecture#Compose Root Model]] and [[architecture#Profile And Service Models]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/adapters/compose_manager.py#ComposeManager",
+        "src/proxy2vpn/core/models.py#Profile"
+      ],
+      "tests": [
+        "tests/test_init_command.py",
+        "tests/test_profile_apply.py",
+        "tests/test_profile_remove_delete.py"
+      ],
+      "test_specs": [
+        "cli-regression-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "provider-and-location-catalog",
+      "title": "Provider and location catalog",
+      "summary": "Operators refresh and inspect provider, country, and city availability, then validate requested locations against the cached server catalog.",
+      "details": [
+        "The `servers` group exposes update, provider/country/city listing, and location validation. [[src/proxy2vpn/adapters/server_manager.py#ServerManager]] assembles provider data from Gluetun's manifest and sibling JSON files. Profile validation and fleet planning consume this catalog; listing a location does not establish live connectivity.",
+        "See [[architecture#Server Catalog]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/adapters/server_manager.py#ServerManager"
+      ],
+      "tests": [
+        "tests/test_server_manager.py",
+        "tests/test_profile_create_provider_validation.py",
+        "tests/test_cli_location_validation.py"
+      ],
+      "test_specs": [],
+      "coverage_note": ""
+    },
+    {
+      "id": "vpn-service-lifecycle-and-proxy-access",
+      "title": "VPN service lifecycle and proxy access",
+      "summary": "Operators define, start, stop, restart, update, restore, and delete Gluetun services, then test or export their proxy endpoints.",
+      "details": [
+        "`vpn add` creates a service definition. Container lifecycle commands operate on selected services or supported bulk selections; `vpn update` recreates services. `vpn list`, `vpn logs`, `vpn test`, and `vpn export-proxies` expose current service or proxy information.",
+        "[[src/proxy2vpn/core/models.py#VPNService]] projects profile overrides and location metadata into Compose. [[src/proxy2vpn/cli/commands/vpn.py#start]] and [[src/proxy2vpn/cli/commands/vpn.py#restore]] call Docker helpers with compose-root ownership. Bulk restart/restoration attempt all selected services and fail the command if any operation fails. See [[architecture#CLI Surface]] and [[security#Deployment Security]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/core/models.py#VPNService",
+        "src/proxy2vpn/cli/commands/vpn.py#start",
+        "src/proxy2vpn/cli/commands/vpn.py#restore"
+      ],
+      "tests": [
+        "tests/test_docker_ops.py",
+        "tests/test_vpn_restart_recreate.py",
+        "tests/test_cli_export_proxies.py"
+      ],
+      "test_specs": [
+        "cli-regression-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "runtime-controls-and-diagnosis",
+      "title": "Runtime controls and diagnosis",
+      "summary": "Operators inspect tunnel, DNS, updater, public-IP, and forwarded-port status, restart a tunnel, and diagnose container or network failures.",
+      "details": [
+        "The VPN control commands use [[src/proxy2vpn/adapters/http_client.py#GluetunControlClient]]. `system diagnose` combines Docker/network evidence with [[src/proxy2vpn/core/services/diagnostics.py#DiagnosticAnalyzer]]. The watchdog uses [[src/proxy2vpn/adapters/gluetun_runtime.py#GluetunRuntime]] as its injected runtime boundary.",
+        "Runtime request success does not prove recovered health. Compose mutation and fleet rotation remain outside the runtime adapter. See [[gluetun-runtime]] and [[health#Diagnostic Signals]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/adapters/http_client.py#GluetunControlClient",
+        "src/proxy2vpn/core/services/diagnostics.py#DiagnosticAnalyzer",
+        "src/proxy2vpn/adapters/gluetun_runtime.py#GluetunRuntime"
+      ],
+      "tests": [
+        "tests/test_cli_control.py",
+        "tests/test_gluetun_control_client.py",
+        "tests/test_diagnostics.py"
+      ],
+      "test_specs": [
+        "gluetun-runtime-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "fleet-planning-deployment-and-rotation",
+      "title": "Fleet planning, deployment, and rotation",
+      "summary": "Operators allocate profile capacity across locations, deploy plans, inspect allocation and health, scale capacity, and rotate managed VPN locations.",
+      "details": [
+        "The `fleet` group routes to [[src/proxy2vpn/adapters/fleet_manager.py#FleetManager]], [[src/proxy2vpn/adapters/profile_allocator.py#ProfileAllocator]], and [[src/proxy2vpn/adapters/server_monitor.py#ServerMonitor]]. Planning accounts for occupied names and ports; deployment is additive by default, with explicit forced recreation available.",
+        "Rotation persists the changed service definition, recreates its container, and verifies health. Requested and final names may differ after city-based renaming. Structured fleet status also includes configured external endpoints; deployment and rotation retain Compose-service ownership. See [[fleet]] and [[egress#Watchdog And Fleet Workflows]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/adapters/fleet_manager.py#FleetManager",
+        "src/proxy2vpn/adapters/profile_allocator.py#ProfileAllocator",
+        "src/proxy2vpn/adapters/server_monitor.py#ServerMonitor"
+      ],
+      "tests": [
+        "tests/test_fleet_manager.py",
+        "tests/test_fleet_allocation_table.py",
+        "tests/test_fleet_state_manager.py",
+        "tests/test_server_monitor.py"
+      ],
+      "test_specs": [
+        "cli-regression-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "shared-health-and-external-proxy-observation",
+      "title": "Shared health and external proxy observation",
+      "summary": "Managed Gluetun services and configured HTTP CONNECT endpoints expose normalized availability, authentication, connectivity, latency, and exit-IP evidence.",
+      "details": [
+        "[[src/proxy2vpn/core/services/health_assessment.py#HealthAssessmentService]] selects the source adapter and adds same-profile peer evidence for managed VPNs. [[src/proxy2vpn/adapters/external_proxy.py#ExternalProxyAdapter]] probes HTTPS destinations through the configured proxy and verifies TLS without a direct-host fallback.",
+        "External endpoints come from a separate compose-relative JSON configuration, with environment-variable credential references. External-only workspaces need no synthetic Compose services or Docker cleanup. Unknown observations remain unknown; sharing the host's exit IP alone does not make an external proxy unhealthy. See [[health#Health Assessment]] and [[egress]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/core/services/health_assessment.py#HealthAssessmentService",
+        "src/proxy2vpn/adapters/external_proxy.py#ExternalProxyAdapter"
+      ],
+      "tests": [
+        "tests/test_health_assessment.py",
+        "tests/test_external_proxy.py"
+      ],
+      "test_specs": [
+        "egress-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "watchdog-and-bounded-recovery",
+      "title": "Watchdog and bounded recovery",
+      "summary": "The watchdog repeatedly assesses configured endpoints and selects bounded restart, restoration, rotation, waiting, or investigation outcomes from current evidence and history.",
+      "details": [
+        "`agent run` supports one-shot and daemon operation; `agent status` and `agent stop` expose process control. [[src/proxy2vpn/agent/recovery_policy.py#RecoveryPolicy]] owns pure decisions. [[src/proxy2vpn/agent/runtime.py#AgentWatchdog]] owns effects, delayed rechecks, progress, and persistence.",
+        "Cooldowns, degradation timing, profile/provider scope breakers, and endpoint capabilities constrain automatic repair. External endpoints remain investigation-only under the watchdog. Cancellation preserves action evidence; a completed restart request still needs a health observation. See [[agent#Watchdog Cycle]] and [[recovery-policy]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/agent/recovery_policy.py#RecoveryPolicy",
+        "src/proxy2vpn/agent/runtime.py#AgentWatchdog"
+      ],
+      "tests": [
+        "tests/test_agent_runtime.py",
+        "tests/test_agent_cli.py"
+      ],
+      "test_specs": [
+        "recovery-policy-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "incidents-and-assisted-investigation",
+      "title": "Incidents and assisted investigation",
+      "summary": "Operators list, investigate, dismiss, and approve incidents while retaining evidence of actual recovery requests and their observed outcomes.",
+      "details": [
+        "The `agent incidents`, `investigate`, `dismiss`, and `approve` commands use [[src/proxy2vpn/agent/runtime.py#AgentWatchdog]]. Investigations build source-specific evidence and a fallback plan; configured OpenAI enrichment and investigation can supply structured explanations through [[src/proxy2vpn/agent/llm.py#InvestigationPlan]].",
+        "Approval claims current incident state before network work and preserves newer concurrent dismissals or resolutions. Persisted endpoint source prevents a reused service name from inheriting unrelated history or repair permissions. See [[agent]], [[egress#Watchdog And Fleet Workflows]], and [[agent#Storage Transactions]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/agent/runtime.py#AgentWatchdog",
+        "src/proxy2vpn/agent/llm.py#InvestigationPlan"
+      ],
+      "tests": [
+        "tests/test_agent_llm.py",
+        "tests/test_agent_cli.py"
+      ],
+      "test_specs": [
+        "agent-evidence-tests",
+        "agent-storage-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "manual-mobile-exit-ip-requests",
+      "title": "Manual mobile exit-IP requests",
+      "summary": "Explicitly configured IPRoyal dedicated-mobile endpoints support a manual disruptive exit-IP request, durable request status, and probe-only reconciliation.",
+      "details": [
+        "`endpoint request-exit-ip` requires `--confirm-disruption`. [[src/proxy2vpn/agent/provider.py#MobileOperations]] reserves a durable resource claim before [[src/proxy2vpn/adapters/iproyal.py#IPRoyalMobileAdapter]] contacts the fixed provider origin. `endpoint provider-status` reads stored facts; `endpoint reconcile` probes without replaying the request.",
+        "HTTP acknowledgment, connectivity, authentication, and changed exit IP remain independent outcomes. Guards survive monitoring reset and uncertain requests. This workflow does not provision paid resources, renew subscriptions, or add automatic external recovery. See [[iproyal-mobile]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/agent/provider.py#MobileOperations",
+        "src/proxy2vpn/adapters/iproyal.py#IPRoyalMobileAdapter"
+      ],
+      "tests": [
+        "tests/test_iproyal_adapter.py"
+      ],
+      "test_specs": [
+        "iproyal-discovery-tests",
+        "mobile-operation-tests"
+      ],
+      "coverage_note": "Local sandbox checks do not establish live carrier behavior."
+    },
+    {
+      "id": "private-storage-evidence-and-retention",
+      "title": "Private storage, evidence, and retention",
+      "summary": "Agent state, incidents, provider guards, and action evidence persist privately while concurrent writers, monitoring resets, and interrupted writes preserve their contracts.",
+      "details": [
+        "[[src/proxy2vpn/agent/state.py#AgentStateStore]] owns revision checks, transactions, approval claims, and reset fences. [[src/proxy2vpn/agent/evidence.py#EvidenceSanitizer]] sanitizes persisted and LLM-bound evidence. `agent compact-incidents` previews or applies bounded incident-history retention.",
+        "Network work runs outside evidence transactions. Provider guards persist independently of monitoring generation. Existing exports and backups remain outside automatic retention and redaction. See [[agent#Storage Transactions]], [[agent#Evidence Secrecy Contract]], and [[iproyal-mobile#IPRoyal Mobile Contract#Durable Uncertainty]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/agent/state.py#AgentStateStore",
+        "src/proxy2vpn/agent/evidence.py#EvidenceSanitizer"
+      ],
+      "tests": [],
+      "test_specs": [
+        "agent-storage-tests",
+        "agent-evidence-tests",
+        "incident-retention-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "metrics-dashboards-and-operational-logs",
+      "title": "Metrics, dashboards, and operational logs",
+      "summary": "Operators observe persisted cycle and endpoint evidence through a read-only Prometheus exporter, provisioned alerts and dashboards, and structured operational logs.",
+      "details": [
+        "`agent metrics` serves metrics or prints one snapshot. [[src/proxy2vpn/agent/metrics.py#collect_metrics]] reads stored evidence without probes, repairs, migration, or recovery. Freshness and known flags distinguish successful recent observations from missing, unknown, or stale evidence. Labels use opaque identities rather than service names or secrets.",
+        "The `monitoring/` example supplies Grafana, Prometheus, Alertmanager, and runbooks using isolated synthetic state. Global `--log-file` writes structured logs while machine-readable command results remain separate. See [[metrics]], [[monitoring]], and [[logging]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/agent/metrics.py#collect_metrics"
+      ],
+      "tests": [],
+      "test_specs": [
+        "metrics-tests",
+        "monitoring-tests",
+        "logging-tests"
+      ],
+      "coverage_note": ""
+    },
+    {
+      "id": "deployment-security-and-migration",
+      "title": "Deployment security and migration",
+      "summary": "New services use localhost proxy publication and separate monitor/operator control credentials, while existing deployments migrate through explicit backed-up file changes.",
+      "details": [
+        "[[src/proxy2vpn/core/security.py#ensure_control_auth]] prepares private control files beside Compose. `system secure` changes selected proxy bindings and optionally replaces custom authentication. Live containers require a later recreation to apply prepared files; initialization preserves existing credentials.",
+        "Control requests disable redirects and select role-specific credentials. Existing publication addresses survive ordinary load/save operations. See [[security]]."
+      ],
+      "source_refs": [
+        "src/proxy2vpn/core/security.py#ensure_control_auth"
+      ],
+      "tests": [],
+      "test_specs": [
+        "security-tests",
+        "live-security-tests"
+      ],
+      "coverage_note": "Real Docker release acceptance is opt-in and distinct from ordinary isolated tests."
+    }
+  ],
+  "maintenance": {
+    "summary": "JSON stores feature descriptions, source and test references, and relationships; Markdown is a generated view of that data.",
+    "details": [
+      "Edit [docs/feature-map.json](../docs/feature-map.json), then run `python3 scripts/render_feature_map.py`. Run `python3 scripts/render_feature_map.py --check` to detect a stale Markdown view.",
+      "See [the command inventory](../docs/feature-commands.md) for every registered command and its source entry point. Regenerate it with `python3 scripts/build_feature_inventory.py`; its `--check` mode detects command drift.",
+      "Update the affected JSON feature when behavior or ownership changes. [[development-skills]] describes the project skills used for design, watchdog changes, and verification; [[architecture#Development Verification]] describes the locked tool contracts."
+    ]
+  }
+}

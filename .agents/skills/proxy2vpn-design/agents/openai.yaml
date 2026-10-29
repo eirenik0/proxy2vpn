@@ -1,0 +1,4 @@
+interface:
+  display_name: "Proxy2VPN Design"
+  short_description: "Design compose, endpoint, and state ownership"
+  default_prompt: "Use $proxy2vpn-design to design this project change."
