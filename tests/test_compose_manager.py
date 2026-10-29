@@ -312,3 +312,40 @@ def test_fleet_operation_reloads_compose_after_another_writer(tmp_path):
     assert {"external", "next"} <= {
         p.name for p in ComposeManager(path).list_profiles()
     }
+
+
+# @lat: [[reliability-tests#Reliability Tests#Compose Snapshot Bytes]]
+@pytest.mark.parametrize("edit_at", ["load", "save"])
+def test_compose_fingerprint_tracks_exact_parsed_or_written_bytes(
+    tmp_path, monkeypatch, edit_at
+):
+    from proxy2vpn.adapters import compose_manager
+    from proxy2vpn.adapters.compose_manager import ComposeConflict
+
+    path = _copy_compose(tmp_path)
+    external = path.read_text() + "\n# newer external edit\n"
+    if edit_at == "load":
+        validate = compose_manager.validate_compose
+
+        def validate_after_edit(*args, **kwargs):
+            path.write_text(external)
+            return validate(*args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(compose_manager, "validate_compose", validate_after_edit)
+            manager = ComposeManager(path)
+    else:
+        manager = ComposeManager(path)
+        replace = compose_manager.os.replace
+
+        def replace_then_edit(*args):
+            replace(*args)
+            path.write_text(external)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(compose_manager.os, "replace", replace_then_edit)
+            manager.save()
+
+    with pytest.raises(ComposeConflict):
+        manager.save()
+    assert path.read_text() == external

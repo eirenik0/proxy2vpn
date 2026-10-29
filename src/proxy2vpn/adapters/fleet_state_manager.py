@@ -1965,9 +1965,11 @@ class FleetStateManager:
                 await asyncio.to_thread(ensure_network, False)
 
                 for service in new_services:
+                    definition_added = False
                     try:
                         # Add to compose
                         self.compose_manager.add_service(service)
+                        definition_added = True
 
                         # Start container
                         await asyncio.to_thread(
@@ -1986,11 +1988,12 @@ class FleetStateManager:
                         errors.append(f"Failed to create {service.name}: {e}")
                         logger.error(f"Failed to create service {service.name}: {e}")
 
-                        # Remove from compose if it was added
-                        try:
-                            self.compose_manager.remove_service(service.name)
-                        except Exception:
-                            pass
+                        # Roll back only definitions committed by this attempt.
+                        if definition_added:
+                            try:
+                                self.compose_manager.remove_service(service.name)
+                            except Exception:
+                                pass
 
                         # Deallocate port
                         self._deallocate_ports([(service.port, service.control_port)])

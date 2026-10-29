@@ -56,23 +56,23 @@ class ComposeManager:
         backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
         with self.lock:
             try:
-                with self.compose_path.open("r", encoding="utf-8") as f:
-                    data = self.yaml.load(f)
-                    if not isinstance(data, dict):
-                        raise ValueError("compose file does not contain a mapping")
-                    if not isinstance(data, CommentedMap):
-                        data = CommentedMap(data)
+                content = self.compose_path.read_bytes()
+                data = self.yaml.load(content.decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("compose file does not contain a mapping")
+                if not isinstance(data, CommentedMap):
+                    data = CommentedMap(data)
 
                 validate_compose(self.compose_path, validate_locations=False)
-                self._loaded_content = self.compose_path.read_bytes()
+                self._loaded_content = content
                 return data
             except Exception:
                 # Try to recover from backup if available
                 if backup_path.exists():
-                    with backup_path.open("r", encoding="utf-8") as f:
-                        data = self.yaml.load(f)
+                    content = backup_path.read_bytes()
+                    data = self.yaml.load(content.decode("utf-8"))
                     shutil.copy2(backup_path, self.compose_path)
-                    self._loaded_content = self.compose_path.read_bytes()
+                    self._loaded_content = content
                     return (
                         CommentedMap(data)
                         if not isinstance(data, CommentedMap)
@@ -181,7 +181,12 @@ class ComposeManager:
         if service.name in services:
             raise ValueError(f"Service '{service.name}' already exists")
         services[service.name] = self._merged_service_config(service)
-        self.save()
+        try:
+            self.save()
+        except BaseException:
+            # A failed add must not be committed by a subsequent batch save.
+            del services[service.name]
+            raise
 
     def remove_service(self, name: str) -> None:
         services = self.data.get("services", {})
@@ -365,5 +370,6 @@ class ComposeManager:
             # Atomic write: write to temp file, then replace
             with tmp_path.open("w", encoding="utf-8") as f:
                 self.yaml.dump(self.data, f)
+            content = tmp_path.read_bytes()
             os.replace(tmp_path, self.compose_path)
-            self._loaded_content = self.compose_path.read_bytes()
+            self._loaded_content = content

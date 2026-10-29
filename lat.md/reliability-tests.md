@@ -10,6 +10,10 @@ These regressions verify desired-state consistency, fleet resource ownership, an
 
 A subsequent fleet operation reloads desired state after an independent writer commits, preserving that change and avoiding permanent conflicts from a cached manager.
 
+## Compose Snapshot Bytes
+
+The stale-write fingerprint uses the exact parsed or written bytes, so an external edit during load validation or immediately after replacement is rejected by a later save.
+
 ## Compose Stale Writers
 
 Independent Compose snapshots cannot overwrite newer desired state or its backup; a stale writer receives an explicit conflict and must reload before retrying.
@@ -25,6 +29,14 @@ Failed atomic replacement preserves the last committed file and permits an expli
 ## Scale Batch Reservations
 
 Scale-up with repeated cities reserves distinct names and proxy/control ports for the complete batch before starting containers, so a later service cannot reuse an earlier binding.
+
+## Scale Rejected Definition
+
+When a generated name collides with an existing definition, rejected scale-up preserves that definition and its bindings instead of deleting it as failed-attempt cleanup.
+
+## Scale Partial Commit Failure
+
+If the first add in a scale-up batch fails during atomic replacement, a later successful add persists only its own started definition and retains only its port reservations.
 
 ## Plan Shared Host Ports
 

@@ -4,7 +4,7 @@ Fleet planning converts requested countries and profile capacities into a concre
 
 [[src/proxy2vpn/adapters/fleet_manager.py#FleetManager]] groups profiles by provider, validates profile availability, allocates the next free ports from the compose root, and emits a [[src/proxy2vpn/adapters/fleet_manager.py#DeploymentPlan]] made of concrete service records. Planning is additive: it treats the existing compose file as occupied state and only picks unused names and ports.
 
-Proxy and control ports share one host TCP namespace. [[src/proxy2vpn/core/ports.py#allocate_port_pairs]] selects a complete batch against existing bindings and reservations or raises on exhaustion without changing the supplied occupied set. Scale-up retains successful reservations and releases unused or failed pairs. Tests are in [[reliability-tests#Reliability Tests]].
+Proxy and control ports share one host TCP namespace. [[src/proxy2vpn/core/ports.py#allocate_port_pairs]] selects a complete batch against existing bindings and reservations or raises on exhaustion without changing the supplied occupied set. Scale-up retains successful reservations and releases unused or failed pairs. Cleanup removes only definitions successfully added by that attempt, preserving existing definitions when a generated name is rejected. Tests are in [[reliability-tests#Reliability Tests]].
 
 # Profile Allocation
 
