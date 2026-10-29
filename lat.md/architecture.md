@@ -40,6 +40,8 @@ Compose saves compare the loaded document bytes against the current file under t
 
 Service deletion tolerates absent containers, including Docker not-found errors wrapped by helpers, while preserving definitions on other Docker failures. Profile removal rejects profiles referenced by services so cleanup cannot leave dangling merges. See [[cli-regression-tests#CLI Regression Matrix#Delete Missing Containers]] and [[cli-regression-tests#CLI Regression Matrix#Referenced Profile Removal]].
 
+The Docker bridge `proxy2vpn_network` is shared across roots. Forced deployment reuses an attached network and never disconnects containers to recreate it. An empty network can be recreated; Docker rejects concurrent attachment races without forced disconnection. See [[reliability-tests#Reliability Tests#Forced Deployment Shared Network]].
+
 The compose root also owns generated support artifacts such as the control-server auth file described in [[lat.md/agent#Watchdog Cycle]] and used by container creation paths in [[src/proxy2vpn/adapters/docker_ops.py#create_vpn_container]].
 
 [[lat.md/security#Deployment Security]] defines authenticated control credentials, proxy publication defaults, and explicit migration for existing workspaces.

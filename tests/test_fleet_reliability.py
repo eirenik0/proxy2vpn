@@ -87,3 +87,60 @@ def test_exhausted_scale_batch_does_not_reserve_partial_ports(tmp_path, monkeypa
     with pytest.raises(ValueError, match="port"):
         manager._allocate_ports(1)
     assert manager.allocated_ports == occupied
+
+
+# @lat: [[reliability-tests#Reliability Tests#Forced Deployment Shared Network]]
+def test_forced_definitions_preserve_network_and_other_root(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from proxy2vpn.adapters import docker_ops
+    from proxy2vpn.adapters.fleet_manager import ServicePlan
+    from proxy2vpn.core import config
+
+    path = workspace(tmp_path)
+    other = tmp_path / "other.yml"
+    ComposeManager.create_initial_compose(other)
+    before = other.read_bytes()
+    attached = [
+        SimpleNamespace(name="own", labels={config.COMPOSE_FILE_LABEL: str(path)}),
+        SimpleNamespace(name="foreign", labels={config.COMPOSE_FILE_LABEL: str(other)}),
+        SimpleNamespace(name="unmanaged", labels={}),
+    ]
+    effects = []
+
+    class Network:
+        containers = attached
+
+        def reload(self):
+            pass
+
+        def disconnect(self, container, force=False):
+            effects.append(("disconnect", container.name))
+
+        def remove(self):
+            effects.append(("remove",))
+
+    network = Network()
+    client = SimpleNamespace(
+        networks=SimpleNamespace(
+            list=lambda **kwargs: [network],
+            create=lambda **kwargs: effects.append(("create",)),
+        )
+    )
+    monkeypatch.setattr(docker_ops, "_client", lambda: client)
+    manager = FleetManager(path)
+    plan = ServicePlan(
+        name="new",
+        profile="account",
+        location="Berlin",
+        country="Germany",
+        port=20000,
+        control_port=30000,
+        provider="protonvpn",
+    )
+    added = []
+    asyncio.run(manager._create_service_definitions([plan], True, added))
+    assert added == ["new"]
+    assert [service.name for service in ComposeManager(path).list_services()] == ["new"]
+    assert effects == []
+    assert network.containers == attached
+    assert other.read_bytes() == before

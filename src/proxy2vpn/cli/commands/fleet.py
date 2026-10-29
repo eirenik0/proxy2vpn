@@ -50,7 +50,7 @@ def deploy(
         False,
         "--force",
         "-f",
-        help="Recreate containers and Docker network if they exist",
+        help="Recreate containers; reuse the shared network while containers are attached",
     ),
 ):
     """Deploy VPN fleet from plan file"""

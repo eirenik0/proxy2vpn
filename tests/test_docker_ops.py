@@ -693,8 +693,8 @@ def test_ensure_network_recreates(monkeypatch):
     assert removed_created["removed"] and removed_created["created"]
 
 
-def test_ensure_network_disconnects_containers_before_removal(monkeypatch):
-    """Test that containers are disconnected before network removal."""
+def test_ensure_network_preserves_attached_containers(monkeypatch):
+    """Shared attachments prevent network replacement, even with force."""
     operations = {
         "containers_disconnected": [],
         "network_removed": False,
@@ -733,8 +733,6 @@ def test_ensure_network_disconnects_containers_before_removal(monkeypatch):
     monkeypatch.setattr(docker_ops, "_client", lambda timeout=10: Client())
     docker_ops.ensure_network(recreate=True)
 
-    # Verify containers were disconnected first
-    assert operations["containers_disconnected"] == ["container1", "container2"]
-    # Verify network was removed and recreated
-    assert operations["network_removed"]
-    assert operations["network_created"]
+    assert operations["containers_disconnected"] == []
+    assert not operations["network_removed"]
+    assert not operations["network_created"]

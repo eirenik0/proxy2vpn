@@ -122,7 +122,7 @@ def _load_env_file(path: str) -> dict[str, str]:
 
 
 def ensure_network(recreate: bool = False) -> None:
-    """Ensure the proxy2vpn Docker network exists."""
+    """Ensure the shared network exists; recreate only when unattached."""
     client = _client()
     network_name = "proxy2vpn_network"
 
@@ -134,12 +134,10 @@ def ensure_network(recreate: bool = False) -> None:
         network = networks[0]
         try:
             network.reload()
-            # Force disconnect all containers
-            for container in network.containers:
-                try:
-                    network.disconnect(container, force=True)
-                except DockerException:
-                    pass  # Ignore disconnect failures
+            # The network is shared by Compose roots and unmanaged containers.
+            # Force applies to container replacement, never to shared attachments.
+            if _network_container_names(network):
+                return
             network.remove()
         except DockerException as exc:
             raise RuntimeError(

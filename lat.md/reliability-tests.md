@@ -33,3 +33,7 @@ Deployment plans avoid existing bindings and reserve proxy and control ports in 
 ## Port Exhaustion
 
 A batch that cannot reserve both port roles fails without partial reservation, preventing an out-of-range binding or leaked capacity after exhaustion.
+
+## Forced Deployment Shared Network
+
+Forced deployment preserves all existing shared-network attachments, including another Compose root and unmanaged containers, while replacing only the requested root's desired definitions.
