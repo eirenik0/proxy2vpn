@@ -14,6 +14,8 @@ Project skills live in `.agents/skills/`. Load the skill matching the task:
 
 For live fleet operations, use the existing `.codex/skills/proxy2vpn-ops/SKILL.md` and its remote reference.
 
+The feature map source is `docs/feature-map.json`. Edit JSON and run `python3 scripts/render_feature_map.py` to update `lat.md/feature-map.md`. Check rendering with `python3 scripts/render_feature_map.py --check`; regenerate the CLI inventory separately with `python3 scripts/build_feature_inventory.py`.
+
 When pstack is available, use its `how` and `why` skills to investigate behavior and constraints, `architect` for meaningful design choices, and `blast-radius` for changes crossing shared contracts. Apply its root-cause, boundary, and verification principles where relevant. The project skills provide repository-specific contracts and remain usable without the plugin. Keep generic pstack skills in the plugin so updates do not require copying them into this repository.
 
 # Post-task checklist (REQUIRED — do not skip)

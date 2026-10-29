@@ -7,6 +7,7 @@ Proxy2VPN turns Docker-managed Gluetun containers into a compose-root VPN fleet 
 This index points to the stable concepts that explain how the CLI, compose state, fleet planner, diagnostics, and watchdog fit together.
 
 - [[architecture]]: CLI context, compose-root ownership, and the profile/service domain model.
+- [[feature-map]]: Implemented features, command entry points, ownership, constraints, and regression coverage.
 - [[development-skills]]: Project skill routing, pstack integration, and reproducible regression scopes.
 - [[health]]: Diagnostics, normalized health assessment, and provider-scoped rotation memory.
 - [[fleet]]: Deployment planning, slot allocation, and rotation execution.

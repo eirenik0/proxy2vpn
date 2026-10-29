@@ -17,3 +17,11 @@ General investigation, design, and review guidance stays in the installed pstack
 The helper at `.agents/skills/proxy2vpn-verify/scripts/run_checks.py` accepts CLI, recovery, storage, runtime, egress, fleet, and full scopes. Focused scopes select existing regression files and deduplicate overlaps. Full scope runs `make test`. Successful tests are followed by `lat check`; a failing command stops execution with a nonzero status.
 
 `--dry-run` prints commands without executing them. Focused selections check that every named test file exists before execution. These scopes are starting points; changes crossing their boundaries require the corresponding additional checks. Live-security testing remains an explicit separate workflow. See [[architecture#Development Verification]] for the repository tool contracts.
+
+## Feature map source and rendering
+
+The feature map stores structured feature records and relationship nodes and edges in JSON, with a generated Markdown view for readers and lat.md navigation.
+
+Edit `docs/feature-map.json`, then run `python3 scripts/render_feature_map.py` to render [[feature-map]]. Each feature records a stable ID, summary, details, source references, tests, and test specifications. The renderer rejects duplicate IDs, unknown graph nodes, and missing source or test files.
+
+Run `python3 scripts/render_feature_map.py --check` to detect a stale view. The separate `scripts/build_feature_inventory.py` derives `docs/feature-commands.md` from CLI registrations and supports the same freshness check. Rendering reads local files without importing application code or contacting services.
