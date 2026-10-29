@@ -10,6 +10,8 @@ Runtime inspection, incident evidence, control requests, restoration, and orphan
 
 [[egress#Watchdog And Fleet Workflows]] adds external endpoint inventory and investigation-only incidents. External-only roots need no Docker or Compose file. Capabilities block unsupported recovery before execution, while existing Gluetun actions and state remain compatible.
 
+Continuous monitoring retries operational `RuntimeError`, connection, and timeout failures after cycle finalization persists their evidence. Retry delay doubles from the positive monitoring interval, capped at five minutes or that interval if longer, and resets after a successful cycle. Each retry reloads current state to retain concurrent writes and reset generations. Storage integrity errors, other disk errors, and invalid configuration propagate; cancellation is never retried. One-shot cycles still report failures directly. See [[reliability-tests#Reliability Tests#Watchdog Failure Then Recovery]] and [[reliability-tests#Reliability Tests#Watchdog Fatal Failures]].
+
 # Incidents And State
 
 Agent state is stored next to the compose file so watchdog status, daemon metadata, and incident history move with the workspace.

@@ -37,3 +37,23 @@ A batch that cannot reserve both port roles fails without partial reservation, p
 ## Forced Deployment Shared Network
 
 Forced deployment preserves all existing shared-network attachments, including another Compose root and unmanaged containers, while replacing only the requested root's desired definitions.
+
+## Watchdog Failure Then Recovery
+
+A transient operational inventory failure persists a failed cycle and cleared progress, then a continuous watchdog reloads evidence and completes a later successful cycle, including after reset during backoff.
+
+## Watchdog Bounded Backoff
+
+Repeated operational failures use increasing delays capped at five minutes or the configured interval if longer; a successful cycle restores the ordinary interval and resets retry delay.
+
+## Watchdog Fatal Failures
+
+Storage integrity, disk, and invalid configuration failures propagate without retrying, preserving the fail-closed evidence contract.
+
+## Watchdog Retry Cancellation
+
+Cancellation during retry sleep exits promptly and preserves the completed failed cycle without publishing an extra attempt or active progress.
+
+## One Shot Failure
+
+One-shot monitoring retains its failure exit contract rather than silently retrying an operational failure.

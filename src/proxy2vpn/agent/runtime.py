@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 from uuid import uuid4
 
+from proxy2vpn.core.private_storage import StorageError
 from proxy2vpn.agent.config import AgentSettings
 from proxy2vpn.agent.llm import (
     IncidentContext,
@@ -156,7 +157,12 @@ class AgentWatchdog:
 
         state: AgentState | None = None
         initialized = False
+        retry_delay = 0
+        base_delay = max(1, self.interval_seconds)
+        max_retry_delay = max(300, base_delay)
         while True:
+            # Storage startup is outside the operational retry handler. Unsafe or
+            # unavailable evidence storage must fail closed instead of looping.
             try:
                 if state is None:
                     state = self._load_state(
@@ -164,10 +170,30 @@ class AgentWatchdog:
                     )
                     self.store.write_state(state)
                     initialized = True
-                state = await self.run_cycle(state)
             except StorageConflict:
                 state = None
-            await asyncio.sleep(self.interval_seconds)
+                await asyncio.sleep(self.interval_seconds)
+                continue
+
+            delay = self.interval_seconds
+            try:
+                state = await self.run_cycle(state)
+                retry_delay = 0
+            except StorageConflict:
+                state = None
+                retry_delay = 0
+            except StorageError:
+                raise
+            except (RuntimeError, ConnectionError, TimeoutError):
+                # Cycle finalization already persisted the failure. Reload fresh
+                # evidence next time, respecting resets and concurrent writers.
+                state = None
+                retry_delay = min(
+                    max_retry_delay, retry_delay * 2 if retry_delay else base_delay
+                )
+                delay = retry_delay
+                events.warning("agent_cycle_retry_scheduled", retry_delay_seconds=delay)
+            await asyncio.sleep(delay)
 
     async def run_once(self) -> AgentState:
         """Execute one cycle and exit."""
