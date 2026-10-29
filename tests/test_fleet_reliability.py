@@ -144,3 +144,46 @@ def test_forced_definitions_preserve_network_and_other_root(tmp_path, monkeypatc
     assert effects == []
     assert network.containers == attached
     assert other.read_bytes() == before
+
+
+# @lat: [[reliability-tests#Reliability Tests#Scale Rejected Definition]]
+def test_scale_rejected_name_preserves_existing_definition(tmp_path, monkeypatch):
+    from proxy2vpn.core.models import VPNService
+
+    path = workspace(tmp_path)
+    compose = ComposeManager(path)
+    name = "protonvpn-germany-berlin-20000"
+    existing = VPNService.create(
+        name=name,
+        port=20010,
+        control_port=30010,
+        provider="protonvpn",
+        profile="account",
+        location="Berlin",
+        environment={},
+        labels={},
+    )
+    compose.add_service(existing)
+    before = path.read_bytes()
+    manager = fleet_state.FleetStateManager(path)
+    monkeypatch.setattr(manager.server_manager, "list_cities", lambda *args: ["Berlin"])
+    monkeypatch.setattr(fleet_state, "ensure_network", lambda *args: None)
+
+    async def loaded():
+        pass
+
+    monkeypatch.setattr(manager, "_ensure_server_catalog_loaded", loaded)
+
+    async def run():
+        try:
+            return await manager.scale_fleet(
+                fleet_state.OperationConfig(countries=["Germany"]),
+                fleet_state.OperationType.SCALE_UP,
+            )
+        finally:
+            await manager.close()
+
+    result = asyncio.run(run())
+    assert not result.success
+    assert path.read_bytes() == before
+    assert ComposeManager(path).get_service(name).port == 20010
