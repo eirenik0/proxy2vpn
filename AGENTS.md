@@ -3,6 +3,19 @@
 - Run `lat search` to find sections relevant to your task. Read them to understand the design intent before writing code.
 - Run `lat expand` on user prompts to expand any `[[refs]]` — this resolves section names to file locations and provides context.
 
+# Project skills and pstack
+
+Project skills live in `.agents/skills/`. Load the skill matching the task:
+
+- `proxy2vpn-design`: changes to module ownership, interfaces, compose roots, endpoint capabilities, or persistence boundaries.
+- `proxy2vpn-watchdog`: recovery decisions, incident transitions, delayed observations, action evidence, or agent concurrency.
+- `proxy2vpn-verify`: selecting regression suites and checking the actual result before handoff. Its `scripts/run_checks.py` supports focused scopes and command previews.
+- `lat-md`: edits to architecture concepts and test specifications in `lat.md/`.
+
+For live fleet operations, use the existing `.codex/skills/proxy2vpn-ops/SKILL.md` and its remote reference.
+
+When pstack is available, use its `how` and `why` skills to investigate behavior and constraints, `architect` for meaningful design choices, and `blast-radius` for changes crossing shared contracts. Apply its root-cause, boundary, and verification principles where relevant. The project skills provide repository-specific contracts and remain usable without the plugin. Keep generic pstack skills in the plugin so updates do not require copying them into this repository.
+
 # Post-task checklist (REQUIRED — do not skip)
 
 After EVERY task, before responding to the user:

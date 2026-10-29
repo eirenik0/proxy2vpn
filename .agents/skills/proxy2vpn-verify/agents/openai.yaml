@@ -1,0 +1,4 @@
+interface:
+  display_name: "Proxy2VPN Verify"
+  short_description: "Run focused regressions and validate lat.md links"
+  default_prompt: "Use $proxy2vpn-verify to verify this project change."
