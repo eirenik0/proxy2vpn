@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
+from proxy2vpn.core.ports import allocate_port_pairs
 from .compose_manager import ComposeManager
 from .display_utils import console
 from .docker_ops import (
@@ -253,12 +254,10 @@ class FleetStateManager:
 
     def _allocate_ports(self, count: int) -> List[Tuple[int, int]]:
         """Atomically allocate multiple port pairs (proxy_port, control_port)."""
-        port_pairs = []
-        for _ in range(count):
-            proxy_port = self.compose_manager.next_available_port()
-            control_port = self.compose_manager.next_available_control_port()
-            port_pairs.append((proxy_port, control_port))
-        return port_pairs
+        occupied = self.compose_manager.get_all_used_ports() | self.allocated_ports
+        pairs = allocate_port_pairs(occupied, count, proxy_start=self.port_start)
+        self.allocated_ports.update(port for pair in pairs for port in pair)
+        return pairs
 
     def _deallocate_ports(self, port_pairs: List[Tuple[int, int]]):
         """Deallocate port pairs."""
@@ -1938,6 +1937,13 @@ class FleetStateManager:
                         errors=["Failed to create any new services"],
                     )
 
+                used_pairs = {
+                    (service.port, service.control_port) for service in new_services
+                }
+                self._deallocate_ports(
+                    [pair for pair in new_ports if pair not in used_pairs]
+                )
+
                 if config.dry_run:
                     self._deallocate_ports(new_ports)
                     service_names = [s.name for s in new_services]
@@ -1987,7 +1993,7 @@ class FleetStateManager:
                             pass
 
                         # Deallocate port
-                        self.allocated_ports.discard(service.port)
+                        self._deallocate_ports([(service.port, service.control_port)])
 
                 return OperationResult(
                     operation_type=OperationType.SCALE_UP,

@@ -21,3 +21,15 @@ Direct document edits use the same stale-write check as typed mutations, includi
 ## Compose Commit Failure
 
 Failed atomic replacement preserves the last committed file and permits an explicit retry against the same unchanged revision.
+
+## Scale Batch Reservations
+
+Scale-up with repeated cities reserves distinct names and proxy/control ports for the complete batch before starting containers, so a later service cannot reuse an earlier binding.
+
+## Plan Shared Host Ports
+
+Deployment plans avoid existing bindings and reserve proxy and control ports in one host namespace, including overlapping requested ranges and unmanaged Compose mappings.
+
+## Port Exhaustion
+
+A batch that cannot reserve both port roles fails without partial reservation, preventing an out-of-range binding or leaked capacity after exhaustion.

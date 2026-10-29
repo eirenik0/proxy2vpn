@@ -306,10 +306,9 @@ class ComposeManager:
                             ports.add(int(port_str))
                         except ValueError:
                             pass
-            else:
-                # Non-VPN services use standard port mappings
-                for host_port, _ in iter_port_mappings(service_config.get("ports")):
-                    ports.add(host_port)
+            # Actual bindings and managed labels share the host port namespace.
+            for host_port, _ in iter_port_mappings(service_config.get("ports")):
+                ports.add(host_port)
 
         return ports
 

@@ -60,7 +60,8 @@ def test_plan_deployment_basic_allocation(fleet_manager, monkeypatch):
         "prov-b-city2",
     ]
     assert [s.profile for s in plan.services] == ["acc1", "acc2"]
-    assert [s.port for s in plan.services] == [30000, 30001]
+    assert [s.port for s in plan.services] == [30002, 30004]
+    assert [s.control_port for s in plan.services] == [30003, 30005]
     assert [s.country for s in plan.services] == ["A", "B"]
 
 
