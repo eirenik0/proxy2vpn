@@ -27,12 +27,17 @@ networks:
 """
 
 
+class ComposeConflict(RuntimeError):
+    """The loaded Compose snapshot was superseded by another writer."""
+
+
 # @lat: [[lat.md/architecture#Compose Root Model]]
 class ComposeManager:
     """Manage docker-compose files for VPN services."""
 
     def __init__(self, compose_path: Path) -> None:
-        self.compose_path = compose_path
+        self.compose_path = compose_path.expanduser().resolve()
+        compose_path = self.compose_path
         self.yaml = YAML()
         self.lock = FileLock(str(compose_path) + ".lock")
         self.data: CommentedMap = self._load()
@@ -59,6 +64,7 @@ class ComposeManager:
                         data = CommentedMap(data)
 
                 validate_compose(self.compose_path, validate_locations=False)
+                self._loaded_content = self.compose_path.read_bytes()
                 return data
             except Exception:
                 # Try to recover from backup if available
@@ -66,6 +72,7 @@ class ComposeManager:
                     with backup_path.open("r", encoding="utf-8") as f:
                         data = self.yaml.load(f)
                     shutil.copy2(backup_path, self.compose_path)
+                    self._loaded_content = self.compose_path.read_bytes()
                     return (
                         CommentedMap(data)
                         if not isinstance(data, CommentedMap)
@@ -344,6 +351,14 @@ class ComposeManager:
         backup_path = self.compose_path.with_suffix(self.compose_path.suffix + ".bak")
         tmp_path = self.compose_path.with_suffix(self.compose_path.suffix + ".tmp")
         with self.lock:
+            if (
+                not self.compose_path.exists()
+                or self.compose_path.read_bytes() != self._loaded_content
+            ):
+                raise ComposeConflict(
+                    f"Compose file '{self.compose_path}' changed since loading; "
+                    "reload it and retry the operation."
+                )
             # Create backup before saving
             if self.compose_path.exists():
                 shutil.copy2(self.compose_path, backup_path)
@@ -352,3 +367,4 @@ class ComposeManager:
             with tmp_path.open("w", encoding="utf-8") as f:
                 self.yaml.dump(self.data, f)
             os.replace(tmp_path, self.compose_path)
+            self._loaded_content = self.compose_path.read_bytes()

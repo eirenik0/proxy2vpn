@@ -1,3 +1,4 @@
+import pytest
 import pathlib
 import sys
 
@@ -233,3 +234,81 @@ def test_validate_compose_file_validate_locations_flag(tmp_path, monkeypatch):
 
     manager.validate_compose_file(validate_locations=True)
     assert captured["validate_locations"] is True
+
+
+# @lat: [[reliability-tests#Reliability Tests#Compose Stale Writers]]
+def test_stale_compose_writer_preserves_newer_profile_and_backup(tmp_path):
+    from proxy2vpn.adapters.compose_manager import ComposeConflict
+
+    path = _copy_compose(tmp_path)
+    first = ComposeManager(path)
+    stale = ComposeManager(path)
+    first.add_profile(Profile(name="first", env_file="first.env"))
+    current = path.read_bytes()
+    backup = path.with_suffix(".yml.bak").read_bytes()
+
+    with pytest.raises(ComposeConflict, match="reload.*retry"):
+        stale.add_profile(Profile(name="second", env_file="second.env"))
+    assert path.read_bytes() == current
+    assert path.with_suffix(".yml.bak").read_bytes() == backup
+    assert "first" in {p.name for p in ComposeManager(path).list_profiles()}
+    assert "second" not in {p.name for p in ComposeManager(path).list_profiles()}
+
+
+# @lat: [[reliability-tests#Reliability Tests#Compose Direct Edits And Removal]]
+def test_direct_save_rejects_external_edits_and_deleted_file(tmp_path):
+    from proxy2vpn.adapters.compose_manager import ComposeConflict
+
+    path = _copy_compose(tmp_path)
+    manager = ComposeManager(path)
+    changed = path.read_text() + "\n# external edit\n"
+    path.write_text(changed)
+    manager.data["x-config"]["health_check_interval"] = "99"
+    with pytest.raises(ComposeConflict):
+        manager.save()
+    assert path.read_text() == changed
+
+    manager = ComposeManager(path)
+    path.unlink()
+    with pytest.raises(ComposeConflict):
+        manager.save()
+    assert not path.exists()
+
+
+# @lat: [[reliability-tests#Reliability Tests#Compose Commit Failure]]
+def test_failed_compose_commit_can_retry_without_overwriting_other_writer(
+    tmp_path, monkeypatch
+):
+    from proxy2vpn.adapters import compose_manager
+
+    path = _copy_compose(tmp_path)
+    manager = ComposeManager(path)
+    before = path.read_bytes()
+    replace = compose_manager.os.replace
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            compose_manager.os,
+            "replace",
+            lambda *args: (_ for _ in ()).throw(OSError("interrupted")),
+        )
+        with pytest.raises(OSError, match="interrupted"):
+            manager.add_profile(Profile(name="new", env_file="new.env"))
+    assert path.read_bytes() == before
+    manager.save()
+    assert "new" in {p.name for p in ComposeManager(path).list_profiles()}
+    assert compose_manager.os.replace is replace
+
+
+# @lat: [[reliability-tests#Reliability Tests#Fleet Fresh Compose]]
+def test_fleet_operation_reloads_compose_after_another_writer(tmp_path):
+    from proxy2vpn.adapters.fleet_state_manager import FleetStateManager
+
+    path = _copy_compose(tmp_path)
+    fleet = FleetStateManager(path)
+    external = ComposeManager(path)
+    external.add_profile(Profile(name="external", env_file="external.env"))
+    fleet._sync_services_from_compose()
+    fleet.compose_manager.add_profile(Profile(name="next", env_file="next.env"))
+    assert {"external", "next"} <= {
+        p.name for p in ComposeManager(path).list_profiles()
+    }

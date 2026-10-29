@@ -233,6 +233,7 @@ class FleetStateManager:
 
     def _sync_services_from_compose(self):
         """Sync services from compose manager to local state."""
+        self.compose_manager = ComposeManager(self.compose_manager.compose_path)
         compose_services = self.compose_manager.list_services()
 
         # Update local service state (only VPN services for fleet management)

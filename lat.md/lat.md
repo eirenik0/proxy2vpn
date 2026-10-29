@@ -10,6 +10,7 @@ This index points to the stable concepts that explain how the CLI, compose state
 - [[feature-map]]: Implemented features, command entry points, ownership, constraints, and regression coverage.
 - [[development-skills]]: Project skill routing, pstack integration, and reproducible regression scopes.
 - [[health]]: Diagnostics, normalized health assessment, and provider-scoped rotation memory.
+- [[reliability-tests]]: Compose consistency, resource ownership, and watchdog continuation regressions.
 - [[fleet]]: Deployment planning, slot allocation, and rotation execution.
 - [[agent]]: Watchdog cycle behavior and compose-root incident state.
 - [[logging]]: Shared event schema, secret redaction, and task-local operational context.
