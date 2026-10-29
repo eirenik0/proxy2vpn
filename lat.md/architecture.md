@@ -36,7 +36,11 @@ The compose file is the source of truth for reusable profiles, concrete VPN serv
 
 [[src/proxy2vpn/adapters/compose_manager.py#ComposeManager]] owns loading, validating, backing up, and atomically saving the compose file. It preserves profile anchors under `x-vpn-base-*`, merges service-specific overrides onto those anchors, and resolves profile env files relative to the compose file so a workspace remains portable.
 
+Compose saves compare the loaded document bytes against the current file under the same file lock as replacement. Stale snapshots raise `ComposeConflict` before backup or file mutation, including direct document edits and external deletion. Callers reload and retry explicitly; fleet operations reload their cached Compose manager before planning against current desired state. No lock spans Docker or network effects. Regression coverage is in [[reliability-tests#Reliability Tests]].
+
 Service deletion tolerates absent containers, including Docker not-found errors wrapped by helpers, while preserving definitions on other Docker failures. Profile removal rejects profiles referenced by services so cleanup cannot leave dangling merges. See [[cli-regression-tests#CLI Regression Matrix#Delete Missing Containers]] and [[cli-regression-tests#CLI Regression Matrix#Referenced Profile Removal]].
+
+The Docker bridge `proxy2vpn_network` is shared across roots. Forced deployment reuses an attached network and never disconnects containers to recreate it. An empty network can be recreated; Docker rejects concurrent attachment races without forced disconnection. See [[reliability-tests#Reliability Tests#Forced Deployment Shared Network]].
 
 The compose root also owns generated support artifacts such as the control-server auth file described in [[lat.md/agent#Watchdog Cycle]] and used by container creation paths in [[src/proxy2vpn/adapters/docker_ops.py#create_vpn_container]].
 

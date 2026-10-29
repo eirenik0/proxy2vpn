@@ -5,6 +5,7 @@ import asyncio
 from filelock import Timeout
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from proxy2vpn.core.ports import allocate_port_pairs
 from proxy2vpn.agent.state import AgentStateStore
 from .compose_manager import ComposeManager
 from .display_utils import console
@@ -213,8 +214,7 @@ class FleetManager:
         existing_names = {
             service.name for service in self.compose_manager.list_services()
         }
-        used_proxy_ports = self.compose_manager.get_used_proxy_ports()
-        used_control_ports = self.compose_manager.get_used_control_ports()
+        used_ports = self.compose_manager.get_all_used_ports()
 
         # Load all profiles and validate they exist
         available_profiles = {p.name: p for p in self.compose_manager.list_profiles()}
@@ -243,18 +243,8 @@ class FleetManager:
             )
 
         # Plan services for each provider
-        current_port = self._next_unused_port(config.port_start, used_proxy_ports)
-        current_control_port = self._next_unused_port(
-            config.control_port_start, used_control_ports
-        )
-        if current_port != config.port_start:
-            console.print(
-                f"[yellow]⚠ Proxy port {config.port_start} already in use, starting from {current_port}[/yellow]"
-            )
-        if current_control_port != config.control_port_start:
-            console.print(
-                f"[yellow]⚠ Control port {config.control_port_start} already in use, starting from {current_control_port}[/yellow]"
-            )
+        current_port = config.port_start
+        current_control_port = config.control_port_start
         self.profile_allocator.setup_profiles(config.profiles)
 
         for provider, profile_names in profile_providers.items():
@@ -268,8 +258,7 @@ class FleetManager:
                 current_control_port,
                 config,
                 existing_names,
-                used_proxy_ports,
-                used_control_ports,
+                used_ports,
             )
 
         return plan
@@ -284,8 +273,7 @@ class FleetManager:
         start_control_port: int,
         config: FleetConfig,
         existing_names: set[str],
-        used_proxy_ports: set[int],
-        used_control_ports: set[int],
+        used_ports: set[int],
     ) -> tuple[int, int]:
         """Plan services for a specific provider."""
         console.print(
@@ -352,9 +340,11 @@ class FleetManager:
         current_control_port = start_control_port
 
         for country, city, hostname, ip in all_entries:
-            current_port = self._next_unused_port(current_port, used_proxy_ports)
-            current_control_port = self._next_unused_port(
-                current_control_port, used_control_ports
+            [(current_port, current_control_port)] = allocate_port_pairs(
+                used_ports,
+                1,
+                proxy_start=current_port,
+                control_start=current_control_port,
             )
 
             # Get next available slot from this provider's profiles
@@ -389,8 +379,7 @@ class FleetManager:
 
             self.profile_allocator.allocate_slot(profile_slot.name, service_name)
             existing_names.add(service_name)
-            used_proxy_ports.add(current_port)
-            used_control_ports.add(current_control_port)
+            used_ports.update((current_port, current_control_port))
             current_port += 1
             current_control_port += 1
 
@@ -723,13 +712,6 @@ class FleetManager:
             suffix += 1
             candidate = f"{name}-{suffix}"
         return candidate
-
-    def _next_unused_port(self, start: int, used_ports: set[int]) -> int:
-        """Return the first port at or above start that is not already reserved."""
-        port = start
-        while port in used_ports:
-            port += 1
-        return port
 
     def _rebuild_profile_allocator(self) -> None:
         """Reconstruct allocator state from compose services."""
